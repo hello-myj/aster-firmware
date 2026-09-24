@@ -12,10 +12,11 @@ list(FILTER ASTER_LVGL_SOURCES EXCLUDE REGEX "/(examples|tests|demos)/")
 list(FILTER ASTER_LVGL_SOURCES EXCLUDE REGEX "/libs/")
 list(FILTER ASTER_LVGL_SOURCES EXCLUDE REGEX "/stdlib/(uefi|rtthread|micropython)/")
 
-# Only the decoders something actually opens: app icons are decoded in
-# firmware (launcher_font_gen.py bakes them to ASTI) and handed to LVGL as
-# in-memory descriptors, so lv_fs has no consumers left -- and tiny_ttf,
-# its only one, is gone with it (aster_lv_fs.c deleted).
+# Only the decoders something actually opens: icons reach LVGL as in-memory
+# ASTI descriptors -- the chrome ones baked into rodata by launcher_icons.inc,
+# the app ones read off the card and decoded in firmware -- so lv_fs has no
+# consumers left, and tiny_ttf, its only one, is gone with it
+# (aster_lv_fs.c deleted).
 list(APPEND ASTER_LVGL_SOURCES
 	${ASTER_LVGL_DIR}/src/libs/bin_decoder/lv_bin_decoder.c
 	${ASTER_LVGL_DIR}/src/libs/rle/lv_rle.c

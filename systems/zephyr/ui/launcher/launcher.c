@@ -81,34 +81,47 @@ LOG_MODULE_REGISTER(aster_launcher, LOG_LEVEL_INF);
 #define LAUNCHER_GRID_COLS LAUNCHER_COLS_FOR(ASTER_UI_W, ASTER_UI_H)
 
 /* COLS is a design choice: what the phone-grid pitch should be. Landscape
- * gets 3 across -- and portrait 2, not because 3 looks wrong there but
- * because it cannot fit: a third of a 240 px panel is 77 px, narrower than
- * the 96 px icon well (asserted below). ROWS is not a choice at all: it is
- * the most rows that still leave the well full size, so 240x320 yields 2 and
- * 320x240 yields exactly 1. */
+ * gets 3 across, portrait 2. Portrait is *forced* to 2: a third of a 240 px
+ * panel is 77 px, narrower than the 96 px icon well, and the assert below
+ * kills the build if anyone asks for it. ROWS is not a choice at all: it is
+ * the most rows that still leave the well and a full label slot, so 240x320
+ * yields 2 and 320x240 yields exactly 1. */
 #define LAUNCHER_TILE_GAP 6
 #define LAUNCHER_GRID_GUT 8
-#define LAUNCHER_WELL_PX  96
-/* Icon square to label. Was 4, which was right while the label was a 14 px
- * face whose line box was 19 tall; the single baked face has a 26 px line
- * box (advY), and 96 + 4 + 26 = 126 does not fit the 123 px tile. Flex
- * centring would then shift the column up by half the overflow and cut the
- * descenders off the app name.
- *
- * The 22 px that buys back is spent here rather than on the well: the well
- * is the icon's 96 px art and the icon generator draws exactly 96x96, so
- * shrinking it would drop every icon into launcher.c's `side > WELL` branch
- * and put it through the transform path for a 4% shrink (see
- * sdk/assets/icons/README.md). And it costs nothing visually -- a 26 px
- * line box has 6 px of empty lead above its ink, so the icon-to-text gap
- * only moves from 8 px to 7. */
-#define LAUNCHER_TILE_PAD_ROW 1
+/* The well is the drawer's fixed point: LAUNCHER_TILE_MIN_H is built around
+ * it and the label slot gets whatever the tile has left. It must also equal
+ * the icon generator's TILE (aster-sdk/tools/app_icons.py), because the
+ * drawer blits the art 1:1 -- anything larger falls into the transform path
+ * below for a silent resample. */
+#define LAUNCHER_WELL_PX 96
+/* Icon square to label. Four is the gap the drawer has always had, and it
+ * still fits: the caption's line box is 21 px (LAUNCHER_LABEL_H), so
+ * 96 + 4 + 21 = 121 sits inside the 123 px tile. */
+#define LAUNCHER_TILE_PAD_ROW 4
 
-/* Well + gap + one line box: the shortest tile that shows the icon at full
- * size and still fits the label's descenders. Window-independent, so it is
- * the same expression in both evaluations and needs no parameter. */
+/* The label slot is ALWAYS one line box tall -- the caption face's, not the
+ * body face's. That is the whole alignment fix: while the label was
+ * LV_SIZE_CONTENT a name too long for the tile made its column taller than
+ * its neighbours', flex centring pushed that column up by half the
+ * difference, and every tile carrying such a name floated above the ones
+ * beside it. A constant slot makes the column a constant height, so the
+ * icon's y is the same across a row.
+ *
+ * One line is not a preference, it is the tile's arithmetic: the tile is
+ * 123 px and the well is 96, so LAUNCHER_TILE_PAD_ROW plus the line box has
+ * to fit in 27, and two line boxes of any legible face do not. A name too
+ * long for the tile therefore ellipsizes instead of wrapping -- and that is
+ * why the label created below pins pad_all and text_line_space to 0. The
+ * ellipsis fires on `size.y > content_height` (widgets/label/lv_label.c),
+ * strictly greater, so any padding or leading of its own would eat into the
+ * one line the slot exists to show. */
+#define LAUNCHER_LABEL_H ASTER_FONT_CAPTION_LINE_H
+
+/* Well + gap + the full label slot: the shortest tile that shows the icon at
+ * full size and still fits a whole line under it. Window-independent, so it
+ * is the same expression in both evaluations and needs no parameter. */
 #define LAUNCHER_TILE_MIN_H \
-	(LAUNCHER_WELL_PX + LAUNCHER_TILE_PAD_ROW + ASTER_FONT_UI_LINE_H)
+	(LAUNCHER_WELL_PX + LAUNCHER_TILE_PAD_ROW + LAUNCHER_LABEL_H)
 
 #define LAUNCHER_GRID_H_(h)     ((h) - 64)   /* 40 down to the page dots   */
 #define LAUNCHER_GRID_BOX_H_(gh) ((gh) - 2 - 2) /* inside top/bottom pads  */
@@ -129,20 +142,30 @@ LOG_MODULE_REGISTER(aster_launcher, LOG_LEVEL_INF);
 	LAUNCHER_TILE_W_(LAUNCHER_GRID_W, LAUNCHER_GRID_COLS)
 #define LAUNCHER_GRID_ROWS  LAUNCHER_GRID_ROWS_(LAUNCHER_GRID_H)
 #define LAUNCHER_TILE_H     LAUNCHER_TILE_H_(LAUNCHER_GRID_H)
-/* The tile is a COLUMN flex of well + pad + label. When that exceeds the
- * tile the overflow is silent -- the label just loses its descenders -- so
- * a re-bake that changes the face's line box has to break the build here
- * instead. That is the whole reason ASTER_FONT_UI_LINE_H is exported. */
+/* The tile is a COLUMN flex of well + pad + the label slot. When that exceeds
+ * the tile the overflow is silent -- flex just shoves the column up, which is
+ * the misalignment this slot exists to remove -- so a re-bake that changes
+ * the caption face's line box has to break the build here instead. That is
+ * the whole reason ASTER_FONT_CAPTION_LINE_H is exported. */
 BUILD_ASSERT(LAUNCHER_TILE_MIN_H <= LAUNCHER_TILE_H,
 	     "drawer tile no longer fits: shrink LAUNCHER_WELL_PX (and re-run "
-	     "sdk/tools/app_icons.py at that size) or the label's line box");
+	     "aster-sdk/tools/app_icons.py at that size), or check the caption "
+	     "face's line box (ASTER_FONT_CAPTION_LINE_H)");
+/* The same sum at the OTHER window. The runtime half of the derivation sees
+ * only the window on the glass, and the assert above only the one the tree
+ * was built for, so without this a slot that fits in landscape and not in
+ * portrait passes every build and shows the bug the moment the panel turns.
+ * That is the case a re-bake or a new panel actually produces. */
+BUILD_ASSERT(LAUNCHER_TILE_MIN_H <=
+	     LAUNCHER_TILE_H_(LAUNCHER_GRID_H_(ASTER_UI_W)),
+	     "the drawer tile fits one orientation but not the other: the label "
+	     "slot is too tall for the turned window");
 BUILD_ASSERT(LAUNCHER_GRID_ROWS >= 1,
 	     "not even one row of tiles fits: the grid container is shorter "
-	     "than a full-size icon well plus its label");
+	     "than a full-size icon well plus its label slot");
 /* A tile narrower than the well squashes the icon through launcher.c's
  * transform path -- the one thing LAUNCHER_WELL_PX exists to prevent -- so
- * adding a column stops being free well before the width runs out. This is
- * what rules 3 columns out in portrait. */
+ * adding a column stops being free well before the width runs out. */
 BUILD_ASSERT(LAUNCHER_TILE_W >= LAUNCHER_WELL_PX,
 	     "drawer tile is narrower than the icon well: use fewer columns");
 /* These two are what make the derivation trustworthy: an integer division
@@ -195,7 +218,8 @@ static launcher_geom_t launcher_geom(int w, int h)
 
 	if (g.tile_h < LAUNCHER_TILE_MIN_H) {
 		LOG_ERR("launcher: window %dx%d leaves %d px tiles, need %d -- "
-			"the labels will lose their descenders", w, h, g.tile_h,
+			"the label slot is taller than the tile and the icons "
+			"on a row will not line up", w, h, g.tile_h,
 			LAUNCHER_TILE_MIN_H);
 	}
 	if (g.tile_w < LAUNCHER_WELL_PX) {
@@ -215,13 +239,17 @@ static launcher_geom_t launcher_geom(int w, int h)
 	return g;
 }
 
-/* Chrome icons (sdk/tools/launcher_font_gen.py). All text renders through the
- * SD cpfont bake, which holds exactly one face, so every mk_label() below
- * names it by constant. Distinct px arguments used to stand in for a size
- * hierarchy (a 48 px hero clock over a 14 px status line); with one face that
- * hierarchy is not expressible, and keeping the old numbers around would
- * describe a layout that no longer exists. aster_ui_font() would snap anything
- * else here to the same face anyway -- naming it is just the honest form. */
+/* Chrome icons: the 16 px A8 masks for the status pill and the theme button,
+ * checked in as launcher_icons.inc (app icons are a different thing -- the
+ * packages' own 96 px colour art, decoded off the card). All text renders
+ * through the SD cpfont bake, so every mk_label() below names the face it
+ * wants by constant rather than by a number that happens to snap to it.
+ * Distinct px arguments used to stand in for a size hierarchy (a 48 px hero
+ * clock over a 14 px status line); the bake holds two faces now, but neither
+ * is a hierarchy -- the body face and the drawer's caption -- so the chrome
+ * still names one size, ASTER_FONT_UI_PX, and only the app names under the
+ * drawer's icons ask for the other. aster_ui_font() would snap anything else
+ * here to the nearest baked face anyway; naming it is just the honest form. */
 #include "launcher_icons.inc"
 
 typedef struct {
@@ -543,9 +571,9 @@ static void on_click(lv_event_t *e)
  *
  * The icon square is where the theming stops. A full-colour icon is the
  * package's own art -- gradient, glyph and rounded corners all baked in by
- * sdk/tools/app_icons.py -- and the launcher blits it untouched, so an app
- * looks the same under every theme. Only the labels and the chrome around
- * them still follow the palette. */
+ * aster-sdk/tools/app_icons.py -- and the launcher blits it untouched, so an
+ * app looks the same under every theme. Only the labels and the chrome
+ * around them still follow the palette. */
 static void build_drawer(void)
 {
 	const launcher_theme_t *th = &s_themes[s_theme];
@@ -585,7 +613,7 @@ static void build_drawer(void)
 		 * goes on the object that *starts* the trickle and covers the
 		 * whole subtree below it -- including descendants that do not
 		 * carry the flag themselves. (Upstream stopped at the first
-		 * child without it; see sdk/vendor/lvgl/PATCHES.md.) */
+		 * child without it; see third_party/lvgl/PATCHES.md.) */
 		lv_obj_add_flag(tile, LV_OBJ_FLAG_STATE_TRICKLE);
 		/* A name wider than the tile would otherwise make the tile itself
 		 * scrollable and pan its own contents on a drag. */
@@ -609,7 +637,11 @@ static void build_drawer(void)
 		well = lv_obj_create(tile);
 		lv_obj_set_size(well, LAUNCHER_WELL_PX, LAUNCHER_WELL_PX);
 		lv_obj_set_style_border_width(well, 0, 0);
-		lv_obj_set_style_radius(well, 26, 0);
+		/* Matches the art's own corner (its RADIUS): a colour icon
+		 * makes the well transparent, so this is only ever seen behind
+		 * a placeholder or a legacy A8 mask, and there it should agree
+		 * with the tiles it stands in for. */
+		lv_obj_set_style_radius(well, 24, 0);
 		lv_obj_set_style_pad_all(well, 0, 0);
 		no_scroll(well);
 		lv_obj_clear_flag(well, LV_OBJ_FLAG_CLICKABLE);
@@ -686,8 +718,23 @@ static void build_drawer(void)
 			}
 		}
 		lbl = mk_label(tile, r->name[0] ? r->name : r->id,
-			       th->card_fg, ASTER_FONT_UI_PX, 1);
+			       th->card_fg, ASTER_FONT_CAPTION_PX, 1);
 		lv_obj_set_width(lbl, LV_PCT(100));
+		/* A fixed one-line slot, not LV_SIZE_CONTENT. This is the
+		 * alignment: a name too long for the tile must not make its
+		 * own column taller than its neighbours', because the tile's
+		 * flex centring turns any height difference into an icon that
+		 * sits higher. See LAUNCHER_LABEL_H for why one line is all
+		 * the tile can hold. */
+		lv_obj_set_height(lbl, LAUNCHER_LABEL_H);
+		/* Both of these are load-bearing, not tidiness. The ellipsis
+		 * threshold is `text height > box height` with no slack, and
+		 * the text measures exactly LAUNCHER_LABEL_H only while
+		 * line_space is 0 and the padding is not eating into
+		 * txt_coords. Either one would ellipsize the one line the slot
+		 * exists to show. */
+		lv_obj_set_style_pad_all(lbl, 0, 0);
+		lv_obj_set_style_text_line_space(lbl, 0, 0);
 		lv_label_set_long_mode(lbl, LV_LABEL_LONG_MODE_DOTS);
 		s_app_n++;
 	}
@@ -1241,15 +1288,16 @@ void aster_launcher_show(void)
 		aster_qpanel_restore_volume();
 	}
 
-	/* Text: SD font router (the one baked cpfont face -- ASTER_FONT_UI_PX,
+	/* Text: SD font router (the body cpfont face -- ASTER_FONT_UI_PX,
 	 * see font_sd.h). Warm the digits/punct the clock and status line
 	 * need right away, and every label created below is queued for
 	 * burst prefetch. */
 	lv_obj_clean(aster_ui_lvgl_screen());
 	s_visible = 1;
-	/* One face, so one warm call. The old pair (48 for the hero clock, 14 for
-	 * the status line) both landed on the same cpfont slot and queued the
-	 * same codepoints twice. */
+	/* One body face, so one warm call here -- the captions under the
+	 * drawer's icons warm their own face, per label, in build_drawer().
+	 * The old pair (48 for the hero clock, 14 for the status line) both
+	 * landed on the same cpfont slot and queued the same codepoints twice. */
 	aster_ui_font_warm(ASTER_FONT_UI_PX, "0123456789:/-AMPM ");
 	build_home();
 	build_drawer_page();

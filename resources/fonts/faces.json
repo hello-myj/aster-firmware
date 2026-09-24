@@ -1,5 +1,5 @@
 {
-  "generator": "sdk/tools/build_cpfont.py",
+  "generator": "tools/build_cpfont.py",
   "format": "cpfont",
   "version": 4,
   "flags": 0,
@@ -24,6 +24,19 @@
       "bytes": 5428108,
       "max_bmp": 210,
       "max_scratch": 420
+    },
+    {
+      "px": 16,
+      "file": "ui_16.cpfont",
+      "line_h": 21,
+      "asc": 17,
+      "desc": -5,
+      "coverage": "full",
+      "intervals": 138,
+      "codepoints": 28988,
+      "bytes": 3777946,
+      "max_bmp": 145,
+      "max_scratch": 289
     }
   ],
   "max_bmp": 210,
