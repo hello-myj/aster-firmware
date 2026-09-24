@@ -13,12 +13,10 @@ config ASTER_HW_LCKFB_S3
     bool "LCKFB ESP32-S3 ShiZhanPai (N16R8)"
 endchoice
 endmenu
-menu "Default startup mode (all modes remain available at runtime)"
+menu "Startup display (launcher is portrait; APPs select their orientation)"
 choice ASTER_BOOT_DISPLAY
     prompt "Display startup mode"
-    default ASTER_BOOT_LANDSCAPE
-config ASTER_BOOT_LANDSCAPE
-    bool "Landscape"
+    default ASTER_BOOT_PORTRAIT
 config ASTER_BOOT_PORTRAIT
     bool "Portrait"
 config ASTER_BOOT_HEADLESS

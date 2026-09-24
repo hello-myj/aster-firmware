@@ -1,6 +1,6 @@
 # Aster Firmware
 
-独立固件仓库，不需要 SDK 或原 MJX 源码。当前硬件只有 **立创开发板 ESP32-S3 实战派（N16R8）**，同一固件支持横屏、竖屏和无屏操作。
+独立固件仓库，不需要 SDK 或原 MJX 源码。当前硬件只有 **立创开发板 ESP32-S3 实战派（N16R8）**，launcher 固定竖屏；同一固件保留 APP 横屏、竖屏和无屏操作能力。
 
 ## 配置、构建、烧录
 
@@ -16,7 +16,7 @@ python tools/firmware.py flash
 **固件没有 `--target` 参数。** menuconfig 在 Zephyr 生成设备树之前运行，选择值保存在 `config/aster.conf`：
 
 - System and hardware：系统和真实硬件型号；当前为 Zephyr / 立创 ESP32-S3 实战派。
-- Default startup mode：默认横屏、竖屏或无屏；只改变启动模式，三种模式的代码始终保留。
+- Startup display：默认竖屏，可选无屏；APP 的横竖屏由应用声明决定。
 - Firmware services：相机、音频、Wi-Fi、原生桌面等功能。
 
 构建工具从上述配置推导底层 Zephyr board、设备树和功能选项。产物统一在 `build/firmware/`。`config/aster.conf` 不纳入 Git，首次使用加载 `config/default.conf`；清理构建目录不会删除配置。高级 Zephyr 选项可在已配置的构建目录使用 `west build -d build/firmware -t menuconfig` 查看；系统/硬件选择以项目入口保存的配置为准。
@@ -30,13 +30,12 @@ python tools/firmware.py flash
 ```text
 aster display headless
 aster display portrait
-aster display landscape
 aster sys info
 ```
 
-切换请求在拥有 UI 的工作线程执行。无屏模式关闭显示输出和触摸能力，对应的能力查询返回不可用；串口、存储、网络及非图形 APP 继续可用。恢复显示后沿用同一套驱动和资源，横竖屏切换会重新同步 LVGL 尺寸并重建桌面布局。
+切换请求在拥有 UI 的工作线程执行。无屏模式关闭显示输出和触摸能力，对应的能力查询返回不可用；串口、存储、网络及非图形 APP 继续可用。恢复显示后返回竖屏 launcher。桌面没有横屏布局或方向切换入口；原生 launcher 启用时，手动请求横屏返回不支持。
 
-有 APP 正在运行时，手动模式切换返回忙，需要先停止该 APP；APP 自身的 `orientation` 声明仍可在运行期间借用所需方向并在退出后归还。已经安装的 APP 在启动时也检查当前能力，避免无屏模式下启动强依赖显示的应用。切换命令不修改默认启动配置，也不改变硬件型号。
+有 APP 正在运行时，手动模式切换返回忙，需要先停止该 APP；APP 的 `app.toml` 中 `[app]` 下仍可设置 `orientation = "landscape"` 或 `orientation = "portrait"`。启动前按声明切换方向；正常退出、停止、异常及启动失败均在返回 launcher 前恢复竖屏。未声明方向的 APP 从竖屏启动。已经安装的 APP 在启动时也检查当前能力，避免无屏模式下启动强依赖显示的应用。切换命令不修改默认启动配置，也不改变硬件型号。
 
 ## 目录与资源
 

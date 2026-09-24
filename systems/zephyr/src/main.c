@@ -62,8 +62,7 @@ int main(void)
 		} else {
             (void)aster_runtime_display_mode_request(
                 IS_ENABLED(CONFIG_ASTER_BOOT_HEADLESS) ? ASTER_DISPLAY_MODE_HEADLESS :
-                IS_ENABLED(CONFIG_ASTER_BOOT_PORTRAIT) ? ASTER_DISPLAY_MODE_PORTRAIT :
-                ASTER_DISPLAY_MODE_LANDSCAPE);
+                ASTER_DISPLAY_MODE_PORTRAIT);
 			aster_runtime_boot_ui(); /* CONFIG_ASTER_SYSTEM_UI */
 		}
 	}

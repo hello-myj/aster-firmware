@@ -47,45 +47,12 @@ LOG_MODULE_REGISTER(aster_launcher, LOG_LEVEL_INF);
 #define LAUNCHER_MAX_APPS ASTER_APP_MAX_RECS
 #define LAUNCHER_ICON_MAX ASTER_APP_MAX_RECS
 
-/* Drawer grid: full-bleed container at y=40 (the page dots sit at dh-20), an
- * 8 px right gutter the scrollbar lives in, 2 px top/bottom padding, 6 px
- * between rows, 0 between columns. Every number below is DERIVED from the
- * logical panel geometry rather than written down.
- *
- * That is not tidiness. The constants used to be literals with a BUILD_ASSERT
- * against a literal, which meant that when the panel's geometry changed the
- * assert still passed: 116*2+8 == 240 was true and stayed true while the grid
- * was being laid out on a 320-wide screen. It kept "working" -- as a 240-wide
- * block with 80 px of dead space -- and an oversized tile wraps to the next
- * line, which silently turns the grid back into the one-column list this page
- * replaced. Pinning the arithmetic to the devicetree instead makes that
- * compile error.
- *
- * The derivation reproduces portrait's historical 116x123 exactly (and the
- * regression test for this whole refactor is that portrait screenshots stay
- * byte-identical), which is the evidence that it generalises rather than
- * re-tunes.
- *
- * Below, the derivation is written ONCE as macros that take the window, and
- * evaluated twice: the plain names are it at the window this firmware was
- * BUILT for (they feed the asserts and nothing else, now), and
- * launcher_geom() is the same text at the window the panel is showing right
- * now. A turn that happens under the UI -- `hw display orient`, or the
- * quick-settings sheet's own 方向 button -- needs the second one, and the
- * only way to keep them from drifting is for the arithmetic to have one
- * copy. The asserts stay because a face re-bake that breaks the grid must
- * still break the BUILD; the runtime half cannot catch that one, since it
- * never sees the window the tree was not compiled for unless someone asks
- * the panel to show it. */
-#define LAUNCHER_COLS_FOR(w, h) ((w) > (h) ? 3 : 2)
-#define LAUNCHER_GRID_COLS LAUNCHER_COLS_FOR(ASTER_UI_W, ASTER_UI_H)
+/* Launcher is portrait-only; applications retain both panel orientations.
+ * Derive the portrait grid from the panel's short and long edges. */
+#define LAUNCHER_WIDTH MIN(ASTER_UI_W, ASTER_UI_H)
+#define LAUNCHER_HEIGHT MAX(ASTER_UI_W, ASTER_UI_H)
+#define LAUNCHER_GRID_COLS 2
 
-/* COLS is a design choice: what the phone-grid pitch should be. Landscape
- * gets 3 across, portrait 2. Portrait is *forced* to 2: a third of a 240 px
- * panel is 77 px, narrower than the 96 px icon well, and the assert below
- * kills the build if anyone asks for it. ROWS is not a choice at all: it is
- * the most rows that still leave the well and a full label slot, so 240x320
- * yields 2 and 320x240 yields exactly 1. */
 #define LAUNCHER_TILE_GAP 6
 #define LAUNCHER_GRID_GUT 8
 /* The well is the drawer's fixed point: LAUNCHER_TILE_MIN_H is built around
@@ -135,8 +102,8 @@ LOG_MODULE_REGISTER(aster_launcher, LOG_LEVEL_INF);
 
 /* The build-time evaluation. Read by the asserts below and by nothing else:
  * every placement is s_geom now. */
-#define LAUNCHER_GRID_W     ASTER_UI_W          /* container, full-bleed      */
-#define LAUNCHER_GRID_H     LAUNCHER_GRID_H_(ASTER_UI_H)
+#define LAUNCHER_GRID_W     LAUNCHER_WIDTH          /* container, full-bleed      */
+#define LAUNCHER_GRID_H     LAUNCHER_GRID_H_(LAUNCHER_HEIGHT)
 #define LAUNCHER_GRID_BOX_H LAUNCHER_GRID_BOX_H_(LAUNCHER_GRID_H)
 #define LAUNCHER_TILE_W \
 	LAUNCHER_TILE_W_(LAUNCHER_GRID_W, LAUNCHER_GRID_COLS)
@@ -151,15 +118,6 @@ BUILD_ASSERT(LAUNCHER_TILE_MIN_H <= LAUNCHER_TILE_H,
 	     "drawer tile no longer fits: shrink LAUNCHER_WELL_PX (and re-run "
 	     "aster-sdk/tools/app_icons.py at that size), or check the caption "
 	     "face's line box (ASTER_FONT_CAPTION_LINE_H)");
-/* The same sum at the OTHER window. The runtime half of the derivation sees
- * only the window on the glass, and the assert above only the one the tree
- * was built for, so without this a slot that fits in landscape and not in
- * portrait passes every build and shows the bug the moment the panel turns.
- * That is the case a re-bake or a new panel actually produces. */
-BUILD_ASSERT(LAUNCHER_TILE_MIN_H <=
-	     LAUNCHER_TILE_H_(LAUNCHER_GRID_H_(ASTER_UI_W)),
-	     "the drawer tile fits one orientation but not the other: the label "
-	     "slot is too tall for the turned window");
 BUILD_ASSERT(LAUNCHER_GRID_ROWS >= 1,
 	     "not even one row of tiles fits: the grid container is shorter "
 	     "than a full-size icon well plus its label slot");
@@ -205,7 +163,7 @@ static launcher_geom_t launcher_geom(int w, int h)
 {
 	launcher_geom_t g;
 
-	g.cols = LAUNCHER_COLS_FOR(w, h);
+	g.cols = LAUNCHER_GRID_COLS;
 	g.grid_w = w;
 	g.grid_h = LAUNCHER_GRID_H_(h);
 	g.box_h = LAUNCHER_GRID_BOX_H_(g.grid_h);
@@ -308,6 +266,7 @@ static lv_obj_t *s_lb_clock, *s_lb_up, *s_lb_soc;
 static lv_obj_t *s_lb_wifi, *s_lb_wifi_d, *s_lb_sd;
 static lv_obj_t *s_dot_wifi, *s_dot_sd;
 static lv_obj_t *s_drawer_n;
+static lv_obj_t *s_bar_clock, *s_bar_wifi, *s_bar_sd;
 /* the glyph-free "no usable face" strip and the state it last reported */
 static lv_obj_t *s_font_warn;
 static int       s_font_warned = -1;
@@ -791,6 +750,9 @@ static void refresh_home(void)
 		 (unsigned)((s / 3600u) % 100u), (unsigned)((s / 60u) % 60u),
 		 (unsigned)(s % 60u));
 	set_label(s_lb_clock, clock);
+	snprintf(up, sizeof(up), "运行 %02u:%02u", (unsigned)(s / 3600u),
+		 (unsigned)((s / 60u) % 60u));
+	set_label(s_bar_clock, up);
 
 	/* One fact per line. This started as a single "esp32s3 · 已运行 0时0分"
 	 * and measured 229 px inside a 240 px label -- 11 px of headroom, which
@@ -808,8 +770,10 @@ static void refresh_home(void)
 		/* `linked`, not `up`: the uptime string above owns that name. */
 		int linked = !err && ws.state == WIFI_STATE_COMPLETED;
 
-		set_label(s_lb_wifi, aster_ui_wifi_word(err ? -1 : ws.state));
+		set_label(s_lb_wifi, linked ? "已连接" : "未连接");
 		dot_color(s_dot_wifi, linked ? th->pill_dot : th->dim);
+		if (s_bar_wifi) lv_obj_set_style_image_recolor(s_bar_wifi,
+			hexc(linked ? th->accent : th->dim), 0);
 		if (!s_lb_wifi_d) {
 			/* nothing to do */
 		} else if (linked && ws.ssid[0]) {
@@ -824,7 +788,7 @@ static void refresh_home(void)
 			set_label(s_lb_wifi_d, line);
 			lv_obj_clear_flag(s_lb_wifi_d, LV_OBJ_FLAG_HIDDEN);
 		} else {
-			lv_obj_add_flag(s_lb_wifi_d, LV_OBJ_FLAG_HIDDEN);
+			set_label(s_lb_wifi_d, "下拉管理网络");
 		}
 	}
 #endif
@@ -834,6 +798,8 @@ static void refresh_home(void)
 
 		set_label(s_lb_sd, mounted ? "SD 已挂载" : "SD 未挂载");
 		dot_color(s_dot_sd, mounted ? th->pill_dot : th->dim);
+		if (s_bar_sd) lv_obj_set_style_image_recolor(s_bar_sd,
+			hexc(mounted ? th->tert : th->dim), 0);
 	}
 
 	/* The one face is missing. Checked here rather than in build_home()
@@ -866,174 +832,95 @@ static void refresh_home(void)
 
 /* ---------- tree ---------- */
 
-/* Home is a PURE INFORMATION PAGE: no app entries and no "all apps" button --
- * navigation to the drawer is a swipe (firmware/ui/gesture.c). Everything on
- * it is real device state, because the page this replaces mixed in two things
- * that were not: the "USB 5V" pill was a STRING LITERAL (there is no
- * CONFIG_USB_DEVICE_STACK and no ADC) and the BT icon was decoration
- * (CONFIG_BT is not set). Both are gone rather than restyled, and so are the
- * two decorative lines that went with them ("你好" and "系统在线" -- neither
- * said anything the rest of the page did not).
- *
- * What is left is what the device can actually answer:
- *   - WiFi: aster_plat_wifi_status() is a net_mgmt query, cheap enough at 1 Hz.
- *     scan (15 s) and connect (35 s) are NOT called from here -- this runs on
- *     the thread that drives LVGL, which is why those belong behind qpanel's
- *     explicit controls and not on a page that redraws every second.
- *   - SD: aster_storage_mounted(), a flag. There is deliberately no free-space
- *     line: no such API exists, and reaching for fs_statvfs would be SD I/O
- *     on the UI thread.
- *   - the clock is UPTIME, not wall time -- there is no RTC.
- *
- * The clock is 20 px because there is exactly one baked face. The 48 px hero
- * clock this page used to carry would now draw the same 20 px glyphs into a
- * 48 px box, so the hero treatment is not available at any price short of a
- * second face -- which is what the single-face migration removed. */
-/* The page is two blocks: status (WiFi over SD) and identity (clock over
- * uptime over chip name). Portrait stacks them down the full width; landscape
- * puts them side by side, because 240 px of height will not hold the stack --
- * the identity block would run into the page dots. Only each block's origin
- * and extent differ; the offsets WITHIN a block are shared, so the two
- * arrangements cannot drift apart. The portrait column here is the historical
- * absolute layout written as offsets, unchanged down to the pixel.
- *
- * These were #if'd on ASTER_UI_LANDSCAPE and are locals now, for the same
- * reason the drawer grid moved: the choice between the two arrangements is
- * the SHAPE OF THE WINDOW, and the window is not always the one this
- * firmware was compiled for. The `wide` test is the same comparison the
- * macro made. */
-#define HOME_ST_DOT_DY  10
-/* One line step (26) plus a clear gap, so the three lines read as a block. */
-#define HOME_CL_STEP 32
-
-typedef struct {
-	int st_w, st_y, cl_x, cl_w, cl_y; /* the two block origins/extents */
-	int st_y_wifi, st_y_wifi_d, st_y_sd, st_dot_x, st_text_x;
-} home_geom_t;
-
-static home_geom_t home_geom(uint32_t dw, uint32_t dh)
+/* Compact native cards: all geometry follows the current logical panel.
+ * No wallpaper bitmap or additional font face is resident in PSRAM. */
+static lv_obj_t *home_card(int x, int y, int w, int h, uint32_t color)
 {
-	bool wide = (dw > dh);
-	home_geom_t g = {
-		.st_w = wide ? (int)(dw / 2) : (int)dw,
-		.st_y = wide ? 40 : 0,
-		.cl_x = wide ? (int)(dw / 2) : 0,
-		.cl_w = wide ? (int)(dw - dw / 2) : (int)dw,
-		.cl_y = wide ? 72 : 150,
-	};
-
-	/* Line-box tops within the status block, and how far a status dot sits
-	 * above its own label: the dot is centred on the label's line box
-	 * (top + 13 - 3). The status block starts at x = 0 in both
-	 * arrangements, which is why there is no st_x. */
-	g.st_y_wifi = g.st_y + 13;
-	g.st_y_wifi_d = g.st_y + 39;
-	g.st_y_sd = g.st_y + 87;
-	g.st_dot_x = 12;
-	g.st_text_x = 28;
-	return g;
+	lv_obj_t *o = lv_obj_create(s_home);
+	flat(o, color);
+	lv_obj_set_pos(o, x, y);
+	lv_obj_set_size(o, w, h);
+	lv_obj_set_style_radius(o, 18, 0);
+	lv_obj_clear_flag(o, LV_OBJ_FLAG_CLICKABLE);
+	return o;
 }
 
 static void build_home(void)
 {
 	const launcher_theme_t *th = &s_themes[s_theme];
-	uint32_t dw = aster_ui_lvgl_width();
-	uint32_t dh = aster_ui_lvgl_height();
-	const home_geom_t hg = home_geom(dw, dh);
-	lv_obj_t *scr = aster_ui_lvgl_screen();
-	lv_obj_t *tb, *o;
+	int dw = aster_ui_lvgl_width(), dh = aster_ui_lvgl_height();
+	int cw = dw - 24;
+	int nx = 12, ny = 166;
+	lv_obj_t *o, *card, *l;
 
-	s_home = lv_obj_create(scr);
-	lv_obj_set_size(s_home, (int32_t)dw, (int32_t)dh);
-	lv_obj_set_pos(s_home, 0, 0);
+	s_home = lv_obj_create(aster_ui_lvgl_screen());
+	lv_obj_set_size(s_home, dw, dh);
 	flat(s_home, th->bg);
+	l = mk_label(s_home, "ASTER", th->clock, 16, 0);
+	lv_obj_set_pos(l, 16, 10);
+	lv_obj_set_style_text_letter_space(l, 3, 0);
+	o = lv_button_create(s_home);
+	lv_obj_set_size(o, 40, 32);
+	lv_obj_set_pos(o, dw - 48, 2);
+	flat(o, th->bg);
+	lv_obj_add_event_cb(o, on_click, LV_EVENT_CLICKED, (void *)3);
+	mk_icon(o, 12, 8, &s_chrome[ICO_THEME], th->accent);
 
-	/* theme switcher, top-right -- chrome, not status */
-	tb = lv_obj_create(s_home);
-	lv_obj_set_size(tb, 44, 32);
-	lv_obj_set_pos(tb, (int32_t)dw - 44, 2);
-	lv_obj_set_style_bg_opa(tb, LV_OPA_TRANSP, 0);
-	lv_obj_set_style_border_width(tb, 0, 0);
-	lv_obj_set_style_pad_all(tb, 0, 0);
-	no_scroll(tb);
-	lv_obj_add_flag(tb, LV_OBJ_FLAG_CLICKABLE);
-	lv_obj_add_event_cb(tb, on_click, LV_EVENT_CLICKED, (void *)3);
-	/* 16x16 art centred in the 44x32 hit box: ((44-16)/2, (32-16)/2). The
-	 * old (18, 10) was centred for the 52x36 button this replaced and is
-	 * 4 px right of centre here. */
-	mk_icon(tb, 14, 8, &s_chrome[ICO_THEME], th->ico);
+	card = home_card(12, 44, cw, 110, th->pill_bg);
+	/* A quiet orbital motif provides depth using inexpensive primitives. */
+	for (int i = 0; i < 3; i++) {
+		o = lv_obj_create(card);
+		flat(o, th->accent);
+		lv_obj_set_size(o, 78 + i * 22, 78 + i * 22);
+		lv_obj_set_pos(o, cw - 45 - i * 11, -32 - i * 11);
+		lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_bg_opa(o, LV_OPA_TRANSP, 0);
+		lv_obj_set_style_border_width(o, 2, 0);
+		lv_obj_set_style_border_color(o, hexc(th->accent), 0);
+		lv_obj_set_style_border_opa(o, LV_OPA_30, 0);
+		lv_obj_clear_flag(o, LV_OBJ_FLAG_CLICKABLE);
+	}
+	l = mk_label(card, "运行时间", th->tert, 16, 0);
+	lv_obj_set_pos(l, 14, 12);
+	s_lb_clock = mk_label(card, "00:00:00", th->clock, 20, 0);
+	lv_obj_set_pos(s_lb_clock, 14, 39);
+	lv_obj_set_style_text_letter_space(s_lb_clock, 2, 0);
+	s_lb_up = mk_label(card, "", th->tert, 16, 0);
+	lv_obj_set_pos(s_lb_up, 14, 78);
+	s_lb_soc = NULL;
 
-	/* WiFi: dot + state word, with the SSID and address on the line below.
-	 * Positions are line-box TOPS: a label's ink baseline sits asc (21)
-	 * rows down from it, so one line box is 26 tall and the dot is centred
-	 * on that box (top + 13 - 3). The second line is exactly one line step
-	 * under the first, so the two stay together if the face is re-baked. */
-	s_dot_wifi = status_dot(s_home, hg.st_dot_x, hg.st_y_wifi + HOME_ST_DOT_DY);
-	s_lb_wifi = mk_label(s_home, "WiFi", th->pill_fg, ASTER_FONT_UI_PX, 0);
-	lv_obj_set_pos(s_lb_wifi, hg.st_text_x, hg.st_y_wifi);
-	s_lb_wifi_d = mk_label(s_home, "", th->dim, ASTER_FONT_UI_PX, 0);
-	lv_obj_set_pos(s_lb_wifi_d, hg.st_text_x, hg.st_y_wifi_d);
-	lv_obj_set_width(s_lb_wifi_d, hg.st_w - 28 - 8);
+	card = home_card(nx, ny, cw, 78, th->pill_bg);
+	mk_icon(card, 14, 14, &s_chrome[ICO_WIFI], th->accent);
+	s_dot_wifi = status_dot(card, cw - 20, 19);
+	s_lb_wifi = mk_label(card, "网络未连接", th->clock, 16, 0);
+	lv_obj_set_pos(s_lb_wifi, 40, 11);
+	lv_obj_set_size(s_lb_wifi, cw - 66, ASTER_FONT_CAPTION_LINE_H);
+	lv_label_set_long_mode(s_lb_wifi, LV_LABEL_LONG_MODE_DOTS);
+	s_lb_wifi_d = mk_label(card, "下拉管理网络", th->tert, 16, 0);
+	lv_obj_set_pos(s_lb_wifi_d, 14, 43);
+	lv_obj_set_size(s_lb_wifi_d, cw - 28, ASTER_FONT_CAPTION_LINE_H);
 	lv_label_set_long_mode(s_lb_wifi_d, LV_LABEL_LONG_MODE_DOTS);
 
-	/* SD: dot + state word. No second line -- see the note above. */
-	s_dot_sd = status_dot(s_home, hg.st_dot_x, hg.st_y_sd + HOME_ST_DOT_DY);
-	s_lb_sd = mk_label(s_home, "SD", th->pill_fg, ASTER_FONT_UI_PX, 0);
-	lv_obj_set_pos(s_lb_sd, hg.st_text_x, hg.st_y_sd);
+	card = home_card(nx, ny + 88, cw, 36, th->pill_bg);
+	mk_icon(card, 14, 10, &s_chrome[ICO_SD], th->tert);
+	s_dot_sd = status_dot(card, cw - 20, 15);
+	s_lb_sd = mk_label(card, "SD", th->tert, 16, 0);
+	lv_obj_set_pos(s_lb_sd, 40, 7);
 
-	/* clock over uptime over identity, centred as a block, with a clear gap
-	 * above it. s_lb_soc is set from s_soc once and never rewritten -- the
-	 * chip name cannot change while the device runs, so putting it through
-	 * refresh_home()'s 1 Hz path would be pure waste. (s_soc itself can
-	 * still be empty here: aster_launcher_show() only fills it when the SD
-	 * card is mounted, so the first show on a cardless boot leaves the
-	 * label blank until the next rebuild.) */
-	s_lb_clock = mk_label(s_home, "00:00:00", th->clock, ASTER_FONT_UI_PX, 1);
-	lv_obj_set_width(s_lb_clock, hg.cl_w);
-	lv_obj_set_pos(s_lb_clock, hg.cl_x, hg.cl_y);
-	s_lb_up = mk_label(s_home, "", th->tert, ASTER_FONT_UI_PX, 1);
-	lv_obj_set_width(s_lb_up, hg.cl_w);
-	lv_obj_set_pos(s_lb_up, hg.cl_x, hg.cl_y + HOME_CL_STEP);
-	s_lb_soc = mk_label(s_home, s_soc, th->dim, ASTER_FONT_UI_PX, 1);
-	lv_obj_set_width(s_lb_soc, hg.cl_w);
-	lv_obj_set_pos(s_lb_soc, hg.cl_x, hg.cl_y + 2 * HOME_CL_STEP);
-
-	/* The "the baked face is unusable" marker, created hidden and flipped by
-	 * refresh_home(). Deliberately glyph-free: with the one baked face gone
-	 * there is no way to write a message that is not itself rendered as the
-	 * placeholder's filled boxes (ui_font.c), i.e. indistinguishable from
-	 * the thing it is trying to report. A red strip along the bottom edge
-	 * plus one LOG_ERR naming the file is what is actually available, and
-	 * `aster sys lvgl` answers the same question on demand. */
-	s_font_warn = lv_obj_create(s_home);
-	lv_obj_set_size(s_font_warn, (int32_t)dw, 6);
-	lv_obj_set_pos(s_font_warn, 0, (int32_t)dh - 6);
-	lv_obj_set_style_bg_color(s_font_warn, hexc(0xEF4444u), 0);
-	lv_obj_set_style_bg_opa(s_font_warn, LV_OPA_COVER, 0);
-	lv_obj_set_style_border_width(s_font_warn, 0, 0);
-	lv_obj_set_style_radius(s_font_warn, 0, 0);
-	no_scroll(s_font_warn);
-	lv_obj_add_flag(s_font_warn, LV_OBJ_FLAG_HIDDEN);
-
-	/* page dots: home active (right dot -> drawer) */
-	o = lv_obj_create(s_home);
-	lv_obj_set_size(o, 14, 6);
-	lv_obj_set_pos(o, (int32_t)((dw - 20) / 2), (int32_t)dh - 20);
-	lv_obj_set_style_bg_color(o, hexc(th->accent), 0);
-	lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-	lv_obj_set_style_radius(o, 3, 0);
-	lv_obj_set_style_border_width(o, 0, 0);
-	no_scroll(o);
-	o = lv_obj_create(s_home);
-	lv_obj_set_size(o, 6, 6);
-	lv_obj_set_pos(o, (int32_t)((dw - 20) / 2 + 18), (int32_t)dh - 20);
-	lv_obj_set_style_bg_color(o, hexc(th->dim), 0);
-	lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-	lv_obj_set_style_radius(o, 3, 0);
-	lv_obj_set_style_border_width(o, 0, 0);
-	no_scroll(o);
-	lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
+	o = lv_button_create(s_home);
+	flat(o, th->bg);
+	lv_obj_set_size(o, 120, 28);
+	lv_obj_set_pos(o, (dw - 120) / 2, dh - 30);
+	lv_obj_set_style_radius(o, 14, 0);
+	lv_obj_set_style_bg_color(o, hexc(th->bg), 0);
 	lv_obj_add_event_cb(o, on_click, LV_EVENT_CLICKED, (void *)1);
+	l = mk_label(o, "打开应用  >", th->accent, 16, 1);
+	lv_obj_center(l);
+	s_font_warn = lv_obj_create(s_home);
+	flat(s_font_warn, 0xEF4444);
+	lv_obj_set_size(s_font_warn, dw, 3);
+	lv_obj_set_pos(s_font_warn, 0, dh - 3);
+	lv_obj_add_flag(s_font_warn, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void build_drawer_page(void)
@@ -1042,28 +929,26 @@ static void build_drawer_page(void)
 	uint32_t dw = aster_ui_lvgl_width();
 	uint32_t dh = aster_ui_lvgl_height();
 	lv_obj_t *scr = aster_ui_lvgl_screen();
-	lv_obj_t *back, *o, *l;
+	lv_obj_t *o;
 
 	s_drawer = lv_obj_create(scr);
 	lv_obj_set_size(s_drawer, (int32_t)dw, (int32_t)dh);
 	lv_obj_set_pos(s_drawer, 0, 0);
 	flat(s_drawer, th->bg);
 
-	back = lv_button_create(s_drawer);
-	lv_obj_set_size(back, 68, 32);
-	lv_obj_set_pos(back, 8, 8);
-	lv_obj_set_style_bg_color(back, hexc(th->card_bg), 0);
-	lv_obj_set_style_radius(back, 8, 0);
-	lv_obj_set_style_shadow_width(back, 0, 0);
-	lv_obj_add_event_cb(back, on_click, LV_EVENT_CLICKED, (void *)2);
-	l = mk_label(back, "主页", th->card_fg, ASTER_FONT_UI_PX, 1);
-	lv_obj_center(l);
-
-	o = mk_label(s_drawer, "所有应用", th->card_fg, ASTER_FONT_UI_PX, 0);
-	lv_obj_set_pos(o, 84, 10);
-	s_drawer_n = mk_label(s_drawer, "0 个", th->count, ASTER_FONT_UI_PX, 2);
-	lv_obj_set_size(s_drawer_n, 52, 28);
-	lv_obj_set_pos(s_drawer_n, (int32_t)dw - 60, 10);
+	s_drawer_n = NULL;
+	s_bar_clock = mk_label(s_drawer, "运行 00:00", th->tert, 16, 0);
+	lv_obj_set_pos(s_bar_clock, 12, 9);
+	s_bar_wifi = lv_image_create(s_drawer);
+	lv_image_set_src(s_bar_wifi, &s_chrome[ICO_WIFI]);
+	lv_obj_set_style_image_recolor(s_bar_wifi, hexc(th->dim), 0);
+	lv_obj_set_pos(s_bar_wifi, dw - 52, 12);
+	lv_obj_set_style_image_recolor_opa(s_bar_wifi, LV_OPA_COVER, 0);
+	s_bar_sd = lv_image_create(s_drawer);
+	lv_image_set_src(s_bar_sd, &s_chrome[ICO_SD]);
+	lv_obj_set_style_image_recolor(s_bar_sd, hexc(th->dim), 0);
+	lv_obj_set_pos(s_bar_sd, dw - 28, 12);
+	lv_obj_set_style_image_recolor_opa(s_bar_sd, LV_OPA_COVER, 0);
 
 	s_list = lv_obj_create(s_drawer);
 	/* Full-bleed grid, 40 down to the page dots: wallpaper shows between
@@ -1230,23 +1115,13 @@ void aster_launcher_show(void)
 	if (!aster_ui_lvgl_screen()) {
 		return;
 	}
-	/* Before anything is built, not on the next pump. An app that declared
-	 * an orientation has just had the window put back (runtime/S6), and
-	 * this function reads aster_ui_lvgl_width()/height() to place the
-	 * toolbar -- numbers it must not take from a display still pointing at
-	 * the app's window, since they are read once, here. The pump would fix
-	 * the display a frame later, which is too late for a tree that has
-	 * already been positioned.
-	 *
-	 * Everything below this line is measured against the window this call
-	 * has just made current: the drawer grid, both home arrangements and
-	 * the page dots all come from launcher_geom()/home_geom(), not from
-	 * ASTER_UI_W/ASTER_UI_H. That is what a runtime turn needs -- the panel can
-	 * now be showing a window this firmware was not compiled for, and the
-	 * page has to be laid out for it rather than merely repainted into it.
-	 * The build-time pair survives in the BUILD_ASSERTs, which is the half
-	 * a face re-bake should break, and the runtime half logs the same four
-	 * properties when it is handed a window the asserts never saw. */
+	/* Restore before measuring or creating any launcher widgets. This also
+	 * covers boot and recovery paths that did not run an application lease. */
+	if (aster_plat_display_orientation_get() != ASTER_ORIENT_PORTRAIT &&
+	    aster_plat_display_orientation_set(ASTER_ORIENT_PORTRAIT)) {
+		LOG_ERR("launcher: could not restore portrait display");
+		return;
+	}
 	aster_ui_lvgl_resync_window();
 	s_geom = launcher_geom((int)aster_ui_lvgl_width(), (int)aster_ui_lvgl_height());
 	s_geom_w = (int)aster_ui_lvgl_width();
@@ -1329,6 +1204,7 @@ void aster_launcher_hide(void)
 	s_lb_wifi = s_lb_wifi_d = s_lb_sd = NULL;
 	s_dot_wifi = s_dot_sd = NULL;
 	s_drawer_n = s_font_warn = NULL;
+	s_bar_clock = s_bar_wifi = s_bar_sd = NULL;
 	s_font_warned = -1;
 	icons_release();
 	s_visible = 0;

@@ -73,6 +73,11 @@ int aster_runtime_display_mode_request(enum aster_display_mode mode)
     if (mode < ASTER_DISPLAY_MODE_HEADLESS || mode > ASTER_DISPLAY_MODE_LANDSCAPE) {
         return ASTER_EINVAL;
     }
+#if IS_ENABLED(CONFIG_ASTER_LAUNCHER_NATIVE)
+    /* Idle system UI has one orientation. APP manifests use the platform
+     * orientation API through the runtime lease, independently of this. */
+    if (mode == ASTER_DISPLAY_MODE_LANDSCAPE) return ASTER_ENOTSUP;
+#endif
     if (!runtime_inited) return ASTER_ESTATE;
     k_mutex_lock(&app_lock, K_FOREVER);
     int result = ASTER_OK;
@@ -107,26 +112,10 @@ static void apply_display_mode(void)
 
 static void worker_fn(void *p1, void *p2, void *p3);
 
-/* --- the orientation lease (S5 declared it, S6 honours it) ---------------
- *
- * A package may declare `orientation` in its manifest. S5 made that
- * advisory -- an unrecognised or unsatisfiable value never blocks an
- * install. S6 is the other half: for as long as such an app runs, the
- * window really is the one it asked for, and when the app goes away the
- * window comes back *before* anything else is drawn on it.
- *
- * Why "before" is the whole point: the system UI is laid out at build time
- * for the window the firmware was built for (firmware/ui's geometry
- * assertions are BUILD_ASSERTs), so it does not reflow. Restoring after
- * relaunch_policy_after() would raise the launcher on the app's window and
- * leave it there -- a sideways launcher, which is exactly the failure this
- * lease exists to prevent.
- *
- * Single global because V1 runs one app at a time (aster_app_start refuses
- * with EBUSY otherwise), and both ends run on the worker thread: it is the
- * only thread that may touch the display while LVGL is up, and taking the
- * lease there also puts the switch ahead of ctx_startup(), so the app's
- * aster_app_init sees the space it asked for on its very first query. */
+/* APP orientation is applied on the UI worker before initialization.
+ * With the native launcher enabled, every teardown restores portrait,
+ * including startup failure and an APP without a direction declaration.
+ * Without a native launcher, retain the previous platform orientation. */
 static struct {
 	int8_t from; /* what the window was before we changed it */
 	int8_t to;   /* what we set; ASTER_ORIENT_ANY = no lease is held */
@@ -176,29 +165,17 @@ static void orient_lease_take(const aster_app_rec_t *rec)
  * lease cleared by this one's teardown. */
 static void orient_lease_release(void)
 {
-	const int8_t set_to = orient_lease.to;
+#if IS_ENABLED(CONFIG_ASTER_LAUNCHER_NATIVE)
+	const int8_t back_to = ASTER_ORIENT_PORTRAIT;
+#else
 	const int8_t back_to = orient_lease.from;
-	int cur;
-
-	if (set_to == ASTER_ORIENT_ANY) {
-		return; /* nothing was taken */
-	}
+	if (orient_lease.to == ASTER_ORIENT_ANY) return;
+#endif
 	orient_lease.to = ASTER_ORIENT_ANY;
 	orient_lease.from = ASTER_ORIENT_ANY;
+	int cur = aster_plat_display_orientation_get();
+	if (cur < 0 || cur == back_to) return;
 
-	cur = aster_plat_display_orientation_get();
-	if (cur < 0) {
-		return;
-	}
-	if (cur != set_to) {
-		/* Something turned the panel while the app ran (`hw display
-		 * orient`). That is newer intent than the lease, and undoing
-		 * it would look like the shell command silently failed. */
-		LOG_INF("orientation: left as %s; the panel was turned while "
-			"the %s lease was held", aster_pkg_orientation_name((int8_t)cur),
-			aster_pkg_orientation_name(set_to));
-		return;
-	}
 	if (aster_plat_display_orientation_set(back_to)) {
 		LOG_ERR("orientation: could not restore the %s window",
 			aster_pkg_orientation_name(back_to));
@@ -942,8 +919,7 @@ static void worker_fn(void *p1, void *p2, void *p3)
 		}
 
 		/* Put the window back before anything is drawn on it again --
-		 * the launcher below is laid out for the build-time window and
-		 * does not reflow. Before the give: a shell `aster app stop`
+		 * the launcher below only has a portrait layout. Before the give: a shell `aster app stop`
 		 * returns on worker_done and can start the next app's lease
 		 * immediately. */
 		orient_lease_release();

@@ -49,7 +49,12 @@ class Contract(unittest.TestCase):
 
     def test_menuconfig_modes_preserve_hardware(self):
         import firmware
-        for mode in ("LANDSCAPE", "PORTRAIT", "HEADLESS"):
+        defaults = firmware.load_kconfig()
+        defaults.load_config(str(ROOT / "config/default.conf"))
+        self.assertEqual(defaults.named_choices["ASTER_BOOT_DISPLAY"].selection.name,
+                         "ASTER_BOOT_PORTRAIT")
+        self.assertNotIn("ASTER_BOOT_LANDSCAPE", defaults.syms)
+        for mode in ("PORTRAIT", "HEADLESS"):
             config = firmware.load_kconfig()
             config.syms["ASTER_BOOT_" + mode].set_value("y")
             self.assertEqual(config.named_choices["ASTER_BOOT_DISPLAY"].selection.name, "ASTER_BOOT_" + mode)
