@@ -1,0 +1,78 @@
+# Aster Firmware
+
+独立固件仓库，不需要 SDK 或原 MJX 源码。当前硬件只有 **立创开发板 ESP32-S3 实战派（N16R8）**，同一固件支持横屏、竖屏和无屏操作。
+
+## 配置、构建、烧录
+
+需要 Python 3.12、west、Zephyr SDK，以及 `west.yml` 锁定的 Zephyr v4.4.2。当前工作区激活已有 `.venv` 后，在本仓库执行：
+
+```bash
+python tools/firmware.py menuconfig
+python tools/firmware.py config
+python tools/firmware.py build
+python tools/firmware.py flash
+```
+
+**固件没有 `--target` 参数。** menuconfig 在 Zephyr 生成设备树之前运行，选择值保存在 `config/aster.conf`：
+
+- System and hardware：系统和真实硬件型号；当前为 Zephyr / 立创 ESP32-S3 实战派。
+- Default startup mode：默认横屏、竖屏或无屏；只改变启动模式，三种模式的代码始终保留。
+- Firmware services：相机、音频、Wi-Fi、原生桌面等功能。
+
+构建工具从上述配置推导底层 Zephyr board、设备树和功能选项。产物统一在 `build/firmware/`。`config/aster.conf` 不纳入 Git，首次使用加载 `config/default.conf`；清理构建目录不会删除配置。高级 Zephyr 选项可在已配置的构建目录使用 `west build -d build/firmware -t menuconfig` 查看；系统/硬件选择以项目入口保存的配置为准。
+
+新的 Zephyr 工作区可通过 `west init -l /path/to/aster-firmware`、`west update` 初始化，再安装该版本环境依赖。参考板需要 [patches/README.md](patches/README.md) 中的驱动补丁。当前工作区已存在相应补丁，本次没有修改共享 Zephyr 源码。
+
+## 同一固件切换显示模式
+
+设备 shell：
+
+```text
+aster display headless
+aster display portrait
+aster display landscape
+aster sys info
+```
+
+切换请求在拥有 UI 的工作线程执行。无屏模式关闭显示输出和触摸能力，对应的能力查询返回不可用；串口、存储、网络及非图形 APP 继续可用。恢复显示后沿用同一套驱动和资源，横竖屏切换会重新同步 LVGL 尺寸并重建桌面布局。
+
+有 APP 正在运行时，手动模式切换返回忙，需要先停止该 APP；APP 自身的 `orientation` 声明仍可在运行期间借用所需方向并在退出后归还。已经安装的 APP 在启动时也检查当前能力，避免无屏模式下启动强依赖显示的应用。切换命令不修改默认启动配置，也不改变硬件型号。
+
+## 目录与资源
+
+```text
+config/                   menuconfig 定义、默认配置、本机配置
+hardware/                 真实板卡信息和固件私有构建映射
+boards/                   接线、设备树和功能配置片段
+contract/include/aster/   公开 ABI、版本和字体度量
+platform/                 无 OS 依赖的 HAL 声明、硬件端口与驱动
+systems/zephyr/           完整服务、WAMR 集成、桌面、shell 和启动
+systems/posix/            开发用核心 ABI 测试程序，不是另一款固件
+modules/                  WAMR、相机、图形和音频组件
+third_party/              LVGL 与配置 UI 的独立副本
+resources/fonts/          系统字体及生成记录
+```
+
+系统字体归固件所有：
+
+```bash
+python tools/resources.py
+```
+
+把 `dist/sdcard/` 的内容复制到设备 SD 卡根目录，得到 `aster/fonts/ui_20.cpfont`。重烘焙字体可安装 `fonttools`、`freetype-py` 后使用 `tools/build_cpfont.py`，再运行 `tools/font_metrics.py` 更新公开度量。APP SDK 不负责生成或部署系统资源。
+
+## 契约发布与开发测试
+
+```bash
+python tools/font_metrics.py --check
+python tools/export_contract.py
+python tools/host.py
+python -m unittest discover -s tests -v
+build/host/bin/aster-host tests/fixtures/hello.wasm
+```
+
+契约 ZIP 包含公开接口、导入符号、WAMR 版本、真实硬件描述及 SHA-256 清单，不包含引脚、DTS 或固件构建规则。SDK 显式导入发布物，日常构建不需要固件仓库。
+
+`aster-host` 仅为 Linux x86_64 上的核心 ABI / APP 生命周期测试程序，不注册为硬件型号，不提供完整屏幕、存储、音频或摄像头模拟。它不需要 Zephyr 或 SDK；开发测试最多处理 600 帧，不限制单个无法返回的 WASM 调用。
+
+架构与移植边界见 [docs/architecture.md](docs/architecture.md)，许可见 [NOTICE.md](NOTICE.md)。实机显示、音频、触摸等仍需开发板验证。

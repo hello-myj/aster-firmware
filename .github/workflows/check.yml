@@ -1,0 +1,15 @@
+name: Firmware contract and host runtime
+on: [push, pull_request]
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python tools/host.py
+      - run: python -m unittest discover -s tests -v
+      - run: python tools/font_metrics.py --check
+      - run: python tools/export_contract.py
+      - run: python tools/resources.py

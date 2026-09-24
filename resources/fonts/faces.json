@@ -1,0 +1,31 @@
+{
+  "generator": "sdk/tools/build_cpfont.py",
+  "format": "cpfont",
+  "version": 4,
+  "flags": 0,
+  "ttf": "ui.ttf",
+  "big_from": 32,
+  "bake": {
+    "ss": 4,
+    "gamma": 1.0,
+    "depth": 4,
+    "lut": "round"
+  },
+  "faces": [
+    {
+      "px": 20,
+      "file": "ui_20.cpfont",
+      "line_h": 26,
+      "asc": 21,
+      "desc": -6,
+      "coverage": "full",
+      "intervals": 138,
+      "codepoints": 28988,
+      "bytes": 5428108,
+      "max_bmp": 210,
+      "max_scratch": 420
+    }
+  ],
+  "max_bmp": 210,
+  "max_scratch": 420
+}

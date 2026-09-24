@@ -1,0 +1,760 @@
+# SPDX-License-Identifier: MIT
+
+mainmenu "Aster Firmware"
+
+rsource "config/Kconfig"
+
+config ASTER
+	bool "ASTER dynamic application platform"
+	default y
+
+config ASTER_WAMR
+	bool "Enable WAMR WebAssembly runtime"
+	default y
+	depends on ASTER
+
+config ASTER_WAMR_HEAP_SIZE
+	int "WAMR runtime pool size (wasm modules/instances/linear memory) in bytes"
+	default 1048576
+	depends on ASTER_WAMR
+
+config ASTER_AOT
+	bool "Enable AOT module loading (apps must ship a matching app.aot)"
+	default y
+	depends on ASTER_WAMR
+
+config ASTER_APP_MAX
+	int "Maximum simultaneously running apps"
+	default 1
+	range 1 4
+	depends on ASTER_WAMR
+
+config ASTER_APP_STACK_SIZE
+	int "Per-app host thread stack size"
+	default 32768
+	depends on ASTER_WAMR
+
+menu "Hardware platform port"
+
+choice ASTER_PLATFORM_PORT
+	prompt "Hardware platform port to build"
+	help
+	  Selects which firmware/platform/<port>/ implementation is compiled.
+	  Each port provides the aster_plat_* symbols declared by
+	  firmware/platform/aster_platform.h plus its own `hw` debug shell.
+
+	  There is deliberately NO default anywhere here, at either level. A port
+	  names the SoC it belongs to with `depends on SOC_...` and that alone
+	  decides everything (both facts verified against this tree's kconfiglib):
+	  a choice member's own `default` is IGNORED -- Kconfig says so outright,
+	  "defaults do not affect choice symbols", and Zephyr makes that warning
+	  fatal -- and a choice whose members are all invisible selects nothing,
+	  where one with an unsatisfied default would silently fall back to
+	  whichever member it lists first. So adding a port is adding a block that
+	  `depends on` its own SoC: visible means selected, invisible means this
+	  port is not for this chip. Never edit a neighbour's block to add one.
+
+	  Position decides only when that is broken. Get a new port's gate wrong --
+	  `depends on SOC_...` naming a SoC that ALREADY has a port -- and two
+	  members become visible on that SoC, where Kconfig takes whichever is
+	  listed first, SILENTLY: verified against this tree's kconfiglib, it emits
+	  no warning there, so there is nothing for Zephyr to escalate either. A
+	  .conf cannot state this rule, so tools/check_target.py does, before
+	  any build: no two members on one SoC, no ungated member at all. It runs
+	  on every --board invocation, since that is when a port is being added.
+
+	  A SoC with no port here therefore selects NOTHING, and that is the
+	  point: the alternative is compiling the first port anyone ever wrote
+	  onto a chip it was never tested on. firmware/platform/CMakeLists.txt
+	  turns that empty choice into a configure-time error.
+
+config ASTER_PLATFORM_ESP32S3
+	bool "ESP32-S3 (LCKFB N16R8 reference port)"
+	depends on SOC_ESP32S3
+	# This port's Kconfig derives the ASTER_HAS_* capability bits from its own
+	# device switches (platform/esp32s3/Kconfig), so their prompts are
+	# suppressed there. See the capabilities menu below.
+	select ASTER_PORT_DERIVES_CAPS
+
+endchoice
+
+# Port device selection lives WITH the port: each platform/<port>/Kconfig holds
+# its own choice of panel/touch/camera/audio/wifi and guards itself with `if
+# ASTER_PLATFORM_<PORT>`. Sourced BY GLOB, not by name, so this line does not
+# change as ports are added -- every platform/<port>/ with a Kconfig is a port.
+#
+# `rsource`, not `source`: Kconfig's `source` resolves relative to $srctree
+# (the Zephyr tree) while `rsource` resolves relative to THIS file, which is
+# what a path under firmware/ needs.
+rsource "platform/*/Kconfig"
+
+endmenu
+
+menu "ASTER hardware capabilities (reported to apps via feature_flags)"
+
+# Each bit below is either DERIVED or DECLARED, and which one is a property of
+# the port rather than of the bit:
+#
+#   - a port that DERIVES them `select`s each one from the device switch that
+#     provides it (see platform/<port>/Kconfig), and its prompt is suppressed
+#     here -- there is nothing to set by hand, and a second way to set it would
+#     be a second answer.
+#   - a port that DECLARES them keeps the prompt, and boards/<board>.conf sets
+#     it. That is the right shape for a capability the port provides outside
+#     its own Kconfig, or does not model as a device switch at all -- ACCEL,
+#     GYRO, KEYS, RTC, FILESYSTEM and PSRAM are set this way everywhere.
+#
+# ASTER_PORT_DERIVES_CAPS is that fork. It is what stops this file from naming a
+# board: the gate used to read `!ASTER_PLATFORM_ESP32S3`, i.e. "not the one board
+# we happened to have", which is the wrong answer for every board added after
+# it. A deriving port selects the marker; the marker says so; no port is named
+# here, so port N+1 needs no case added.
+config ASTER_PORT_DERIVES_CAPS
+	bool
+
+config ASTER_HAS_DISPLAY
+	bool "Board provides a display (ASTER_FEATURE_DISPLAY)" if !ASTER_PORT_DERIVES_CAPS
+	default n
+
+config ASTER_HAS_FRAMEBUFFER
+	bool "Board provides a framebuffer path (ASTER_FEATURE_FRAMEBUFFER)" if !ASTER_PORT_DERIVES_CAPS
+	default n
+
+config ASTER_DISPLAY_ROTATION
+	int "Logical screen rotation (degrees, clockwise)" if ASTER_HAS_DISPLAY
+	range 0 270 if ASTER_HAS_DISPLAY
+	default 0
+	help
+	  Software rotation the platform display driver applies between the
+	  app-visible (logical) screen and the panel-native window. This is
+	  the FALLBACK for controllers that cannot rotate themselves: the
+	  transpose costs a strided PSRAM gather per pixel in write_at().
+
+	  The reference panel switches landscape/portrait windows at runtime.
+	  Use the display mode command; no devicetree overlay change is needed.
+
+config ASTER_DISP_PSRAM_STAGE
+	bool "Stage panel writes in a full-panel PSRAM buffer"
+	depends on ASTER_HAS_DISPLAY && ESP_SPIRAM
+	default n
+	help
+	  Allocate ONE full-panel RGB565 staging buffer in PSRAM (240x320x2
+	  on the reference glass = 153600 B) instead of the internal-DRAM
+	  bounce, freeing the whole CONFIG_ASTER_DISP_BOUNCE_KB from DRAM.
+	  Dirty rects become a single CASET/RASET window.
+
+	  The stock Zephyr SPI driver sees a non-DMA-capable source and
+	  k_malloc+memcpy()s every 4092-byte chunk through an internal-RAM
+	  bounce before GDMA sends it (CPU reads PSRAM). Measured on the
+	  reference glass: ~26.5 fps, clean display, only per-chunk heap
+	  churn as the cost.
+
+	  GDMA reading PSRAM directly (no copy) was tried via a west-tree
+	  SPI patch and rejected: horizontal banding whenever anything else
+	  touches PSRAM during transfer -- MSPI bus contention, since
+	  LVGL/WAMR/Wi-Fi heaps all live in PSRAM here. Dead end, see
+	  docs/verification.md 2026-09-10. (The driver patch that exists
+	  today, SPI_ESP32_SLEEP_WAIT, does NOT read PSRAM from GDMA; it
+	  only converts the driver's own busy-wait into a sleep. See
+	  CONFIG_ASTER_DISP_ASYNC.)
+
+config ASTER_DISP_TIMING
+	bool "Log gather/SPI-write split timing every 64 rects"
+	depends on ASTER_HAS_DISPLAY
+	default n
+	help
+	  Diagnostic for the PSRAM staging path: every 64 panel rects, log
+	  the CPU time spent gathering/byteswapping into the staging buffer
+	  versus display_write() (SPI GDMA incl. the driver's per-4092-byte
+	  k_malloc bounce). Shows which half actually caps fps. Prints
+	  "disp timing/64 rects" lines; leave off for normal use.
+
+config ASTER_GFX_TIMING
+	bool "Log gfx raster vs panel-flush split every 64 frames"
+	default n
+	depends on ASTER_LVGL
+	help
+	  Splits the per-frame cost of a gfx-engine app at the only boundary
+	  that matters: aster_gfx_exec_into() (command walk + rasterization,
+	  i.e. pp_gfx/pretty-poly, blits, text, sprite decode) versus
+	  aster_plat_display_write_at() (gather + SPI wire). An app-side timer
+	  cannot make this cut -- the rasterization runs *inside* the
+	  aster_gfx_exec() native call, so an app that times around it reports
+	  the sum and mis-attributes the bottleneck.
+
+	  Use together with CONFIG_ASTER_DISP_TIMING to also split the flush
+	  half. Prints one "gfx tim:" line per 64 frames; leave off for
+	  normal use.
+
+config ASTER_DISP_SRC_FLUSH
+	bool "Flush the display source rect before gathering"
+	depends on ASTER_HAS_DISPLAY && CACHE_MANAGEMENT
+	default n
+	help
+	  Legacy safety from the GDMA-from-PSRAM-direct experiments, when
+	  the DMA master read the LVGL band buffer itself. On the staging
+	  path the CPU is the only reader of the source, and a core's own
+	  loads are coherent with its prior stores -- the flush just writes
+	  the whole rect back to PSRAM (and evicts it from cache before the
+	  gather reads it again). Measured cost on the reference glass was
+	  ~4 ms/frame at full-panel flush. Keep off unless the source can
+	  become non-cacheable.
+
+config ASTER_DISP_FLIP_DBUF
+	bool "Double-buffered async flip for full-screen presents"
+	depends on ASTER_HAS_DISPLAY && ASTER_DISP_ASYNC
+	default y
+	help
+	  Full-screen surface presents (aster_surface_present on a screen-sized
+	  RGB565 surface, rot 0) stop blocking the caller on the wire: the
+	  frame is byte-swapped into one of two PSRAM front buffers and posted
+	  to the display worker, and the call returns immediately. The app's
+	  own surface stays authoritative and untouched, so it can start
+	  rasterizing the next frame while the previous one is still clocking
+	  out. Frame period becomes max(raster + copy, wire) instead of
+	  raster + gather + wire.
+
+	  The two front buffers are what makes this tear-free without an app
+	  API change: a flip waits only for ITS OWN slot's previous send, so
+	  the buffer the wire is currently reading is never the one being
+	  filled. Without the second buffer the poster would have to block on
+	  the other send and the overlap -- the entire point -- is lost.
+
+	  Costs 2 x panel size in PSRAM (2 x 153600 B here) plus one
+	  PSRAM->PSRAM byte-swapping copy per frame. Falls back to the
+	  synchronous staging path when the buffers can't be allocated, when
+	  the panel is rotated, or for sub-screen rects.
+
+config ASTER_DISP_ASYNC
+	bool "Flush the panel from a dedicated worker thread"
+	depends on ASTER_HAS_DISPLAY && ASTER_DISP_PSRAM_STAGE && MULTITHREADING
+	select SPI_ESP32_SLEEP_WAIT
+	default n
+	help
+	  Hand panel writes to a worker thread instead of running them on
+	  the UI thread. Together with SPI_ESP32_SLEEP_WAIT (the SPI driver
+	  sleeps on the trans_done interrupt while the wire clocks out) this
+	  pipelines rendering against transfer on ONE core: LVGL draws the
+	  next band while the previous one streams.
+
+	  No pixel copy is added. The worker owns the caller's buffer for
+	  exactly as long as LVGL's own double-buffer protocol keeps it
+	  alive: flush_cb returns without lv_display_flush_ready(), and the
+	  wait happens in flush_wait_cb before LVGL may reuse a band, so a
+	  queued band can never be overwritten mid-transfer. Rotation or
+	  ragged-pitch rects still gather into the staging buffer -- now
+	  touched only by the worker.
+
+	  Wire-bound result on the reference glass: 153600 B/frame at
+	  80 MHz = 20.4 ms -> ~49 fps ceiling (measured synchronous:
+	  33.5 fps). Costs one worker stack plus the SPI IRQ.
+
+config ASTER_DISP_WORKER_PRIO
+	int "Display flush worker priority"
+	depends on ASTER_DISP_ASYNC
+	default 6
+	help
+	  MUST be numerically BELOW the UI/app thread priority (apps run
+	  at 7): on a single core a lower-priority (higher-numbered) worker
+	  is never scheduled while the render thread stays runnable, so the
+	  transfer would start only when UI blocks and nothing would
+	  overlap. A higher-priority worker preempts the renderer for the
+	  short per-chunk copy+arm, then sleeps on the SPI trans_done IRQ,
+	  handing the core straight back. It borrows the CPU for memcpy
+	  bursts only and is idle the rest of the wire time, so rendering
+	  is not starved.
+
+config ASTER_DISP_BOUNCE_KB
+	# The conditions sit on the prompt, not on `depends on`: the symbol has
+	# to keep a value even when the panel is compiled out, because display.c
+	# still builds in that profile (it answers ASTER_ENOTSUP at runtime, see
+	# aster_plat_display_has) and sizes its bounce macro from this.
+	int "Display bounce buffer size (KB, internal DRAM)" if ASTER_HAS_DISPLAY && !ASTER_DISP_PSRAM_STAGE
+	range 4 96 if ASTER_HAS_DISPLAY && !ASTER_DISP_PSRAM_STAGE
+	default 20
+	help	  Internal-DRAM staging buffer for panel writes when
+	  CONFIG_ASTER_DISP_PSRAM_STAGE is off (the default). With PSRAM_STAGE
+	  on, this symbol is unused and the whole budget returns to DRAM.
+
+	  Rows per SPI window are derived from this budget and the rect's own
+	  stride, so a narrow rect buys more rows (20 KB -> 42 rows at 240 px,
+	  32 at 320 px). Fewer, larger windows mean fewer CASET/RASET/RAMWR
+	  round-trips.
+
+	  A window is never free (CASET/RASET/RAMWR + DMA setup), so this
+	  is a real DRAM-for-fps trade and wants measuring per board.
+	  Reference board, full-frame flush before post-init hold-cs:
+	  20 KB (8 windows/frame) 17.4 fps vs 40 KB (4 windows/frame) 20.3
+	  fps. CS-on-I2C is now disarmed after DISPON
+	  (CONFIG_ST7789V_HOLD_CS_AFTER_INIT); do not put mipi-hold-cs in
+	  the DTS -- this panel's init sequence needs CS edges.
+
+config ASTER_HAS_TOUCH
+	bool "Board provides a touch panel (ASTER_FEATURE_TOUCH)" if !ASTER_PORT_DERIVES_CAPS
+	default n
+
+config ASTER_HAS_CAMERA
+	bool "Board provides a camera (ASTER_FEATURE_CAMERA)" if !ASTER_PORT_DERIVES_CAPS
+	default n
+
+config ASTER_HAS_AUDIO_IN
+	bool "Board provides audio input (ASTER_FEATURE_AUDIO_INPUT)" if !ASTER_PORT_DERIVES_CAPS
+	default n
+
+config ASTER_HAS_AUDIO_OUT
+	bool "Board provides audio output (ASTER_FEATURE_AUDIO_OUTPUT)" if !ASTER_PORT_DERIVES_CAPS
+	default n
+
+config ASTER_HAS_WIFI
+	bool "Board provides Wi-Fi (ASTER_FEATURE_WIFI)" if !ASTER_PORT_DERIVES_CAPS
+	default n
+
+# MOUSE and BLUETOOTH are the two feature bits that have been in the ABI since
+# 1.0 -- and named in aster_sysinfo_feature_by_name() -- with no Kconfig symbol
+# to ever set them. An app with `requires = ["mouse"]` was therefore refused on
+# every board that could ever exist, for a capability the ABI advertised. They
+# stay default n until a board actually provides one; the point is that the
+# answer is now a board decision rather than a constant.
+config ASTER_HAS_MOUSE
+	bool "Board provides a pointing device (ASTER_FEATURE_MOUSE)"
+	default n
+
+config ASTER_HAS_BT
+	bool "Board provides Bluetooth (ASTER_FEATURE_BLUETOOTH)"
+	default n
+
+# ACCEL and GYRO are declared separately because "has an IMU" is two facts, not
+# one. ASTER_HAS_IMU used to set both bits, which is a false POSITIVE on a board
+# with only an accelerometer: apps that require a gyroscope installed happily
+# and then behaved wrong -- the one failure mode the feature bits exist to
+# prevent. The reference QMI8658 is genuinely six-axis, so its conf now says so
+# in two lines.
+config ASTER_HAS_ACCEL
+	bool "Board provides an accelerometer (ASTER_FEATURE_ACCELEROMETER)"
+	default n
+
+config ASTER_HAS_GYRO
+	bool "Board provides a gyroscope (ASTER_FEATURE_GYROSCOPE)"
+	default n
+
+# One-way compat alias: reads stay correct (`IS_ENABLED(CONFIG_ASTER_HAS_IMU)`
+# still answers "both"), writes stop working. An outside board conf that still
+# says `CONFIG_ASTER_HAS_IMU=y` now fails the configure with a Kconfig error
+# naming this symbol -- "assigned in a configuration file, but is not directly
+# user-configurable (has no prompt)". That is deliberate. A prompt here would
+# be a second way to claim both bits, and it is the board's author who knows
+# which of them a given part really provides; the one-line form is what let a
+# gyro be reported by a board that had none.
+config ASTER_HAS_IMU
+	bool
+	default y if ASTER_HAS_ACCEL && ASTER_HAS_GYRO
+
+config ASTER_HAS_KEYS
+	bool "Board provides keys/buttons (ASTER_FEATURE_KEYBOARD)"
+	default n
+
+config ASTER_HAS_RTC
+	bool "Board provides a persistent RTC (ASTER_FEATURE_RTC)"
+	default n
+
+config ASTER_HAS_FILESYSTEM
+	bool "Board provides a persistent filesystem (ASTER_FEATURE_FILESYSTEM)"
+	default n
+
+config ASTER_HAS_PSRAM
+	bool "Board exposes external/PSRAM to apps (ASTER_FEATURE_PSRAM)"
+	default n
+
+endmenu
+
+menu "ASTER system UI (optional graphical shell)"
+
+config ASTER_SYSTEM_UI_ENABLE
+	bool "Auto-start a system UI (launcher) at boot"
+	default n
+	help
+	  Show the home screen once storage+runtime are ready, and return to
+	  it after any other app exits. With ASTER_LAUNCHER_NATIVE the home is
+	  the built-in native launcher; otherwise it is the launcher app
+	  picked below (a different screen skin is a different launcher
+	  package; one screen can ship several themes and the board profile
+	  picks one). Disable for headless command-line operation (the
+	  default). The ABI never learns about UI form factors -- the launcher
+	  queries display/input facts and picks its own layout.
+
+config ASTER_LAUNCHER_NATIVE
+	bool "Built-in native launcher (LVGL, no guest app)"
+	depends on ASTER_LVGL
+	default n
+	help
+	  Render the home screen (clock page + app drawer) with LVGL
+	  directly from the firmware instead of loading the
+	  "aster.launcher.desktop" guest app. The runtime shows/hides the
+	  launcher tree around app launches, so returning home costs a
+	  tree rebuild instead of a full app (re)start. Themes and the
+	  current page persist under the legacy "aster.launcher.desktop" kv
+	  namespace, so a device upgrading from the guest launcher keeps its
+	  settings. The guest-app home path stays available by turning this
+	  off and selecting ASTER_SYSTEM_UI_CUSTOM.
+
+choice ASTER_SYSTEM_UI_PKG
+	prompt "System UI package (guest-app home; non-default)"
+	depends on ASTER_SYSTEM_UI_ENABLE && !ASTER_LAUNCHER_NATIVE
+	default ASTER_SYSTEM_UI_CUSTOM
+	help
+	  Fallback path only: run a custom *installed app* as the home
+	  screen instead of the built-in native launcher. The reference
+	  "aster.launcher.desktop" package has been folded into the firmware
+	  (CONFIG_ASTER_LAUNCHER_NATIVE); pick this only to point the home at
+	  your own launcher .mja (each screen size / color depth / theme is
+	  its own .mja). Layout lives in the package, not in this Kconfig.
+
+config ASTER_SYSTEM_UI_CUSTOM
+	bool "Custom app id..."
+
+endchoice
+
+config ASTER_SYSTEM_UI_ID
+	string "Custom system UI app id"
+	depends on ASTER_SYSTEM_UI_CUSTOM
+	default ""
+
+config ASTER_SYSTEM_UI
+	string
+	default "" if ASTER_LAUNCHER_NATIVE
+	default ASTER_SYSTEM_UI_ID if ASTER_SYSTEM_UI_CUSTOM
+	default ""
+
+config ASTER_EXIT_KEY_CODE
+	int "Physical key code that force-exits the foreground app"
+	default 0    # 0 disables the global exit key
+	help
+	  A platform INPUT_KEY_* code intercepted by the runtime BEFORE the key
+	  reaches any app. Pressing it cleanly force-quits the current foreground
+	  app; the normal launch policy then returns to the system UI. On the
+	  lckfb board, boot0 is INPUT_KEY_0 (11). Set 0 to disable.
+
+endmenu
+
+menu "ASTER display substrate"
+
+config ASTER_LVGL
+	bool "LVGL display substrate (launcher home + screenshot)"
+	depends on ASTER_HAS_DISPLAY
+	default y
+	help
+	  Brings up the LVGL 9 host-side display stack used by the firmware
+	  home screen (launcher clock page + app drawer), the shared font
+	  pool and `aster ui screenshot`. Guest apps no longer render through
+	  it: they draw via the gfx engine (aster/gfx.h) into their own
+	  surface buffer. Disable on headless images.
+
+config ASTER_LVGL_BAND_ROWS
+	int "PARTIAL render band height (rows)"
+	depends on ASTER_LVGL
+	range 16 320
+	default 80
+	help
+	  Taller bands mean fewer SPI window setups per dirty region (and a
+	  larger PSRAM bounce). The flush count is ceil(logical_height / rows):
+	  on the reference board's 320x240 landscape build, 80 rows is 3
+	  flushes for a full frame and 160 is 2 (the portrait build's 240x320
+	  makes those 4 and 2).
+
+config ASTER_LVGL_PROFILER
+	bool "Log dirty-pixel / flush-byte profiler every 2s"
+	depends on ASTER_LVGL
+	default n
+	help
+	  When on, prints `ui prof: flush=…` every 2 s. Leave off for normal
+	  shell use — the line redraws the prompt. Enable only when measuring
+	  dirty-region cost.
+
+config ASTER_SCREENSHOT
+	bool "Debug CLI: `aster ui screenshot` (panel record -> base64 over shell)"
+	depends on ASTER_LVGL && SHELL
+	default n
+	help
+	  Development aid for humans (and AI agents) attached to the serial
+	  shell: streams the current screen as base64 lines, one per shell
+	  line, raw RGB565. Pair with a serial screenshot client, which decodes
+	  them into a PNG.
+
+	  The grab is served from the display driver's record of what was
+	  handed to the wire, so it shows the present path and not just the
+	  app's (or LVGL's) own buffers -- a screen-grab taken from those
+	  cannot see a wrong byte-order pass on the way to the glass, which is
+	  how one such bug shipped. Keeping that record true across partial
+	  writes costs a 150 KB PSRAM shadow and one row copy per dirty row of
+	  every partial write; the full-screen present paths alias instead and
+	  pay nothing, so games are unaffected and only a band UI that
+	  animates a large region pays. Enables LV_USE_SNAPSHOT (~4 KB rocode)
+	  for the last-resort re-render. Keep off in shipping images.
+
+endmenu
+
+menu "ASTER platform profile (board identity & geometry)"
+
+# These describe the *reference port* so the system layer (sysinfo/mja/shell)
+# carries no board- or arch-specific literals. A new board overrides them in
+# its boards/<board>.conf; the system code only ever reads CONFIG_ASTER_*.
+
+config ASTER_BOARD_ID
+	string "Board profile id reported to apps/shell"
+	default "generic"
+
+config ASTER_PLATFORM
+	string "Platform name reported to apps"
+	default "zephyr"
+
+config ASTER_SOC
+	string "SoC name reported to apps/shell"
+	default "unknown"
+
+choice ASTER_CPU_ARCH
+	prompt "CPU architecture (ASTER_ARCH_*)"
+	default ASTER_CPU_ARCH_XTENSA
+
+config ASTER_CPU_ARCH_XTENSA
+	bool "Xtensa"
+config ASTER_CPU_ARCH_ARM
+	bool "Arm"
+config ASTER_CPU_ARCH_RISCV
+	bool "RISC-V"
+config ASTER_CPU_ARCH_X86
+	bool "x86"
+endchoice
+
+config ASTER_CPU_ARCH_ID
+	int
+	default 1 if ASTER_CPU_ARCH_XTENSA
+	default 2 if ASTER_CPU_ARCH_ARM
+	default 3 if ASTER_CPU_ARCH_RISCV
+	default 4 if ASTER_CPU_ARCH_X86
+
+# ASTER_AOT_TARGET_* (see aster_mja.h): the target this platform prefers for AOT.
+# Derived from the chosen CPU arch where the mapping is unambiguous. Arm has
+# both thumb-v7 and cortex-m encodings, so it is left 0 (no AOT extraction)
+# unless the board port sets CONFIG_ASTER_AOT_TARGET_ID explicitly.
+config ASTER_AOT_TARGET_ID
+	int
+	default 1 if ASTER_CPU_ARCH_XTENSA
+	default 2 if ASTER_CPU_ARCH_RISCV
+	default 5 if ASTER_CPU_ARCH_X86
+	default 0
+
+config ASTER_CPU_FREQ_HZ
+	int "CPU frequency in Hz"
+	default 0
+
+config ASTER_CPU_COUNT
+	int "Number of CPU cores"
+	default 1
+
+config ASTER_RAM_INTERNAL
+	hex "App-visible internal RAM heap (bytes)"
+	default 0x50000
+
+config ASTER_RAM_EXTERNAL
+	hex "External/PSRAM size (bytes, 0 if none)"
+	default 0
+
+config ASTER_FLASH_SIZE
+	hex "Total flash size (bytes)"
+	default 0
+
+# Physical panel facts, reported to apps through aster_display_info_t. Both
+# default to 0 = "unknown", which is what the ABI already documents for
+# refresh_rate and the only honest answer for a board whose author has not
+# measured them. They were hard-coded in display.c instead, where the dpi was
+# self-described as a "V1 placeholder" and derived by dividing the panel
+# WIDTH by an unrecorded 1.69" diagonal -- that yields ~142, while the real
+# figure for a 240x320 panel over a 1.69" diagonal is ~237, since the
+# diagonal is 400 px and 240 is one side. Nothing in the tree read either
+# field, so no app can regress from these becoming 0; a board that sets them
+# now reports a number someone actually knows.
+config ASTER_DISP_DPI_X100
+	int "Panel density in dpi*100 (0 = unknown)"
+	default 0
+	range 0 100000
+
+config ASTER_DISP_REFRESH_HZ
+	int "Panel refresh rate in Hz (0 = unknown)"
+	default 0
+	range 0 1000
+
+# Capture geometry: the sensor and its windowing decide it, so it is a board
+# fact like the panel size above. These two numbers used to be #defines in
+# platform/aster_platform.h -- the contract header that the *port-independent*
+# runtime includes -- where the runtime read them to size-check every app
+# buffer. Move to a sensor whose native window is not QVGA and every
+# aster_cam_read() would have been rejected ASTER_EINVAL before the driver was
+# ever called, with nothing in the log naming the cause. The runtime now asks
+# the port (aster_plat_cam_info) and these two numbers are the port's answer.
+config ASTER_CAM_WIDTH
+	int "Camera capture width (px)"
+	default 320
+	range 1 8192
+
+config ASTER_CAM_HEIGHT
+	int "Camera capture height (px)"
+	default 240
+	range 1 8192
+
+# Native PCM format: the codec and the I2S clocking decide it. Same reasoning
+# as the camera geometry, plus one more -- these numbers were also published to
+# apps as ASTER_AUDIO_* macros in the ABI header, which is worse. An app is
+# compiled once and installed on any board, so a per-board #define in its
+# header is a number that is simply wrong on every other board. Apps ask
+# through aster_audio_get_info() instead (ABI 3.2).
+config ASTER_AUDIO_RATE
+	int "Native PCM sample rate (Hz)"
+	default 16000
+	range 1 192000
+
+config ASTER_AUDIO_CHANNELS
+	int "Native PCM channels"
+	default 2
+	range 1 8
+
+config ASTER_AUDIO_BITS
+	int "Native PCM bits per sample"
+	default 16
+	range 8 32
+
+# App coordinate space = logical screen / DIV, both axes, integer.
+#
+# The guest's space is deliberately SMALLER than the glass on a big panel,
+# never larger: an app authored around the reference board's 240 px short edge
+# keeps its proportions and its touch-target sizes on a 720x720 or a 1024x600
+# panel, and the cost of a present is bounded by the app's own raster area
+# rather than by the panel's. The alternative direction (a canvas larger than
+# the panel, scaled down) multiplies the raster area of the same app by the
+# square of the factor and lands it on whatever board is slowest.
+#
+# DIV=1 is not "scaling disabled" so much as "there is no scaling here to
+# disable": the entire mechanism lives inside `#if ASTER_APP_SPACE_DIV > 1`, so
+# the reference board's build carries none of it -- no tables, no bars, no
+# per-pixel map. app space IS the logical screen and every present is the same
+# 1:1 path it always was.
+#
+# The divisor must divide both panel edges evenly, and the build fails if it
+# does not. A fractional divisor would make the nearest-neighbour map
+# non-uniform (some app pixels covering two glass pixels, others three) and
+# the touch inverse ambiguous, which is exactly the class of thing that looks
+# fine in a screenshot.
+#
+# Recommended value: round(panel_short_side / 240), floored at 1.
+# 320x240 -> 1; 480x320 -> 1 or 2; 720x720 -> 3 (app space 240x240);
+# 1024x600 -> 2 or 4 (600/3 is not an integer, so 3 is not available).
+config ASTER_APP_SPACE_DIV
+	int "App coordinate space divisor (logical screen / DIV)"
+	default 1
+	range 1 8
+
+# Declared ceiling on the app space, checked against the devicetree and the
+# divisor by a BUILD_ASSERT in the display port. The port sizes its app-space
+# scratch by it, so a build whose panel/DIV exceeds this fails to compile
+# rather than corrupting a stack buffer. The correct value is
+# panel_long_side / ASTER_APP_SPACE_DIV.
+config ASTER_APP_SPACE_MAX
+	int "App-space scratch bound (pixels per edge)"
+	default 320
+	range 16 8192
+
+endmenu
+
+menu "Package security"
+
+choice ASTER_SIGNATURE_POLICY
+	prompt ".mja signature verification policy"
+	default ASTER_SIGNATURE_ALLOW_UNSIGNED
+	help
+	  Selects how the installer treats ECDSA-P256/SHA-256 signatures in
+	  MJA1 packages. The signature covers every byte of the file except the
+	  signature block itself (header reserved fields carry sig_off/len).
+
+config ASTER_SIGNATURE_OFF
+	bool "off (verify nothing; legacy behaviour)"
+config ASTER_SIGNATURE_ALLOW_UNSIGNED
+	bool "allow unsigned, but reject bad signatures (default)"
+config ASTER_SIGNATURE_REQUIRE
+	bool "require a valid signature for every install"
+endchoice
+
+config ASTER_SIGNATURE_VERIFY
+	bool
+	default y if ASTER_SIGNATURE_ALLOW_UNSIGNED || ASTER_SIGNATURE_REQUIRE
+	select MBEDTLS
+	select PSA_CRYPTO
+	select PSA_WANT_KEY_TYPE_ECC_PUBLIC_KEY
+	select PSA_WANT_ECC_SECP_R1_256
+	select PSA_WANT_ALG_ECDSA
+	select PSA_WANT_ALG_SHA_256
+
+config ASTER_VENDOR_PUBKEY
+	string "vendor ECDSA-P256 public key (65B uncompressed, hex: 04..)"
+	default "04eb4e34f79d32219ad5f027d5e6b448f1f5cb44b1857e246867f7f10b980aa6d661ddba440f1a9675d8c5832b36cec9bd688890a009170ccf717d393145f0162e"
+	help
+	  Trust anchor for signature verification: 130 hex chars = 65 bytes,
+	  SEC1 04|X|Y uncompressed point. The default is the historical
+	  development trust anchor; its private key is not shipped here.
+	  Set this to the public point matching your application signing key.
+
+endmenu
+
+menu "Image viewer (imgdec)"
+
+config ASTER_IMGDEC
+	bool "Enable image decoder front-end (BMP/JPEG/PNG)"
+	depends on ASTER_HAS_DISPLAY && FILE_SYSTEM
+	default n
+	help
+	  Streaming image decode to small-endian RGB565 previews for the
+	  panel. BMP is decoded by row-seek sampling so memory is decoupled
+	  from file size (a 4K/24bpp BMP previews in constant ~200 KiB of
+	  PSRAM). JPEG and PNG are decoded by the sub-options below, both
+	  streaming and both with memory decoupled from raster size; turn a
+	  sub-option off and that format falls back to probe-time
+	  ASTER_ENOTSUP rather than being advertised.
+
+if ASTER_IMGDEC
+
+config ASTER_IMGDEC_JPG
+	bool "JPEG decode (TJpgDec)"
+	default y
+	help
+	  Vendored TJpgDec (R0.03, ChaN 2021) decodes baseline JPEG
+	  streamed off the file, using the coarsest free 1/2,1/4,1/8 DCT
+	  downscale that still covers the preview target. Memory is
+	  decoupled from file and raster size.
+
+config ASTER_IMGDEC_PNG
+	bool "PNG decode (miniz)"
+	default y
+	help
+	  Vendored miniz 3.0.2 (inflate only) streams IDAT chunks into
+	  a 32 KB dictionary; rows are unfiltered and sampled on the fly
+	  into the RGB565 canvas. Non-interlaced ct 0/2/3/4/6 at any bit
+	  depth; Adam7 is refused. Memory decoupled from raster size.
+
+config ASTER_IMGDEC_SHELL
+	bool "Expose `hw img` debug shell"
+	default y
+	help
+	  Six subcommands under `hw img` to drive the decoder from the
+	  console for manual on-hardware verification: info / show / view /
+	  bench / dump / hex. `dump` prints one decoded row as hex so a host
+	  can diff the device decoder against a reference without a camera;
+	  `hex` dumps raw file bytes for pulling files back off the card.
+	  Full reference in docs/shell.md.
+
+endif # ASTER_IMGDEC
+
+endmenu
+
+source "Kconfig.zephyr"
+
+config ASTER_TARGET_ID
+	string
+	default "lckfb-s3" if ASTER_HW_LCKFB_S3

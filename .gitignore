@@ -1,0 +1,8 @@
+/build*/
+/dist/
+__pycache__/
+*.pyc
+.venv/
+*.log
+config/aster.conf
+config/aster.conf.old

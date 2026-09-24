@@ -1,0 +1,41 @@
+mainmenu "Aster firmware configuration"
+menu "System and hardware"
+choice ASTER_SYSTEM_SELECT
+    prompt "Operating system"
+    default ASTER_SYSTEM_ZEPHYR
+config ASTER_SYSTEM_ZEPHYR
+    bool "Zephyr"
+endchoice
+choice ASTER_HARDWARE_SELECT
+    prompt "Hardware model"
+    default ASTER_HW_LCKFB_S3
+config ASTER_HW_LCKFB_S3
+    bool "LCKFB ESP32-S3 ShiZhanPai (N16R8)"
+endchoice
+endmenu
+menu "Default startup mode (all modes remain available at runtime)"
+choice ASTER_BOOT_DISPLAY
+    prompt "Display startup mode"
+    default ASTER_BOOT_LANDSCAPE
+config ASTER_BOOT_LANDSCAPE
+    bool "Landscape"
+config ASTER_BOOT_PORTRAIT
+    bool "Portrait"
+config ASTER_BOOT_HEADLESS
+    bool "Headless (shell and non-graphical applications)"
+endchoice
+endmenu
+menu "Firmware services"
+config ASTER_CFG_CAMERA
+    bool "Camera"
+    default y
+config ASTER_CFG_AUDIO
+    bool "Audio input and output"
+    default y
+config ASTER_CFG_WIFI
+    bool "Wi-Fi"
+    default y
+config ASTER_CFG_LAUNCHER
+    bool "Built-in system desktop"
+    default y
+endmenu

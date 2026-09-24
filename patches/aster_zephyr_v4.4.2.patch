@@ -1,0 +1,973 @@
+diff --git a/drivers/display/Kconfig.st7789v b/drivers/display/Kconfig.st7789v
+index 88721d2e909..bcd50ecf831 100644
+--- a/drivers/display/Kconfig.st7789v
++++ b/drivers/display/Kconfig.st7789v
+@@ -28,3 +28,31 @@ config ST7789V_RGB565X
+ 	bool "RGB565X"
+ 
+ endchoice
++
++config ST7789V_HOLD_CS_AFTER_INIT
++	bool "Hold SPI CS after the first DISPON"
++	depends on ST7789V
++	help
++	  After a successful display_blanking_off (DISPON), set SPI_HOLD_ON_CS
++	  on a RAM copy of the MIPI DBI SPI config so later CASET/RASET/RAMWR
++	  transfers do not deassert chip-select.
++
++	  Do not use the DTS mipi-hold-cs property for this: that flag is
++	  present from the first command, and this controller's init sequence
++	  needs a CS edge to latch SLPOUT/DISPON (glass stays dark, SPI still
++	  reports success). Holding only after DISPON keeps init working.
++
++	  Intended for boards whose LCD CS sits on a slow I2C expander. The
++	  LCD must be the only device on that SPI bus, because CS then stays
++	  low for the rest of the session.
++
++config ST7789V_CS_ASSERT_AFTER_RESET
++	bool "Park CS low after reset (SPI stops toggling it)"
++	depends on ST7789V
++	help
++	  LCKFB official recipe: after panel reset, assert chip-select once
++	  and take it away from the SPI driver (equivalent to GPIO_NUM_NC).
++	  Later init commands and pixel writes rely on DC only.
++
++	  Reset still uses the normal CS edges (software reset needs them).
++	  This is not DTS mipi-hold-cs, which would also cover reset.
+diff --git a/drivers/display/display_st7789v.c b/drivers/display/display_st7789v.c
+index 5d9408fbae1..27caabd6e30 100644
+--- a/drivers/display/display_st7789v.c
++++ b/drivers/display/display_st7789v.c
+@@ -14,7 +14,9 @@
+ #include "display_st7789v.h"
+ 
+ #include <zephyr/device.h>
++#include <zephyr/drivers/gpio.h>
+ #include <zephyr/drivers/mipi_dbi.h>
++#include <zephyr/drivers/spi.h>
+ #include <zephyr/pm/device.h>
+ #include <zephyr/sys/byteorder.h>
+ #include <zephyr/drivers/display.h>
+@@ -32,6 +34,12 @@ struct st7789v_config {
+ 	uint8_t vrh_value;
+ 	uint8_t vdv_value;
+ 	uint8_t mdac;
++	/* MJX-PATCH: second MADCTL value, for a runtime window switch. Present
++	 * only on panels that should show BOTH of their windows from one
++	 * firmware image; absent means the driver behaves exactly as upstream
++	 * (set_orientation rejects everything but NORMAL). */
++	uint8_t mdac_alt;
++	bool mdac_switchable;
+ 	uint8_t gamma;
+ 	uint8_t colmod;
+ 	uint8_t lcm;
+@@ -51,8 +59,54 @@ struct st7789v_config {
+ struct st7789v_data {
+ 	uint16_t x_offset;
+ 	uint16_t y_offset;
++	/* RAM copy so HOLD_ON_CS can be armed after DISPON without
++	 * putting mipi-hold-cs in the DTS (that flag would also cover
++	 * the init sequence, which this panel needs CS edges to latch). */
++	struct mipi_dbi_config dbi;
++	/* MJX-PATCH: the window MADCTL is currently producing. These start as
++	 * the DT width/height and are what get_capabilities() reports, so a
++	 * runtime switch is visible to every caller that sizes itself from the
++	 * display (MJX's logical geometry, and through it its touch map). */
++	uint16_t w_cur;
++	uint16_t h_cur;
++	uint8_t mdac_cur;
+ };
+ 
++/* MJX-PATCH: frame memory is 240 (native X) by 320 (native Y), and MADCTL's
++ * MV bit (0x20) transposes the counters, which is why the same controller can
++ * present either a 240x320 or a 320x240 window. A window that does not match
++ * the current MV asks CASET or RASET for an address the controller does not
++ * have there: it wraps into the rest of frame memory (visible garbage) rather
++ * than failing. One predicate, used by the build-time assertions and by
++ * set_orientation(), so the two can never disagree about what "legal" means.
++ *
++ * Offsets are added in because set_mem_area() adds them: the check has to be
++ * on the address that actually reaches the controller. */
++#define ST7789V_GRAM_X 240u /* native columns */
++#define ST7789V_GRAM_Y 320u /* native rows */
++#define ST7789V_MADCTL_MV 0x20u
++
++/* Both of the next two are macros rather than functions on purpose: they are
++ * wanted in BUILD_ASSERTs as well, and _Static_assert needs an integer
++ * constant expression, which a function call never is. Same reason the
++ * predicate carries the offsets: set_mem_area() adds them, so the address
++ * that reaches the controller is the one that has to be checked. */
++#define ST7789V_WINDOW_IS_LEGAL(mdac, xo, yo, w, h)			\
++	(((uint32_t)(xo) + (w) <= ((mdac) & ST7789V_MADCTL_MV		\
++					? ST7789V_GRAM_Y : ST7789V_GRAM_X)) && \
++	 ((uint32_t)(yo) + (h) <= ((mdac) & ST7789V_MADCTL_MV		\
++					? ST7789V_GRAM_X : ST7789V_GRAM_Y)))
++
++/* MV only transposes, so a MADCTL value that differs in MV shows the same
++ * rectangle with its edges swapped; one that agrees in MV shows the same edge
++ * lengths (a 180 degree turn, or a mirror of the same rectangle). */
++#define ST7789V_ALT_TRANSPOSES(mdac, mdac_alt)				\
++	((((mdac) ^ (mdac_alt)) & ST7789V_MADCTL_MV) != 0)
++#define ST7789V_ALT_W(w, h, mdac, mdac_alt)				\
++	(ST7789V_ALT_TRANSPOSES(mdac, mdac_alt) ? (h) : (w))
++#define ST7789V_ALT_H(w, h, mdac, mdac_alt)				\
++	(ST7789V_ALT_TRANSPOSES(mdac, mdac_alt) ? (w) : (h))
++
+ #ifdef CONFIG_ST7789V_RGB888
+ #define ST7789V_PIXEL_SIZE 3u
+ #else
+@@ -72,8 +126,9 @@ static int st7789v_transmit(const struct device *dev, uint8_t cmd,
+ 			    uint8_t *tx_data, size_t tx_count)
+ {
+ 	const struct st7789v_config *config = dev->config;
++	struct st7789v_data *data = dev->data;
+ 
+-	return mipi_dbi_command_write(config->mipi_dbi, &config->dbi_config,
++	return mipi_dbi_command_write(config->mipi_dbi, &data->dbi,
+ 				      cmd, tx_data, tx_count);
+ }
+ 
+@@ -113,6 +168,28 @@ static int st7789v_reset_display(const struct device *dev)
+ 	return ret;
+ }
+ 
++#if IS_ENABLED(CONFIG_ST7789V_CS_ASSERT_AFTER_RESET)
++/* Official LCKFB sequence: reset (with CS edges), then lcd_cs(0) and
++ * never let the SPI driver touch CS again. DC still selects cmd/data.
++ *
++ * Keep hardware CS disabled: ESP32 SPIM maps !cs_is_gpio to CS0/1/2 via
++ * spi_config.slave. slave > 2 is the HAL "no CS pin" equivalent of
++ * GPIO_NUM_NC. */
++static void st7789v_cs_park_low(struct st7789v_data *data)
++{
++	if (!spi_cs_is_gpio(&data->dbi.config) ||
++	    data->dbi.config.cs.gpio.port == NULL) {
++		return;
++	}
++
++	(void)gpio_pin_set_dt(&data->dbi.config.cs.gpio, 1);
++	data->dbi.config.cs.cs_is_gpio = false;
++	data->dbi.config.cs.gpio.port = NULL;
++	data->dbi.config.slave = 0xFF;
++	LOG_INF("cs parked low after reset (SPI will not toggle it)");
++}
++#endif
++
+ static int st7789v_blanking_on(const struct device *dev)
+ {
+ 	return st7789v_transmit(dev, ST7789V_CMD_DISP_OFF, NULL, 0);
+@@ -120,7 +197,22 @@ static int st7789v_blanking_on(const struct device *dev)
+ 
+ static int st7789v_blanking_off(const struct device *dev)
+ {
+-	return st7789v_transmit(dev, ST7789V_CMD_DISP_ON, NULL, 0);
++	int ret = st7789v_transmit(dev, ST7789V_CMD_DISP_ON, NULL, 0);
++
++#if IS_ENABLED(CONFIG_ST7789V_HOLD_CS_AFTER_INIT)
++	if (ret == 0) {
++		struct st7789v_data *data = dev->data;
++
++		/* DISPON has already been latched with a CS edge. Further
++		 * pixel traffic can keep CS low; DC still distinguishes
++		 * command vs data. */
++		if ((data->dbi.config.operation & SPI_HOLD_ON_CS) == 0) {
++			data->dbi.config.operation |= SPI_HOLD_ON_CS;
++			LOG_INF("hold-cs armed after DISPON");
++		}
++	}
++#endif
++	return ret;
+ }
+ 
+ static int st7789v_set_mem_area(const struct device *dev, const uint16_t x,
+@@ -153,6 +245,7 @@ static int st7789v_write(const struct device *dev,
+ 			 const void *buf)
+ {
+ 	const struct st7789v_config *config = dev->config;
++	struct st7789v_data *data = dev->data;
+ 	struct display_buffer_descriptor mipi_desc;
+ 	const uint8_t *write_data_start = (uint8_t *) buf;
+ 	uint16_t nbr_of_writes;
+@@ -201,7 +294,7 @@ static int st7789v_write(const struct device *dev,
+ 	}
+ 
+ 	for (uint16_t write_cnt = 0U; write_cnt < nbr_of_writes; ++write_cnt) {
+-		ret = mipi_dbi_write_display(config->mipi_dbi, &config->dbi_config,
++		ret = mipi_dbi_write_display(config->mipi_dbi, &data->dbi,
+ 					     write_data_start, &mipi_desc, pixfmt);
+ 		if (ret < 0) {
+ 			return ret;
+@@ -217,10 +310,17 @@ static void st7789v_get_capabilities(const struct device *dev,
+ 			      struct display_capabilities *capabilities)
+ {
+ 	const struct st7789v_config *config = dev->config;
++	/* MJX-PATCH: from the data struct, not the DT config -- after a
++	 * runtime orientation switch the DT's width/height describe the window
++	 * the panel came up in, not the one it is showing now. */
++	const struct st7789v_data *data = dev->data;
+ 
+ 	memset(capabilities, 0, sizeof(struct display_capabilities));
+-	capabilities->x_resolution = config->width;
+-	capabilities->y_resolution = config->height;
++	capabilities->x_resolution = data->w_cur;
++	capabilities->y_resolution = data->h_cur;
++	capabilities->current_orientation =
++		(data->mdac_cur == config->mdac) ? DISPLAY_ORIENTATION_NORMAL
++						 : DISPLAY_ORIENTATION_ROTATED_90;
+ 
+ #ifdef CONFIG_ST7789V_RGB565
+ 	capabilities->supported_pixel_formats = PIXEL_FORMAT_RGB_565;
+@@ -232,7 +332,15 @@ static void st7789v_get_capabilities(const struct device *dev,
+ 	capabilities->supported_pixel_formats = PIXEL_FORMAT_RGB_888;
+ 	capabilities->current_pixel_format = PIXEL_FORMAT_RGB_888;
+ #endif
+-	capabilities->current_orientation = DISPLAY_ORIENTATION_NORMAL;
++	/* MJX-PATCH: upstream hard-codes DISPLAY_ORIENTATION_NORMAL here, after
++	 * the #endif. It must not come back: it overwrote the computed value
++	 * above, so a panel already showing its alternate window still reported
++	 * NORMAL -- and the platform's orientation_request() believes this
++	 * field, so asking for the OTHER orientation computed "go to the alt"
++	 * while already on it, the driver saw mdac == mdac_cur, returned 0
++	 * without writing a register, and the caller was told it got what it
++	 * asked for. Measured on the reference board: `hw display orient
++	 * landscape` printed the error-free "orientation=portrait". */
+ }
+ 
+ static int st7789v_set_pixel_format(const struct device *dev,
+@@ -251,14 +359,109 @@ static int st7789v_set_pixel_format(const struct device *dev,
+ 	return -ENOTSUP;
+ }
+ 
++/* MJX-PATCH: which MADCTL value and window a request maps to.
++ *
++ * NORMAL is the window the DT declares; ROTATED_90/270 is the panel's other
++ * one (mdac-alt), with its edges swapped. 90 and 270 are the same window here
++ * and not two: which of the pair a rotation by +90 versus -90 lands on is a
++ * mirror difference, and the caller has already chosen which mirror it wants
++ * by choosing mdac-alt. A 180 degree turn would need a third MADCTL value, so
++ * it stays unimplemented.
++ *
++ * Scalar arguments and no logging on purpose: this is the one part of the
++ * patch that can be checked without a board, and it is worth checking because
++ * the two ends are written from opposite directions -- a caller asks for an
++ * ASPECT and this answers with a window, so an inversion between them looks
++ * like a switch that works and turns the wrong way. */
++static int st7789v_window_for(uint8_t mdac, uint8_t mdac_alt, bool switchable,
++			      uint16_t width, uint16_t height,
++			      enum display_orientation orientation,
++			      uint8_t *out_mdac, uint16_t *out_w, uint16_t *out_h)
++{
++	if (orientation == DISPLAY_ORIENTATION_NORMAL) {
++		*out_mdac = mdac;
++		*out_w = width;
++		*out_h = height;
++		return 0;
++	}
++	if (orientation != DISPLAY_ORIENTATION_ROTATED_90 &&
++	    orientation != DISPLAY_ORIENTATION_ROTATED_270) {
++		return -ENOTSUP;
++	}
++	if (!switchable) {
++		return -ENOTSUP;
++	}
++	/* Every orientation in Zephyr's enum is a ROTATION, and turning a
++	 * window a quarter turn has to change MV. An mdac-alt agreeing with
++	 * mdac in MV describes the same rectangle mirrored: accepting the
++	 * request would write the register, change nothing about the aspect,
++	 * and return 0 -- so a caller that asked for an orientation would be
++	 * told it got one while looking at the same shape as before. (A 180
++	 * is this same case plus a turn, which is why it is separately
++	 * unimplemented rather than routed here.) */
++	if (!ST7789V_ALT_TRANSPOSES(mdac, mdac_alt)) {
++		return -ENOTSUP;
++	}
++	*out_mdac = mdac_alt;
++	*out_w = ST7789V_ALT_W(width, height, mdac, mdac_alt);
++	*out_h = ST7789V_ALT_H(width, height, mdac, mdac_alt);
++	return 0;
++}
++
+ static int st7789v_set_orientation(const struct device *dev,
+ 			    const enum display_orientation orientation)
+ {
+-	if (orientation == DISPLAY_ORIENTATION_NORMAL) {
++	const struct st7789v_config *config = dev->config;
++	struct st7789v_data *data = dev->data;
++	uint16_t w, h;
++	uint8_t mdac;
++	uint8_t tmp;
++	int ret;
++
++	ret = st7789v_window_for(config->mdac, config->mdac_alt,
++				 config->mdac_switchable, config->width,
++				 config->height, orientation, &mdac, &w, &h);
++	if (ret < 0) {
++		const char *why;
++
++		if (!config->mdac_switchable) {
++			why = "no mdac-alt on this panel";
++		} else if (!ST7789V_ALT_TRANSPOSES(config->mdac,
++						   config->mdac_alt)) {
++			why = "mdac-alt does not transpose the window";
++		} else {
++			why = "180 needs a third MADCTL value";
++		}
++		LOG_ERR("Orientation %d not implemented (%s)", (int)orientation,
++			why);
++		return ret;
++	}
++
++	if (!ST7789V_WINDOW_IS_LEGAL(mdac, data->x_offset, data->y_offset, w,
++				     h)) {
++		LOG_ERR("Refusing orientation %d: MADCTL 0x%02x with a %ux%u "
++			"window at offset %u,%u runs past frame memory (%ux%u)",
++			(int)orientation, mdac, w, h, data->x_offset,
++			data->y_offset, ST7789V_GRAM_X, ST7789V_GRAM_Y);
++		return -EINVAL;
++	}
++
++	if (mdac == data->mdac_cur) {
+ 		return 0;
+ 	}
+-	LOG_ERR("Changing display orientation not implemented");
+-	return -ENOTSUP;
++
++	tmp = mdac;
++	ret = st7789v_transmit(dev, ST7789V_CMD_MADCTL, &tmp, 1);
++	if (ret < 0) {
++		return ret;
++	}
++	/* Only after the controller agreed: everything downstream sizes itself
++	 * from get_capabilities(), so advertising the new window first would
++	 * have callers lay out for a window that is not on the glass yet. */
++	data->mdac_cur = mdac;
++	data->w_cur = w;
++	data->h_cur = h;
++	return 0;
+ }
+ 
+ static int st7789v_lcd_init(const struct device *dev)
+@@ -403,6 +606,7 @@ static int st7789v_lcd_init(const struct device *dev)
+ static int st7789v_init(const struct device *dev)
+ {
+ 	const struct st7789v_config *config = dev->config;
++	struct st7789v_data *data = dev->data;
+ 	int ret;
+ 
+ 	if (!device_is_ready(config->mipi_dbi)) {
+@@ -410,6 +614,8 @@ static int st7789v_init(const struct device *dev)
+ 		return -ENODEV;
+ 	}
+ 
++	data->dbi = config->dbi_config;
++
+ 	k_sleep(K_TIMEOUT_ABS_MS(config->ready_time_ms));
+ 
+ 	ret = st7789v_reset_display(dev);
+@@ -418,6 +624,10 @@ static int st7789v_init(const struct device *dev)
+ 		return ret;
+ 	}
+ 
++#if IS_ENABLED(CONFIG_ST7789V_CS_ASSERT_AFTER_RESET)
++	st7789v_cs_park_low(data);
++#endif
++
+ 	ret = st7789v_blanking_on(dev);
+ 	if (ret < 0) {
+ 		LOG_ERR("Failed to turn blanking on (%d)", ret);
+@@ -486,6 +696,8 @@ static DEVICE_API(display, st7789v_api) = {
+ 		.vrh_value = DT_INST_PROP_OR(inst, vrhs, 0),				\
+ 		.vdv_value = DT_INST_PROP_OR(inst, vdvs, 0),				\
+ 		.mdac = DT_INST_PROP(inst, mdac),					\
++		.mdac_alt = DT_INST_PROP_OR(inst, mdac_alt, 0),				\
++		.mdac_switchable = DT_INST_NODE_HAS_PROP(inst, mdac_alt),		\
+ 		.gamma = DT_INST_PROP(inst, gamma),					\
+ 		.colmod = DT_INST_PROP(inst, colmod),					\
+ 		.lcm = DT_INST_PROP(inst, lcm),						\
+@@ -505,8 +717,58 @@ static DEVICE_API(display, st7789v_api) = {
+ 	static struct st7789v_data st7789v_data_ ## inst = {				\
+ 		.x_offset = DT_INST_PROP(inst, x_offset),				\
+ 		.y_offset = DT_INST_PROP(inst, y_offset),				\
++		.w_cur = DT_INST_PROP(inst, width),					\
++		.h_cur = DT_INST_PROP(inst, height),					\
++		.mdac_cur = DT_INST_PROP(inst, mdac),					\
+ 	};										\
+ 											\
++	/* MJX-PATCH: both declared windows must address frame memory. Checked
++	 * here rather than only in set_orientation() because a DTS that pairs
++	 * MV with the wrong window is a build mistake, and the failure it would
++	 * otherwise cause is garbage on the glass, not an error -- the same
++	 * reason the CS recipe is asserted rather than documented. The alt
++	 * window is the derived one, so there is nothing for a board to keep
++	 * in sync by hand.
++	 *
++	 * The second assertion is not independent of the first when the window
++	 * fills the frame memory: with zero offsets the two candidate windows
++	 * are (w,h) and (h,w) and the two MV states have exactly those limits,
++	 * so whatever the primary accepts the alternate does too (checked by
++	 * enumeration on the reference board's numbers -- zero witnesses). It
++	 * earns its keep on a panel that is SMALLER than the frame memory,
++	 * where an offset can make the swapped window overrun. Both are kept:
++	 * one costs a line and the other is the case nobody tests.*/	\
++	BUILD_ASSERT(ST7789V_WINDOW_IS_LEGAL(DT_INST_PROP(inst, mdac),		\
++			DT_INST_PROP(inst, x_offset), DT_INST_PROP(inst, y_offset),	\
++			DT_INST_PROP(inst, width), DT_INST_PROP(inst, height)),	\
++		"st7789v: mdac and width/height disagree about the window "	\
++		"(MV transposes: 240x320 without it, 320x240 with it)");	\
++	BUILD_ASSERT(!DT_INST_NODE_HAS_PROP(inst, mdac_alt) ||			\
++		ST7789V_WINDOW_IS_LEGAL(DT_INST_PROP_OR(inst, mdac_alt, 0),	\
++			DT_INST_PROP(inst, x_offset), DT_INST_PROP(inst, y_offset),	\
++			ST7789V_ALT_W(DT_INST_PROP(inst, width),		\
++				DT_INST_PROP(inst, height),			\
++				DT_INST_PROP(inst, mdac),			\
++				DT_INST_PROP_OR(inst, mdac_alt, 0)),		\
++			ST7789V_ALT_H(DT_INST_PROP(inst, width),		\
++				DT_INST_PROP(inst, height),			\
++				DT_INST_PROP(inst, mdac),			\
++				DT_INST_PROP_OR(inst, mdac_alt, 0))),		\
++		"st7789v: mdac-alt cannot show this panel's other window "	\
++		"(check mdac-alt's MV bit against width/height)");		\
++	/* ...and it has to BE the other window. An mdac-alt matching mdac in
++	 * MV is a mirror of the same rectangle, which is not a rotation: it
++	 * cannot answer a single value of display_orientation, and a board
++	 * that declares one has either copied the property by mistake or
++	 * wants something this API does not express. Refused here rather than
++	 * at the first switch, because the alternative is a register write
++	 * that returns success and changes nothing. */			\
++	BUILD_ASSERT(!DT_INST_NODE_HAS_PROP(inst, mdac_alt) ||			\
++		ST7789V_ALT_TRANSPOSES(DT_INST_PROP(inst, mdac),		\
++			DT_INST_PROP_OR(inst, mdac_alt, 0)),			\
++		"st7789v: mdac-alt agrees with mdac about MV, so it is a "	\
++		"mirror of the same window and cannot express an orientation");	\
++											\
+ 	PM_DEVICE_DT_INST_DEFINE(inst, st7789v_pm_action);				\
+ 											\
+ 	DEVICE_DT_INST_DEFINE(inst, &st7789v_init, PM_DEVICE_DT_INST_GET(inst),		\
+diff --git a/drivers/gpio/gpio_pca95xx.c b/drivers/gpio/gpio_pca95xx.c
+index c61031dc99b..8b0f75f6167 100644
+--- a/drivers/gpio/gpio_pca95xx.c
++++ b/drivers/gpio/gpio_pca95xx.c
+@@ -513,6 +513,15 @@ static int gpio_pca95xx_port_set_masked_raw(const struct device *dev,
+ 	reg_out = drv_data->reg_cache.output;
+ 	reg_out = (reg_out & ~mask) | (mask & value);
+ 
++	/* Latching expander: a no-op write still costs a full I2C
++	 * transaction. SPI_HOLD_ON_CS still asserts CS on every
++	 * transfer; skipping the unchanged write is what actually
++	 * removes the I2C tax once CS is already low. */
++	if (reg_out == drv_data->reg_cache.output) {
++		k_sem_give(&drv_data->lock);
++		return 0;
++	}
++
+ 	ret = update_output_regs(dev, reg_out);
+ 
+ 	k_sem_give(&drv_data->lock);
+diff --git a/drivers/gpio/gpio_pca_series.c b/drivers/gpio/gpio_pca_series.c
+index a7ef564ef4d..d52af1cf917 100644
+--- a/drivers/gpio/gpio_pca_series.c
++++ b/drivers/gpio/gpio_pca_series.c
+@@ -1328,6 +1328,14 @@ static int gpio_pca_series_port_write(const struct device *dev,
+ #endif /* CONFIG_GPIO_PCA_SERIES_CACHE_ALL */
+ 
+ 	out = ((out_old & ~mask) | (value & mask)) ^ toggle;
++	/* Latching expander: a no-op write still costs a full I2C
++	 * transaction. SPI_HOLD_ON_CS still asserts CS on every
++	 * transfer; skipping the unchanged write is what actually
++	 * removes the I2C tax once CS is already low. */
++	if (out == out_old) {
++		k_sem_give(&data->lock);
++		return 0;
++	}
+ 	out = sys_cpu_to_le32(out);
+ 
+ 	ret = gpio_pca_series_reg_write(dev, PCA_REG_TYPE_1B_OUTPUT_PORT, (uint8_t *)&out);
+diff --git a/drivers/i2s/i2s_esp32.c b/drivers/i2s/i2s_esp32.c
+index 5b0601abf27..ca55f88b5af 100644
+--- a/drivers/i2s/i2s_esp32.c
++++ b/drivers/i2s/i2s_esp32.c
+@@ -272,6 +272,15 @@ static void i2s_esp32_rx_callback(void *arg, int status)
+ 		goto rx_disable;
+ 	}
+ 
++	/* The queue owns the block now. Clear the pointer before any of the
++	 * rx_disable jumps below, or i2s_esp32_rx_stop_transfer() would free a
++	 * buffer that i2s_esp32_queue_drop() is going to release as well. This
++	 * also covers the failed k_mem_slab_alloc() below, which leaves its
++	 * output untouched and would otherwise leave the stale pointer in place.
++	 */
++	stream->data->mem_block = NULL;
++	stream->data->mem_block_len = 0;
++
+ 	if (dev_data->state == I2S_STATE_STOPPING) {
+ 		if (dev_data->active_dir == I2S_DIR_RX ||
+ 		    (dev_data->active_dir == I2S_DIR_BOTH && !dev_cfg->tx.data->transferring)) {
+@@ -282,7 +291,15 @@ static void i2s_esp32_rx_callback(void *arg, int status)
+ 
+ 	err = k_mem_slab_alloc(stream->data->i2s_cfg.mem_slab, &stream->data->mem_block, K_NO_WAIT);
+ 	if (err < 0) {
+-		LOG_DBG("RX failed to allocate memory from slab: %i:", err);
++		/* The application has not returned a block in time, so there is
++		 * nothing left to arm the channel with. Say so here: the caller only
++		 * sees the -EIO that this state change produces later, which points
++		 * at the read rather than at the slab that actually ran dry.
++		 */
++		LOG_ERR("RX slab alloc failed: %d rx_used=%u rx_free=%u rxq=%u",
++			err, (unsigned)k_mem_slab_num_used_get(stream->data->i2s_cfg.mem_slab),
++			(unsigned)k_mem_slab_num_free_get(stream->data->i2s_cfg.mem_slab),
++			(unsigned)k_msgq_num_used_get(&stream->data->queue));
+ 		dev_data->state = I2S_STATE_ERROR;
+ 		goto rx_disable;
+ 	}
+@@ -382,6 +399,31 @@ static void i2s_esp32_rx_stop_transfer(const struct device *dev)
+ 	i2s_hal_clear_intr_status(hal, I2S_INTR_MAX);
+ #endif /* SOC_GDMA_SUPPORTED */
+ 
++	/* The in-flight buffer was allocated from the application's mem_slab by
++	 * the RX callback (or start_transfer) and is not on the queue -- the
++	 * completed ones are, and i2s_esp32_queue_drop() releases those. Free it
++	 * here as well, otherwise the slab leaks one block per stop and the
++	 * application eventually sees alloc failures it cannot diagnose.
++	 */
++	if (stream->data->mem_block != NULL) {
++#if SOC_GDMA_SUPPORTED
++		/* dma_stop() only clears the start bit, which the channel honours at a
++		 * descriptor boundary. The in-flight descriptor therefore keeps filling
++		 * this buffer, and a burst landing after the free below overwrites the
++		 * free-list pointer stored in the block's first word: that strands every
++		 * block queued behind it, so a later allocation fails with -ENOMEM even
++		 * though the slab still counts those blocks as free. Reloading the
++		 * channel pulses its reset, which discards the descriptor, so nothing
++		 * can write to the buffer once it goes back to the slab. The descriptor
++		 * is rebuilt from the new block when the stream is started again.
++		 */
++		(void)dma_reload(stream->conf->dma_dev, stream->conf->dma_channel,
++				 (uint32_t)NULL, (uint32_t)(uintptr_t)stream->data->mem_block,
++				 stream->data->mem_block_len);
++		stream->data->dma_pending = false;
++#endif /* SOC_GDMA_SUPPORTED */
++		k_mem_slab_free(stream->data->i2s_cfg.mem_slab, stream->data->mem_block);
++	}
+ 	stream->data->mem_block = NULL;
+ 	stream->data->mem_block_len = 0;
+ 
+@@ -472,6 +514,13 @@ static void i2s_esp32_tx_callback(void *arg, int status)
+ 	}
+ 
+ 	k_mem_slab_free(stream->data->i2s_cfg.mem_slab, stream->data->mem_block);
++	/* Freed, so it is no longer ours. Clear it before the error path below
++	 * reaches i2s_esp32_tx_stop_transfer(), which would free it a second
++	 * time -- and before tx_compl_transfer() can fail to take a new block
++	 * from the queue and leave the dangling pointer in place.
++	 */
++	stream->data->mem_block = NULL;
++	stream->data->mem_block_len = 0;
+ 
+ #if SOC_GDMA_SUPPORTED
+ 	if (status < 0) {
+@@ -580,6 +629,24 @@ static void i2s_esp32_tx_stop_transfer(const struct device *dev)
+ 	i2s_hal_clear_intr_status(hal, I2S_INTR_MAX);
+ #endif /* SOC_GDMA_SUPPORTED */
+ 
++	/* Ownership of the buffer currently in mem_block passed to the driver in
++	 * i2s_write()/start_transfer, so it must go back to the slab on stop --
++	 * i2s_esp32_queue_drop() only releases what is still queued.
++	 */
++	if (stream->data->mem_block != NULL) {
++#if SOC_GDMA_SUPPORTED
++		/* Same descriptor-boundary caveat as the RX side: without the reset
++		 * the channel can still be fetching from this buffer after it is
++		 * released, and the application is free to hand it straight back to a
++		 * later transfer.
++		 */
++		(void)dma_reload(stream->conf->dma_dev, stream->conf->dma_channel,
++				 (uint32_t)(uintptr_t)stream->data->mem_block, (uint32_t)NULL,
++				 stream->data->mem_block_len);
++		stream->data->dma_pending = false;
++#endif /* SOC_GDMA_SUPPORTED */
++		k_mem_slab_free(stream->data->i2s_cfg.mem_slab, stream->data->mem_block);
++	}
+ 	stream->data->mem_block = NULL;
+ 	stream->data->mem_block_len = 0;
+ 
+diff --git a/drivers/spi/Kconfig.esp32 b/drivers/spi/Kconfig.esp32
+index dd3818e7797..3b24e99ee70 100644
+--- a/drivers/spi/Kconfig.esp32
++++ b/drivers/spi/Kconfig.esp32
+@@ -17,4 +17,31 @@ config SPI_ESP32_INTERRUPT
+ 	help
+ 	  Enables interrupt support for ESP32 SPI driver.
+ 
++config SPI_ESP32_SLEEP_WAIT
++	bool "Sleep (IRQ-backed) while waiting for DMA transfer completion"
++	depends on !SPI_ESP32_INTERRUPT && MULTITHREADING
++	help
++	  The stock master path finishes every DMA block by polling
++	  spi_hal_usr_is_done() in a tight loop, burning the calling
++	  thread's CPU for the whole wire transfer. With this option each
++	  block is armed, the trans_done interrupt is enabled, and the
++	  calling thread sleeps on a semaphore until the block has fully
++	  clocked out. On a single core this frees the CPU for other
++	  threads (e.g. LVGL rendering while a display flush streams),
++	  which polling can never do: the poller holds the core.
++
++config SPI_ESP32_DMA_CHUNK_SIZE
++	int "Max bytes clocked per DMA user command"
++	range 256 16384
++	default 4092
++	help
++	  Bytes handed to the SPI peripheral in a single user_start
++	  command when DMA is enabled. The stock value (4092) equals one
++	  GDMA descriptor, so long buffers are split into many restart
++	  points. Raising it lets one user command feed a whole GDMA
++	  descriptor chain (the GDMA driver auto-splits at 4092 up to
++	  CONFIG_DMA_ESP32_MAX_DESCRIPTOR_NUM entries), cutting per-chunk
++	  restart overhead. The upper bound 16384 keeps k_malloc bounce
++	  spikes off the heap; ms_data_bitlen would allow 32767.
++
+ endif # ESP32_SPIM
+diff --git a/drivers/spi/spi_esp32_spim.c b/drivers/spi/spi_esp32_spim.c
+index 04fd911b65f..471d3f31676 100644
+--- a/drivers/spi/spi_esp32_spim.c
++++ b/drivers/spi/spi_esp32_spim.c
+@@ -36,16 +36,89 @@ LOG_MODULE_REGISTER(esp32_spi, CONFIG_SPI_LOG_LEVEL);
+ #error "spi3 must not have dma-enabled if ADC_ESP32_DMA is enabled for ESP32-S2"
+ #endif
+ 
+-#define SPI_DMA_MAX_BUFFER_SIZE 4092
++#define SPI_DMA_MAX_BUFFER_SIZE CONFIG_SPI_ESP32_DMA_CHUNK_SIZE
++
++/* Floor the adaptive chunk size settles at. One GDMA descriptor is 4092 B,
++ * so below that a chunk buys no restart saving at all while still costing
++ * an extra IRQ-backed wait per block: stop there.
++ */
++#define SPI_DMA_MIN_BUFFER_SIZE 4092u
++
++/* Stock behaviour is a tight poll on the user-done bit: the calling thread
++ * holds the core for the whole wire transfer. With SPI_ESP32_SLEEP_WAIT the
++ * trans_done interrupt gives a semaphore instead, so other threads run while
++ * SPI clocks out (single-core display pipeline: render overlaps flush). The
++ * Kconfig gate (!SPI_ESP32_INTERRUPT) keeps this wait in thread context.
++ */
++#if IS_ENABLED(CONFIG_SPI_ESP32_SLEEP_WAIT)
++#define SPI_ESP32_WAIT_DONE(dev, hal) spi_esp32_sleep_wait_done(dev)
++#else
++#define SPI_ESP32_WAIT_DONE(dev, hal)                                                            \
++	while (!spi_hal_usr_is_done(hal)) {                                                      \
++		/* nop */                                                                        \
++	}
++#endif
+ 
+ #define SPI_DMA_RX 0
+ #define SPI_DMA_TX 1
+ 
++/* Halve the per-command chunk after the internal-RAM bounce that a
++ * non-DMA-capable source needs could not be k_malloc'd.
++ *
++ * This is the coupling that brought `mjx.player` (37 KB of AOT text) up to a
++ * frozen panel: WAMR allocates AOT code from the same 64 KB kernel heap, so
++ * the 16 KB bounce a full-screen PSRAM present asks for stopped fitting
++ * while the app itself was running perfectly well. Failing the transfer
++ * instead of shrinking drops the frame forever -- the panel keeps whatever
++ * it last managed to write and the app reads as hung.
++ *
++ * Shrinking costs wire throughput (fewer bytes per user command, more GDMA
++ * restarts -- see the Kconfig help), which is the right trade: a slower
++ * screen beats a dead one. It only ever shrinks, and only after an
++ * allocation has already failed, so a boot that never runs a large app
++ * never pays for it.
++ */
++static void spi_esp32_bounce_shrink(struct spi_esp32_data *data, size_t want)
++{
++	size_t prev = data->dma_chunk;
++
++	if (prev <= SPI_DMA_MIN_BUFFER_SIZE) {
++		return;
++	}
++	data->dma_chunk = MAX(prev / 2u, SPI_DMA_MIN_BUFFER_SIZE);
++	LOG_WRN("no room for a %u B bounce; SPI chunk %u -> %u B for this boot",
++		(unsigned)want, (unsigned)prev, (unsigned)data->dma_chunk);
++}
++
+ static bool spi_esp32_transfer_ongoing(struct spi_esp32_data *data)
+ {
+ 	return spi_context_tx_on(&data->ctx) || spi_context_rx_on(&data->ctx);
+ }
+ 
++#if IS_ENABLED(CONFIG_SPI_ESP32_SLEEP_WAIT)
++/* One per-block completion interrupt: trans_done fires when the whole
++ * user command (all GDMA descriptors of the chunk) has clocked out. Mask
++ * and clear before waking the submitter so the next block re-arms clean.
++ */
++static void IRAM_ATTR spi_esp32_sleep_isr(const void *arg)
++{
++	const struct device *dev = (const struct device *)arg;
++	const struct spi_esp32_config *cfg = dev->config;
++	struct spi_esp32_data *data = dev->data;
++
++	spi_ll_disable_int(cfg->spi);
++	spi_ll_clear_int_stat(cfg->spi);
++	k_sem_give(&data->tx_wait);
++}
++
++static void spi_esp32_sleep_wait_done(const struct device *dev)
++{
++	struct spi_esp32_data *data = dev->data;
++
++	k_sem_take(&data->tx_wait, K_FOREVER);
++}
++#endif
++
+ static inline void spi_esp32_complete(const struct device *dev,
+ 				      struct spi_esp32_data *data __maybe_unused,
+ 				      spi_dev_t *spi, int status)
+@@ -169,15 +242,14 @@ static int IRAM_ATTR spi_esp32_transfer(const struct device *dev)
+ 	spi_hal_dev_config_t *hal_dev = &data->dev_config;
+ 	spi_hal_trans_config_t *hal_trans = &data->trans_config;
+ 	size_t chunk_len_bytes = spi_context_max_continuous_chunk(&data->ctx) * data->dfs;
+-	size_t max_buf_sz =
+-		cfg->dma_enabled ? SPI_DMA_MAX_BUFFER_SIZE : SOC_SPI_MAXIMUM_BUFFER_SIZE;
++	size_t max_buf_sz = cfg->dma_enabled ? data->dma_chunk : SOC_SPI_MAXIMUM_BUFFER_SIZE;
+ 	size_t transfer_len_bytes = MIN(chunk_len_bytes, max_buf_sz);
+ 	size_t transfer_len_frames = transfer_len_bytes / data->dfs;
+ 	size_t bit_len = transfer_len_bytes << 3;
+ 	uint8_t *rx_temp = NULL;
+ 	uint8_t *tx_temp = NULL;
+-	size_t dma_len_tx = MIN(ctx->tx_len * data->dfs, SPI_DMA_MAX_BUFFER_SIZE);
+-	size_t dma_len_rx = MIN(ctx->rx_len * data->dfs, SPI_DMA_MAX_BUFFER_SIZE);
++	size_t dma_len_tx = MIN(ctx->tx_len * data->dfs, max_buf_sz);
++	size_t dma_len_rx = MIN(ctx->rx_len * data->dfs, max_buf_sz);
+ 	bool prepare_data = true;
+ 	int err = 0;
+ 
+@@ -189,6 +261,7 @@ static int IRAM_ATTR spi_esp32_transfer(const struct device *dev)
+ 			tx_temp = k_malloc(dma_len_tx);
+ 			if (!tx_temp) {
+ 				LOG_ERR("Error allocating temp buffer Tx");
++				spi_esp32_bounce_shrink(data, dma_len_tx);
+ 				return -ENOMEM;
+ 			}
+ 			memcpy(tx_temp, &ctx->tx_buf[0], dma_len_tx);
+@@ -200,6 +273,7 @@ static int IRAM_ATTR spi_esp32_transfer(const struct device *dev)
+ 			tx_temp = k_calloc(dma_len_rx, sizeof(uint8_t));
+ 			if (!tx_temp) {
+ 				LOG_ERR("Error allocating zero buffer for RX-only");
++				spi_esp32_bounce_shrink(data, dma_len_rx);
+ 				return -ENOMEM;
+ 			}
+ 		}
+@@ -213,6 +287,7 @@ static int IRAM_ATTR spi_esp32_transfer(const struct device *dev)
+ 			rx_temp = k_calloc(((dma_len_rx << 3) + 31) / 8, sizeof(uint8_t));
+ 			if (!rx_temp) {
+ 				LOG_ERR("Error allocating temp buffer Rx");
++				spi_esp32_bounce_shrink(data, dma_len_rx);
+ 				err = -ENOMEM;
+ 				goto free;
+ 			}
+@@ -332,12 +407,15 @@ static int IRAM_ATTR spi_esp32_transfer(const struct device *dev)
+ 	}
+ 
+ 	/* send data */
++#if IS_ENABLED(CONFIG_SPI_ESP32_SLEEP_WAIT)
++	k_sem_reset(&data->tx_wait);
++	spi_ll_clear_int_stat(cfg->spi);
++	spi_ll_enable_int(cfg->spi);
++#endif
+ 	spi_hal_user_start(hal);
+ 	spi_context_update_tx(&data->ctx, data->dfs, transfer_len_frames);
+ 
+-	while (!spi_hal_usr_is_done(hal)) {
+-		/* nop */
+-	}
++	SPI_ESP32_WAIT_DONE(dev, hal);
+ 
+ #if defined(SOC_GDMA_SUPPORTED)
+ 	if (cfg->dma_enabled) {
+@@ -381,12 +459,16 @@ static void IRAM_ATTR spi_esp32_isr(void *arg)
+ 	const struct device *dev = (const struct device *)arg;
+ 	const struct spi_esp32_config *cfg = dev->config;
+ 	struct spi_esp32_data *data = dev->data;
++	int ret;
+ 
++	/* Same trap as the thread-context loop in transceive(): a transfer
++	 * that bails out before advancing the context would otherwise keep
++	 * spi_esp32_transfer_ongoing() true and spin here forever. */
+ 	do {
+-		spi_esp32_transfer(dev);
+-	} while (spi_esp32_transfer_ongoing(data));
++		ret = spi_esp32_transfer(dev);
++	} while (!ret && spi_esp32_transfer_ongoing(data));
+ 
+-	spi_esp32_complete(dev, data, cfg->spi, 0);
++	spi_esp32_complete(dev, data, cfg->spi, ret);
+ }
+ #endif
+ 
+@@ -427,6 +509,11 @@ static int spi_esp32_init(const struct device *dev)
+ 	const struct spi_esp32_config *cfg = dev->config;
+ 	struct spi_esp32_data *data = dev->data;
+ 
++	/* Widest bounce the heap may be asked for; shrinks on failure (see
++	 * spi_esp32_bounce_shrink). The driver struct is not zero-initialised
++	 * by this point in every configure path, so set it here. */
++	data->dma_chunk = SPI_DMA_MAX_BUFFER_SIZE;
++
+ 	if (!cfg->clock_dev) {
+ 		return -EINVAL;
+ 	}
+@@ -476,6 +563,24 @@ static int spi_esp32_init(const struct device *dev)
+ 	}
+ #endif
+ 
++#if IS_ENABLED(CONFIG_SPI_ESP32_SLEEP_WAIT)
++	k_sem_init(&data->tx_wait, 0, 1);
++	spi_ll_disable_int(cfg->spi);
++	spi_ll_clear_int_stat(cfg->spi);
++
++	err = esp_intr_alloc(cfg->irq_source,
++			ESP_PRIO_TO_FLAGS(cfg->irq_priority) |
++			ESP_INT_FLAGS_CHECK(cfg->irq_flags) | ESP_INTR_FLAG_IRAM,
++			(intr_handler_t)spi_esp32_sleep_isr,
++			(void *)dev,
++			NULL);
++
++	if (err != 0) {
++		LOG_ERR("could not allocate sleep-wait interrupt (err %d)", err);
++		return err;
++	}
++#endif
++
+ 	err = pinctrl_apply_state(cfg->pcfg, PINCTRL_STATE_DEFAULT);
+ 	if (err < 0) {
+ 		LOG_ERR("Failed to configure SPI pins");
+@@ -684,11 +789,20 @@ static int transceive(const struct device *dev,
+ 	spi_ll_set_int_stat(cfg->spi);
+ #else
+ 
++	/* spi_esp32_transfer() only advances the SPI context once it gets as
++	 * far as clocking a chunk out. Every one of its error paths returns
++	 * before that -- most easily hit when the k_malloc() that bounces a
++	 * non-DMA-capable chunk through internal RAM fails -- and leaves
++	 * tx/rx still "on". Ignoring the return value turns one failed
++	 * allocation into an infinite loop: spi_context_tx_on() stays true
++	 * forever, so this do/while retries, re-fails and re-logs at console
++	 * speed and the calling thread never returns. Stop on error and hand
++	 * the status to spi_context_complete() so the caller sees it. */
+ 	do {
+-		spi_esp32_transfer(dev);
+-	} while (spi_esp32_transfer_ongoing(data));
++		ret = spi_esp32_transfer(dev);
++	} while (!ret && spi_esp32_transfer_ongoing(data));
+ 
+-	spi_esp32_complete(dev, data, cfg->spi, 0);
++	spi_esp32_complete(dev, data, cfg->spi, ret);
+ 
+ #endif  /* CONFIG_SPI_ESP32_INTERRUPT */
+ 
+diff --git a/drivers/spi/spi_esp32_spim.h b/drivers/spi/spi_esp32_spim.h
+index de57186ca9f..fee62cd968e 100644
+--- a/drivers/spi/spi_esp32_spim.h
++++ b/drivers/spi/spi_esp32_spim.h
+@@ -66,6 +66,19 @@ struct spi_esp32_data {
+ 	spi_hal_trans_config_t trans_config;
+ 	uint8_t dfs;
+ 	uint32_t clock_source_hz;
++	/* Bytes handed to the peripheral per user command. Starts at
++	 * CONFIG_SPI_ESP32_DMA_CHUNK_SIZE and shrinks (never grows back
++	 * within a boot) when the internal-RAM bounce that a non-DMA-capable
++	 * source needs cannot be k_malloc'd at the current size -- see the
++	 * note at the allocation site in spi_esp32_spim.c. */
++	size_t dma_chunk;
++#if IS_ENABLED(CONFIG_SPI_ESP32_SLEEP_WAIT)
++	/* One DMA block is armed, then the submitting thread sleeps here
++	 * until the trans_done ISR gives it. Sized/used for master mode
++	 * only; CS is handled by spi_context around the whole transaction.
++	 */
++	struct k_sem tx_wait;
++#endif
+ };
+ 
+ #endif /* ZEPHYR_DRIVERS_SPI_ESP32_SPIM_H_ */
+diff --git a/dts/bindings/display/sitronix,st7789v.yaml b/dts/bindings/display/sitronix,st7789v.yaml
+index 8b582061ed6..05b092b81b3 100644
+--- a/dts/bindings/display/sitronix,st7789v.yaml
++++ b/dts/bindings/display/sitronix,st7789v.yaml
+@@ -44,7 +44,31 @@ properties:
+   mdac:
+     type: int
+     required: true
+-    description: Memory Data Access Control
++    description: |
++      Memory Data Access Control. This is the window the panel comes up in,
++      which is the one width/height describe.
++
++  mdac-alt:
++    type: int
++    description: |
++      Memory Data Access Control for the panel's other window, which lets
++      display_set_orientation() switch between the two at runtime instead of
++      making the window a build-time property.
++
++      MV (0x20) transposes the addressing, so a value differing from `mdac`
++      in MV shows the same rectangle with its edges swapped, and one agreeing
++      in MV shows the same edge lengths (a 180 degree turn of that same
++      window). The alternate window is derived from width/height and never
++      declared: two properties that have to agree is one too many.
++
++      Differing in MV is required, not merely expected: every value of
++      display_orientation is a rotation, so a value that agrees with `mdac`
++      about MV is a mirror of the same rectangle and cannot answer any of
++      them. Since nothing can read it, such a node fails the build instead of
++      accepting a switch that changes no aspect.
++
++      Absent means the driver behaves as upstream - set_orientation() accepts
++      NORMAL only and returns -ENOTSUP for anything else.
+ 
+   lcm:
+     type: int
+diff --git a/modules/fatfs/zephyr_fatfs_config.h b/modules/fatfs/zephyr_fatfs_config.h
+index 9896b953e11..b40c3c40394 100644
+--- a/modules/fatfs/zephyr_fatfs_config.h
++++ b/modules/fatfs/zephyr_fatfs_config.h
+@@ -50,6 +50,11 @@
+ #define	FF_MAX_LFN	CONFIG_FS_FATFS_MAX_LFN
+ #endif /* defined(CONFIG_FS_FATFS_MAX_LFN) */
+ 
++#if defined(CONFIG_FS_FATFS_UNICODE)
++#undef FF_LFN_UNICODE
++#define FF_LFN_UNICODE	2	/* UTF-8 in and out of the FS API */
++#endif /* defined(CONFIG_FS_FATFS_UNICODE) */
++
+ #if defined(CONFIG_FS_FATFS_MIN_SS)
+ #undef FF_MIN_SS
+ #define FF_MIN_SS	CONFIG_FS_FATFS_MIN_SS
+diff --git a/subsys/fs/Kconfig.fatfs b/subsys/fs/Kconfig.fatfs
+index 7db3ec3e4f8..aeaa2312ac1 100644
+--- a/subsys/fs/Kconfig.fatfs
++++ b/subsys/fs/Kconfig.fatfs
+@@ -167,6 +167,25 @@ config FS_FATFS_MAX_LFN
+ 	  additional 608 bytes at exFAT enabled.
+ 	  It should be set 255 to support full featured LFN operations.
+ 
++config FS_FATFS_UNICODE
++	bool "UTF-8 file names"
++	help
++	  Exchange long file names with the FS API as UTF-8 instead of
++	  converting them to the OEM code page (FS_FATFS_CODEPAGE).
++
++	  FAT stores long names as UTF-16, so a code page that cannot
++	  represent a name makes the conversion fail, and ELM FAT then
++	  discards the long name entirely and reports the 8.3 short name --
++	  on a card written by another OS that is the raw OEM bytes of the
++	  original, which is not text in any encoding the system speaks.
++	  Names outside the code page (CJK on the default 437, for one) are
++	  therefore unreachable: they cannot be listed and cannot be opened.
++
++	  With this enabled names are UTF-8 end to end, and the code page is
++	  left to the 8.3 short names only.
++	  This option affects FF_LFN_UNICODE defined in ffconf.h, inside
++	  ELM FAT module, by setting its value to 2.
++
+ endif # FS_FATFS_LFN
+ 
+ config FS_FATFS_CODEPAGE

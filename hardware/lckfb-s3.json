@@ -1,0 +1,62 @@
+{
+  "public": {
+    "schema": 1,
+    "id": "lckfb-s3",
+    "product": "aster",
+    "abi": "3.2.0",
+    "system": "zephyr",
+    "cpu": "xtensa",
+    "aot_target": "xtensa",
+    "capabilities": [
+      "display",
+      "touch",
+      "keyboard",
+      "camera",
+      "audio-in",
+      "audio-out",
+      "wifi",
+      "accelerometer",
+      "gyroscope",
+      "filesystem",
+      "storage.app",
+      "rtc",
+      "psram",
+      "framebuffer"
+    ],
+    "display": {
+      "width": 320,
+      "height": 240,
+      "format": "rgb565",
+      "modes": [
+        "landscape",
+        "portrait",
+        "headless"
+      ],
+      "runtime_switch": true
+    },
+    "memory": {
+      "max_linear": 2097152
+    },
+    "deployment": {
+      "transport": "serial",
+      "console": "/dev/ttyUSB0",
+      "data_glob": "/dev/ttyACM*",
+      "package_dir": "/SD:"
+    },
+    "status": "build-supported",
+    "name": "立创开发板 ESP32-S3 实战派"
+  },
+  "build": {
+    "system": "zephyr",
+    "board": "esp32s3_devkitc/esp32s3/procpu",
+    "port": "esp32s3",
+    "conf": [
+      "boards/lckfb_s3/base.conf",
+      "boards/lckfb_s3/display.conf"
+    ],
+    "overlay": [
+      "boards/esp32s3_devkitc_esp32s3_procpu.overlay"
+    ],
+    "kconfig": "ASTER_HW_LCKFB_S3"
+  }
+}

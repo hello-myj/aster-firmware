@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: MIT
+#
+# ESP32-S3 reference port (LCKFB N16R8).
+#
+# Sourced by firmware/Kconfig through `rsource "platform/*/Kconfig"`, and it
+# guards itself. That combination is the whole point of this file's layout: a
+# port is a DIRECTORY plus a choice member in firmware/Kconfig, nothing here
+# knows any other port exists, and adding one never edits a neighbour.
+#
+# Everything below is device SELECTION, and it belongs to the port because a
+# symbol like ASTER_CAMERA only means anything next to the code that drives the
+# sensor -- which lives in this same directory. Whatever this file switches on
+# it also `select`s the matching ASTER_HAS_* bit, the one apps are actually
+# admitted or refused on (see the capabilities menu in firmware/Kconfig), so
+# "advertised a capability but compiled no driver for it" is not expressible
+# here. The capability bits are not Kconfig-ed twice.
+#
+# NOTE: a panel chosen here must match the devicetree overlay in
+# firmware/boards/ (DTS is preprocessed before Kconfig, so the overlay cannot
+# read CONFIG_*). Swapping to a *different* controller IC is port work: point
+# the build at that panel's overlay fragment too. check_models.py cross-checks
+# the panel geometry the overlay pins against the model registry.
+
+if ASTER_PLATFORM_ESP32S3
+
+choice ASTER_ESP32S3_PANEL
+	prompt "LCD panel driver"
+	default ASTER_PANEL_ST7789V
+
+config ASTER_PANEL_NONE
+	bool "No panel (headless: command-line operation)"
+	help
+	  Compiles the port without a display. Apps requiring the "display"
+	  capability are refused at INSTALL (missing capability) and runtime
+	  display calls return ASTER_ENOTSUP. ASTER_HAS_DISPLAY/FRAMEBUFFER follow
+	  this choice automatically.
+
+config ASTER_PANEL_ST7789V
+	bool "ST7789V - 320x240 - RGB565 (4-wire SPI via MIPI-DBI)"
+	select DISPLAY
+	select MIPI_DBI
+	select MIPI_DBI_SPI
+	select ST7789V
+	select ASTER_HAS_DISPLAY
+	select ASTER_HAS_FRAMEBUFFER
+
+endchoice
+
+# Board conf assigns these. A patched st7789v honours them; vanilla Zephyr
+# ignores the values. They must be user-configurable so the board .conf loads.
+config ST7789V_HOLD_CS_AFTER_INIT
+	bool "Hold LCD CS after panel init (no-op unless driver patched)"
+	depends on ST7789V
+
+config ST7789V_CS_ASSERT_AFTER_RESET
+	bool "Assert LCD CS after SW reset (no-op unless driver patched)"
+	depends on ST7789V
+
+config ASTER_ESP32S3_TOUCH
+	bool "Capacitive touch panel (FT5336 over I2C)"
+	select INPUT
+	select INPUT_FT5336
+	select ASTER_HAS_TOUCH
+
+config ASTER_CAMERA
+	bool "Camera (GC0308 DVP) debug support"
+	select VIDEO
+	select ASTER_HAS_CAMERA
+
+config ASTER_AUDIO
+	bool "Audio codec (I2S play + record)"
+	select I2S
+	select ASTER_HAS_AUDIO_IN
+	select ASTER_HAS_AUDIO_OUT
+	help
+	  Reference port: I2S0 plus the board DAC/ADC. Enables the `hw audio`
+	  shell and the App ABI play/record/start entry points (PCM or MP3;
+	  MP3 is decoded in the port). Capability bits ASTER_HAS_AUDIO_IN /
+	  ASTER_HAS_AUDIO_OUT follow this switch.
+
+config ASTER_WIFI
+	bool "Wi-Fi station (scan / join)"
+	select WIFI
+	select NETWORKING
+	select NET_IPV4
+	select NET_UDP
+	select NET_DHCPV4
+	select NET_MGMT
+	select NET_MGMT_EVENT
+	select NET_L2_WIFI_MGMT
+	select ASTER_HAS_WIFI
+	help
+	  Station-mode Wi-Fi for the `hw wifi` shell (scan, connect,
+	  disconnect, status). No App ABI yet, no SoftAP, no credential
+	  storage. Capability bit ASTER_HAS_WIFI follows this switch.
+	  IPv6 is left off to save RAM.
+
+endif # ASTER_PLATFORM_ESP32S3

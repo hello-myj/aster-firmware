@@ -1,0 +1,506 @@
+/*
+ * 立创·实战派 ESP32-S3 V1.0.1
+ * 引脚来源：doc/Netlist_ESP32-S3-V1_0_1_2026-07-22.tel / doc/pinout.md
+ *
+ * 基座板：esp32s3_devkitc/esp32s3/procpu（overlay 覆盖引脚与外设）
+ */
+
+#include <zephyr/dt-bindings/pinctrl/esp32s3-pinctrl.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/display/panel.h>
+#include <zephyr/dt-bindings/mipi_dbi/mipi_dbi.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+	chosen {
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+		zephyr,display = &st7789v;
+		zephyr,touch = &ft6336;
+		zephyr,camera = &lcd_cam_dvp;
+		zephyr,sdhc = &sdhc0;
+		/* Roles the port binds by NAME, not by node label. The port
+		 * used to reach for DT_NODELABEL(qmi8658) / (i2c0) / (i2s0),
+		 * which turns the label into a hard interface between the
+		 * board and the C: a board whose six-axis part is not a
+		 * QMI8658, or whose codec hangs off i2c1, cannot reuse the
+		 * port at all -- and the mismatch arrives as an undefined
+		 * macro rather than as "this board declared no IMU".
+		 *
+		 * Declaring the role here is the one line a new board writes.
+		 * These three are ASTER's own roles, so they carry our vendor
+		 * prefix; `imu0` in aliases below was already there and is
+		 * left alone, but binding through it would have made the IMU
+		 * work one way and the audio buses another. */
+		aster,imu = &qmi8658;
+		aster,audio-i2c = &i2c0;
+		aster,audio-i2s = &i2s0;
+	};
+
+	aliases {
+		/delete-property/ sw0;
+		sw0 = &btn_boot;
+		imu0 = &qmi8658;
+		sdhc0 = &sdhc0;
+		i2c-0 = &i2c0;
+		watchdog0 = &wdt0;
+		lcd-bl = &lcd_bl_gpio;
+	};
+
+	buttons {
+		/delete-node/ button_0;
+
+		btn_boot: button_boot {
+			gpios = <&gpio0 0 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+			label = "BOOT";
+			zephyr,code = <INPUT_KEY_0>;
+		};
+	};
+
+	/* LCD 背光 GPIO42：低电平点亮（立创实战派原理图） */
+	leds {
+		compatible = "gpio-leds";
+
+		lcd_bl_gpio: lcd_bl_gpio {
+			gpios = <&gpio1 10 GPIO_ACTIVE_LOW>;
+			label = "LCD BL";
+		};
+	};
+
+	/*
+	 * ST7789：SPI3 MOSI=40 SCLK=41，DC=GPIO39，CS=PCA9557.0
+	 * RST 与系统 RESET 共用；背光低有效。
+	 */
+	mipi_dbi0: mipi_dbi {
+		compatible = "zephyr,mipi-dbi-spi";
+		dc-gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
+		spi-dev = <&spi3>;
+		write-only;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		st7789v: st7789v@0 {
+			compatible = "sitronix,st7789v";
+			reg = <0>;
+			/* ESP32-S3 SPI 主机上限 80 MHz，已顶满，再高只能换并行/QSPI */
+			mipi-max-frequency = <DT_FREQ_M(80)>;
+			mipi-mode = "MIPI_DBI_MODE_SPI_4WIRE";
+			/* Official 06-lcd uses spi_mode = 2 (CPOL=1, CPHA=0). */
+			mipi-cpol;
+			/* CS rides on the PCA9557 I2C expander (100 kHz):
+			 * historically every edge cost an I2C round-trip
+			 * (~3.6 ms of CS churn per window). FIXED
+			 * 2026-09-08: CS is parked low after reset and
+			 * detached from the SPI driver, so window switches
+			 * no longer touch it (verified 2026-09-10 by the
+			 * ASTER_DISP_TIMING split: write side matches pure
+			 * 80 MHz line rate + per-4092B GDMA restart).
+			 *
+			 * DO NOT add mipi-hold-cs here. Tried on HW
+			 * 2026-09-08: SPI_HOLD_ON_CS itself is fine
+			 * (17.5 -> 20.3 fps) but this panel's init
+			 * sequence needs CS edges to latch SLPOUT/DISPON,
+			 * so the glass stays dark while every SPI write
+			 * still reports success.
+			 *
+			 * Official CS recipe (CONFIG_ST7789V_CS_ASSERT_
+			 * AFTER_RESET): SW reset still uses CS edges,
+			 * then CS is parked low and detached so SPI
+			 * never toggles it again (IDF GPIO_NUM_NC).
+			 * CONFIG_ST7789V_HOLD_CS_AFTER_INIT remains as
+			 * a backup if park-after-reset is off. The
+			 * gpio_pca_series also skips unchanged output
+			 * writes.
+			 *
+			 * write_at still batches swapped pixels into
+			 * multi-row bands (CONFIG_ASTER_DISP_BOUNCE_KB)
+			 * and LVGL only ships dirty regions. */
+			/* LANDSCAPE. The ST7789V GRAM is 240RGBx320 (see the
+			 * binding); MV (0x20) is what transposes it into a
+			 * 320x240 window, and the controller then addresses
+			 * that window directly. So the port keeps
+			 * CONFIG_ASTER_DISPLAY_ROTATION=0 and retains every fast
+			 * path a software rotation would forfeit (band
+			 * direct-send, async flip, panel canvas, pipelining).
+			 * This window is the half that makes MV legal: a
+			 * portrait 240x320 window with MV still set is a
+			 * guaranteed RASET overflow, which is why the 0x60/0xA0
+			 * runs in verification.md row 24 proved only that MV
+			 * was still set -- not that those values are wrong. */
+			width = <320>;
+			height = <240>;
+			x-offset = <0>;
+			y-offset = <0>;
+			vcom = <0x19>;
+			gctrl = <0x35>;
+			vrhs = <0x12>;
+			vdvs = <0x20>;
+			/* MADCTL. With a 320x240 window the landscape choices
+			 * are the MV bit ORed with a mirror: 0x20 (MV), 0x60
+			 * (MX|MV), 0xA0 (MY|MV), 0xE0 (MX|MY|MV). Two of those
+			 * are the true 90/270 rotations, the other two are
+			 * their mirror images; which is which is a mounting
+			 * fact, so it is settled on glass, not in prose. OR in
+			 * 0x08 if red and blue trade places. Verify with
+			 * `hw display colorbar` + `hw display fill 0xF800`. */
+			mdac = <0x60>;
+			/* The panel's OTHER window, which makes this a
+			 * runtime choice instead of a second firmware image:
+			 * 0x00 is the native 240x320 one (MV=0, no mirror).
+			 * The driver derives its 240x320 geometry from the
+			 * width/height above -- MV only transposes, so there
+			 * is nothing here to keep in sync -- and asserts both
+			 * windows at build time. `hw display orient portrait`
+			 * switches; the touch map follows the window by
+			 * itself (display.c s_touch_maps is indexed by it).
+			 *
+			 * The pair is not symmetric in cost: landscape is the
+			 * one the launcher and the UI presets are laid out
+			 * for, and it is what the panel comes up in. This
+			 * property is what makes portrait reachable without
+			 * a rebuild, not a claim that the two are equivalent. */
+			mdac-alt = <0x00>;
+			gamma = <0x01>;
+			/* v4.4.2 binding 变化：pixel-format 属性删除，
+			 * 像素格式改由 Kconfig choice 决定（默认
+			 * ST7789V_RGB565）；COLMOD 寄存器值改从 DT 读
+			 * （required）。0x55 = RGB_65K|FMT_16bit，与旧
+			 * 驱动按 RGB_565 算出的值逐位相同；上游
+			 * esp32s3_eye 同值。 */
+			colmod = <0x55>;
+			lcm = <0x2c>;
+			porch-param = [0c 0c 00 33 33];
+			cmd2en-param = [5a 69 02 01];
+			pwctrl1-param = [a4 a1];
+			pvgam-param = [d0 04 0d 11 13 2b 3f 54 4c 18 0d 0b 1f 23];
+			nvgam-param = [d0 04 0c 11 13 2c 3f 44 51 2f 1f 1f 20 23];
+			ram-param = [00 f0];
+			rgb-param = [cd 08 14];
+		};
+	};
+
+	lvgl_pointer {
+		compatible = "zephyr,lvgl-pointer-input";
+		input = <&ft6336>;
+	};
+
+	zephyr,user {
+		/* PCA9557 控制脚：**按名字取，不按下标**。
+		 *
+		 * 这里原本是一个三元素 io-gpios 数组，C 侧用下标 1 和 2 去取
+		 * PA_EN / DVP_PWDN（下标 0 是 LCD_CS，声明了但没有任何代码读
+		 * 它）。下标是位置约定 —— 板子换一下书写顺序，音频就会去拉
+		 * 摄像头的掉电脚：没有编译错误、没有日志，只是两件事同时坏，
+		 * 而查的时候两边看起来都"没错"。具名之后这个错误写不出来。
+		 *
+		 * C 侧用 GPIO_DT_SPEC_GET_OR(..., {0}) 取：引脚缺失是「这块板
+		 * 没接」这一合法情形，交给既有的 gpio_is_ready_dt() 判空就够
+		 * 了。具名要解决的是「取错脚」，不是「没接脚」，别把后者也变
+		 * 成编译错误。 */
+		pa-en-gpios = <&pca9557 1 GPIO_ACTIVE_HIGH>;
+		cam-pwdn-gpios = <&pca9557 2 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+/* N16R8：16MB Flash + 8MB Octal PSRAM
+ * reg 已给出 flash0 的大小；flash0 是 soc-nv-flash 叶子节点、无子节点，
+ * 不需要 ranges（v4.4.2 起 flash@0 的 #address-cells=2，旧的 3-cell ranges
+ * 会触发 dtc "not evenly divisible" 报错）。
+ */
+&flash0 {
+	reg = <0x0 DT_SIZE_M(16)>;
+};
+
+&psram0 {
+	size = <DT_SIZE_M(8)>;
+};
+
+&uart0 {
+	status = "okay";
+	current-speed = <115200>;
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&pinctrl {
+	i2c0_default: i2c0_default {
+		group1 {
+			pinmux = <I2C0_SDA_GPIO1>,
+				 <I2C0_SCL_GPIO2>;
+			bias-pull-up;
+			drive-open-drain;
+			output-high;
+		};
+	};
+
+	/* LCD SPI3：仅 MOSI + SCLK（无 MISO），与立创例程一致 */
+	spim3_lcd_default: spim3_lcd_default {
+		group1 {
+			pinmux = <SPIM3_SCLK_GPIO41>;
+		};
+
+		group2 {
+			pinmux = <SPIM3_MOSI_GPIO40>;
+			output-low;
+		};
+	};
+
+	/* TF：SDMMC 1-bit — CLK=47 CMD=48 DAT0=21 */
+	sdhc0_default: sdhc0_default {
+		group1 {
+			pinmux = <SDHC0_CLKOUT_GPIO47>,
+				 <SDHC0_CMD_GPIO48>,
+				 <SDHC0_DATA0_GPIO21>;
+			bias-pull-up;
+			output-high;
+		};
+	};
+
+	/*
+	 * GC0308 DVP（立创实战派）：
+	 * XCLK=5 PCLK=7 VSYNC=3 HREF=46
+	 * D0..D7 = 16,18,8,17,15,6,4,9
+	 */
+	lcd_cam_default: lcd_cam_default {
+		group1 {
+			pinmux = <LCD_CAM_CAM_CLK_GPIO5>;
+			output-enable;
+		};
+
+		group2 {
+			pinmux = <LCD_CAM_V_SYNC_CAM_GPIO3>,
+				 <LCD_CAM_H_ENABLE_CAM_GPIO46>,
+				 <LCD_CAM_CAM_PCLK_GPIO7>,
+				 <LCD_CAM_DATA_IN0_GPIO16>,
+				 <LCD_CAM_DATA_IN1_GPIO18>,
+				 <LCD_CAM_DATA_IN2_GPIO8>,
+				 <LCD_CAM_DATA_IN3_GPIO17>,
+				 <LCD_CAM_DATA_IN4_GPIO15>,
+				 <LCD_CAM_DATA_IN5_GPIO6>,
+				 <LCD_CAM_DATA_IN6_GPIO4>,
+				 <LCD_CAM_DATA_IN7_GPIO9>;
+			input-enable;
+			bias-disable;
+		};
+	};
+
+	/*
+	 * ES8311 (DAC) + ES7210 (ADC) 共用 I2S0（立创实战派）：
+	 * MCLK=38 BCLK=14 WS=13 DOUT=45 DIN=12
+	 *
+	 * BCLK/WS 必须走 I2S0_O_*（TX 时钟）。录音时平台层会同时跑 TX
+	 * 静音块，否则 RX-only 不驱动这些脚，ADC 采到全零。
+	 */
+	i2s0_default: i2s0_default {
+		group1 {
+			pinmux = <I2S0_MCLK_GPIO38>,
+				 <I2S0_O_BCK_GPIO14>,
+				 <I2S0_O_WS_GPIO13>,
+				 <I2S0_O_SD_GPIO45>;
+			output-enable;
+		};
+
+		group2 {
+			pinmux = <I2S0_I_SD_GPIO12>;
+			input-enable;
+		};
+	};
+};
+
+&i2c0 {
+	status = "okay";
+	/* 100 kHz：GC0308 SCCB 在 400 kHz 上会探测失败 */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	pinctrl-0 = <&i2c0_default>;
+	pinctrl-names = "default";
+
+	pca9557: pca9557@19 {
+		compatible = "nxp,pca9554";
+		reg = <0x19>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+	};
+
+	/*
+	 * NEUTRAL on purpose -- no swapped-x-y, no inverted-*, no screen-*.
+	 *
+	 * The calibration lives in firmware/platform/esp32s3/display.c now, as
+	 * a table row per display window (see s_touch_maps). Two reasons, both
+	 * about adding hardware rather than about this board:
+	 *
+	 *  - A board's touch calibration is a property of how ITS panel is
+	 *    bonded. Expressing it through Zephyr's properties means every new
+	 *    board has to re-derive their quirks, and those quirks are real:
+	 *    input_touch.c applies inverted-* to the PRE-swap value, and the
+	 *    screen-* / inverted-* pairing __ASSERT is an equality rather than
+	 *    an implication, so a stale inherited pair satisfies it just as
+	 *    well as a correct one (that is exactly how this file's portrait
+	 *    preset broke once -- see the portrait overlay's note). A row in a
+	 *    table has one order, stated, and cannot be half-inherited.
+	 *
+	 *  - The window is not known here. It is a build-time property today,
+	 *    but the point of the table is that it is indexed BY the window, so
+	 *    the day the window becomes settable (S4) the calibration follows it
+	 *    with no devicetree delta at all.
+	 *
+	 * What is left here is only what the devicetree can know: the part and
+	 * its address. Anything below that belongs to the port.
+	 *
+	 * The record of HOW landscape's row was arrived at, since a table row
+	 * carries no argument: the driver hands over (col, row) =
+	 * (REG_P1_Y*, REG_P1_X*), a 【transpose】 (det -1), while the display
+	 * uses mdac=0x60 (MX|MV, det +1), a 【true rotation】 -- so the two
+	 * necessarily differ by one mirror, on exactly one axis. Which axis is
+	 * the digitizer's bonding and cannot be derived, only measured.
+	 * Glass, 2026-09-22: Y is the mirrored one, established by gesture
+	 * bands -- a physical top-edge drag must open the panel and a bottom
+	 * swipe must exit; a wrong axis swaps those two, which an X-mirror
+	 * cannot explain.
+	 */
+	ft6336: ft6336@38 {
+		compatible = "focaltech,ft5336";
+		reg = <0x38>;
+		status = "okay";
+	};
+
+	qmi8658: qmi8658@6a {
+		compatible = "qst,qmi8658a";
+		reg = <0x6a>;
+		status = "okay";
+		accel-fs = <4>;
+		gyro-fs = <512>;
+	};
+
+	/* GC0308：7-bit 地址 0x21，PWDN=PCA9557.2（高=关机） */
+	gc0308: gc0308@21 {
+		compatible = "galaxycore,gc0308";
+		reg = <0x21>;
+		status = "okay";
+		pwdn-gpios = <&pca9557 2 GPIO_ACTIVE_HIGH>;
+	};
+};
+
+&spi2 {
+	status = "disabled";
+};
+
+&spi3 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+	pinctrl-0 = <&spim3_lcd_default>;
+	pinctrl-names = "default";
+	/* CS = PCA9557 IO0，低有效。注意：CS 挂在 100 kHz I2C 扩展器上。
+	 * 不要在面板节点加 mipi-hold-cs。官方时序由
+	 * CONFIG_ST7789V_CS_ASSERT_AFTER_RESET 在复位后把 CS 拉低并摘掉。 */
+	cs-gpios = <&pca9557 0 GPIO_ACTIVE_LOW>;
+	/* GDMA 直读 PSRAM 已判死（CPU/GDMA 并发抢 MSPI 必花屏，见板 conf
+	 * 注释与 docs/verification.md 2026-09-10）。dma-enabled 保留：
+	 * staging 走 Zephyr 上游驱动自带的 CPU -> k_malloc 4KB bounce ->
+	 * GDMA 路径，无需改 west 树。 */
+	dma-enabled;
+	dmas = <&dma 0>, <&dma 1>;
+	dma-names = "rx", "tx";
+};
+
+&i2s0 {
+	status = "okay";
+	pinctrl-0 = <&i2s0_default>;
+	pinctrl-names = "default";
+};
+
+&i2s1 {
+	status = "disabled";
+};
+
+&ledc0 {
+	status = "disabled";
+};
+
+&sdhc {
+	status = "okay";
+
+	sdhc0: sdhc@0 {
+		status = "okay";
+		pinctrl-0 = <&sdhc0_default>;
+		pinctrl-names = "default";
+		max-bus-freq = <DT_FREQ_M(10)>;
+		bus-width = <1>;
+
+		mmc {
+			compatible = "zephyr,sdmmc-disk";
+			disk-name = "SD";
+			status = "okay";
+		};
+	};
+};
+
+&dma {
+	status = "okay";
+};
+
+&lcd_cam {
+	status = "okay";
+	pinctrl-0 = <&lcd_cam_default>;
+	pinctrl-names = "default";
+};
+
+&lcd_cam_dvp {
+	status = "okay";
+	/* 8MHz XCLK + GC0308 PCLK/2：传感器时钟稳定，DVP 带宽 4MB/s */
+	cam-clk = <8000000>;
+	source = <&gc0308>;
+	data-width = <8>;
+};
+
+&i2c1 {
+	status = "disabled";
+};
+
+&uart1 {
+	status = "disabled";
+};
+
+&twai {
+	status = "disabled";
+};
+
+&adc0 {
+	status = "disabled";
+};
+
+&wifi {
+	status = "okay";
+};
+
+&esp32_bt_hci {
+	status = "okay";
+};
+
+/* Native USB-CDC (Serial-JTAG) on the same Type-C port: used by the ASTER
+ * file-transfer service (services/aster_file_svc.c) to ship .mja packages to
+ * the SD card without a card reader. Console/shell stays on uart0/CH340. */
+&usb_serial {
+	status = "okay";
+};
+
+zephyr_udc0: &usb_otg {
+	status = "okay";
+};
+
+&wdt0 {
+	status = "okay";
+};
+
+&trng0 {
+	status = "okay";
+};

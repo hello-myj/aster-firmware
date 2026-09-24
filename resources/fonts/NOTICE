@@ -1,0 +1,20 @@
+打包与推送到 SD 用的源 TTF，放在仓库里，不依赖宿主机 `/usr/share/fonts`。
+
+| 文件 | 用途 | 上游 | 许可 |
+|---|---|---|---|
+| `DroidSansFallbackFull.ttf` | ui.ttf 的基底：CJK + PUA 图标。**注意它是 Android 的 fallback 字体，cmap 不含任何 ASCII 字母/数字** | Android Droid | Apache-2.0（见 `DroidSansFallbackFull.LICENSE`） |
+| `ui.ttf`（构建产物，不入 git） | 唯一上卡字体 `/SD:/mjx/fonts/ui.ttf`：`build_ui_ttf.py` 把 DejaVu Sans 的拉丁字形按 256/2048 缩放嫁接进 Droid，LVGL tiny_ttf 流式渲染 | Droid + DejaVu 合成 | Apache-2.0 + Bitstream Vera |
+
+ABI 2.1 起字体栈统一到 tiny_ttf：不再烘焙 MJXF 子集。`DejaVuSans.ttf` 不再是
+固件里的 rodata 字体源，但 `build_ui_ttf.py` 合成 ui.ttf 时仍取它的拉丁字形，
+许可义务保留如下。
+
+## Bitstream Vera / DejaVu 许可（适用于合成进 ui.ttf 的拉丁字形）
+
+Fonts are (c) Bitstream (see below). DejaVu changes are in public domain.
+Bitstream Vera Fonts Copyright — permission to use, distribute & sell these
+fonts is given, as is permission to make changes, subject to: the copyright
+notice(s) appear in all copies; both notices and permission notice appear in
+supporting documentation; fonts in modified form carry renamed names; the
+names Bitstream/DejaVu not used to promote derived products. THE FONTS ARE
+PROVIDED "AS IS". (Full text: Bitstream Vera License, http://dejavu-fonts.org)
