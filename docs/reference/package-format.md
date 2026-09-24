@@ -1,6 +1,6 @@
-# ASTER App Package Format `.mja` (MJA1)
+# ASTER App Package Format `.ast` (ASTP)
 
-A `.mja` file is a single-container ASTER application package:
+A `.ast` file is a single-container ASTER application package:
 
 ```
 +---------------------------+
@@ -14,7 +14,7 @@ A `.mja` file is a single-container ASTER application package:
 +---------------------------+
 | icon      (optional)      |  launcher tile (not UI widgets)
 +---------------------------+
-| assets    (optional MJR1) |  app bitmaps; hdr_size=72
+| assets    (optional ASTR) |  app bitmaps; hdr_size=72
 +---------------------------+
 ```
 
@@ -25,9 +25,9 @@ offsets point at the first byte of each blob).
 
 | off | size | field |
 |---|---|---|
-| 0 | 4 | magic `"MJA1"` |
+| 0 | 4 | magic `"ASTP"` |
 | 4 | 2 | format version (=1) |
-| 6 | 2 | header size (64 without assets, **72** when MJR1 is present) |
+| 6 | 2 | header size (64 without assets, **72** when ASTR is present) |
 | 8 | 4 | flags (bit0 = SIGNED, bit1 **reserved** (was HAS_UI), bit2 = HAS_ASSETS, others 0) |
 | 12 | 4 | manifest offset |
 | 16 | 4 | manifest length (bytes, JSON) |
@@ -46,8 +46,8 @@ offsets point at the first byte of each blob).
 > **The four icon fields at 48..55 carry no information.** `pack_mja.py` never writes
 > offset 48 (it packs only `icon_off`/`icon_len` at 40/44 and w/h at 52/54, and the
 > w/h arguments are never passed, so they stay 0); the firmware never reads offset 48,
-> and `aster_mja.c` reads 52/54 into `aster_manifest_t.icon_w/icon_h` — which **no consumer
-> uses**. The real icon format lives inside the MJXI blob at its own offset 10; the
+> and `aster_pkg.c` reads 52/54 into `aster_manifest_t.icon_w/icon_h` — which **no consumer
+> uses**. The real icon format lives inside the ASTI blob at its own offset 10; the
 > real dimensions live there too (offsets 6/8).
 >
 > Do not start relying on 52/54: a packer that fills them would be writing a field
@@ -59,23 +59,23 @@ offsets point at the first byte of each blob).
 
 Format version stays **1**. Old 64-byte headers remain valid. The parser accepts `hdr_size == 64 || hdr_size == 72`.
 
-The 8-byte extension is **not** a new MJA version: packages without UI resources still use a 64-byte header so existing unsigned/signed images verify unchanged.
+The 8-byte extension is **not** a new format version: packages without UI resources still use a 64-byte header so existing unsigned/signed images verify unchanged.
 
-## MJR1 asset blob
+## ASTR asset blob
 
 When `assets_len != 0` the blob at `assets_off` is:
 
 ```
-16B header: magic "MJR1", ver=1, file_count u16, reserved 8
+16B header: magic "ASTR", ver=1, file_count u16, reserved 8
 then file_count × 12B: path_off, data_off, data_len  (offsets from blob start)
 then path strings (NUL-terminated) and file bytes, 4-byte padded
 ```
 
-Paths are relative (`icons/clock.bin`), no `..`, no leading `/`. Install extracts to `/SD:/aster/apps/<id>/assets/<path>`. Reinstall deletes the old `assets/` tree first and keeps `data/`. The original `package.mja` is still stored in full (same double-copy as wasm).
+Paths are relative (`icons/clock.bin`), no `..`, no leading `/`. Install extracts to `/SD:/aster/apps/<id>/assets/<path>`. Reinstall deletes the old `assets/` tree first and keeps `data/`. The original `package.ast` is still stored in full (same double-copy as wasm).
 
-App icons use the **MJXI** pixel format (see [gfx-engine.md](gfx-engine.md)). No fonts are
+App icons use the **ASTI** pixel format (see [gfx-engine.md](gfx-engine.md)). No fonts are
 packed: since ABI 2.1 every glyph streams from one TTF on the SD card
-(`S:/aster/fonts/ui.ttf`) through LVGL tiny_ttf, so the `.mja` never carries a font. The
+(`S:/aster/fonts/ui.ttf`) through LVGL tiny_ttf, so the `.ast` never carries a font. The
 firmware does not decode PNG.
 
 AOT target ids: 1 = xtensa-esp32s3, 2 = riscv, 3 = thumb-v7, 4 = cortex-m,
@@ -103,7 +103,7 @@ order because `build.py` inserts the conditional ones only when set):
 }
 ```
 
-**Key contract** (`build.py::manifest_for` writes; `aster_mja.c` reads):
+**Key contract** (`build.py::manifest_for` writes; `aster_pkg.c` reads):
 
 | key | written | read by fw | notes |
 |---|---|---|---|
@@ -121,7 +121,7 @@ order because `build.py` inserts the conditional ones only when set):
 `orientation` is the app saying which way it was laid out. **Absent means "follow
 the panel"**, and absence is the only way to say it: there is no `any` spelling,
 so no typo can silently become a request. A value that is neither of the two
-spellings is **dropped with a warning on the device** (`aster_mja_norm_orientation`
+spellings is **dropped with a warning on the device** (`aster_pkg_norm_orientation`
 returns `ASTER_ORIENT_ANY`), and a dropped key is indistinguishable from one that
 was never there — the app follows the panel instead of failing. That is why
 `verify_mja.py` asserts the spelling at package time, where the typo is still
@@ -145,18 +145,18 @@ done by filename, not by a manifest field (see the AOT paragraph above).
 
 ```
 /SD:/aster/apps/<id>/
-  ├── package.mja        (original copy)
+  ├── package.ast        (original copy)
   ├── app.wasm           (extracted)
   ├── app.aot-<target>   (extracted, optional)
-  ├── icon.bin           (extracted MJXI launcher tile, optional)
+  ├── icon.bin           (extracted ASTI launcher tile, optional)
   ├── manifest.json      (extracted; includes category / orientation when set)
   ├── assets/            (optional)
   └── data/              (app sandbox root, created on first write)
 ```
 
-`app.toml` may set `icon = "icon.bin"` (MJXI packed into the `.mja` icon section) and `category = "game"|"tool"|"system"`, and `orientation = "portrait"|"landscape"`. Install writes the tile to `icon.bin` and copies `category` and `orientation` into the on-disk manifest. The desktop lists apps from the registry and loads `"<id>/icon.bin"`; it does not guess icons from the id string.
+`app.toml` may set `icon = "icon.bin"` (ASTI packed into the `.ast` icon section) and `category = "game"|"tool"|"system"`, and `orientation = "portrait"|"landscape"`. Install writes the tile to `icon.bin` and copies `category` and `orientation` into the on-disk manifest. The desktop lists apps from the registry and loads `"<id>/icon.bin"`; it does not guess icons from the id string.
 
-`aster app install <path.mja>` verifies: magic, header consistency
+`aster app install <path.ast>` verifies: magic, header consistency
 (offsets + lengths inside file), manifest JSON required keys, ABI compat
 (`min <= device abi <= major`), `requires` capabilities present, wasm magic
 `\0asm`, and the **signature** (see below). `pack_mja.py` and the firmware
@@ -185,7 +185,7 @@ its own location, so there is no self-referential field to exclude.
   | `allow-unsigned` (default, 516 KB fw) | install | install | reject `-17 ESIGN` |
   | `require` | reject `-18 EUNSIGNED` | install | reject `-17 ESIGN` |
   `off` links out all of PSA (zero cost); the other two add ~68 KB. The gate
-  runs in `aster_mja_install_file` before any byte is written to the app dir;
+  runs in `aster_pkg_install_file` before any byte is written to the app dir;
   boot-time scanning of already-installed apps does not re-verify (once on
   disk, the install gate already passed). A `ASTER_ENOTSUP`-free PSA entropy
   source (TRNG) is required — selected automatically via Kconfig.

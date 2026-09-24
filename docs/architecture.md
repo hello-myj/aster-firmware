@@ -6,7 +6,7 @@
 
 固件拥有设备功能、系统资源和运行时。SDK 拥有 APP API 副本、应用库、工具链与部署工具。固件的 `tools/export_contract.py` 输出 ZIP，SDK 的 `tools/import_contract.py` 显式校验导入；正常编译只读取各自仓库内容。
 
-接口使用 `aster_*` 和固定宽度 ABI 类型。版本沿用原实现的 3.2，但命名空间和产品身份已改变，旧 MJX 二进制需重编。容器和数据格式的 MJA1、MJXI、cpfont 标识保留。
+接口使用 `aster_*` 和固定宽度 ABI 类型。命名空间、产品身份和固定宽度标识都已改为 Aster：ASTP 包、ASTI 图标、ASTR 资源块、ASTERFS 文件传输协议。旧 MJX 拼写一律不再接受（改名前的包和固件互相拒绝），旧 APP 需重新编译。当前 ABI 为 3.3。
 
 ## 硬件型号与工作模式
 

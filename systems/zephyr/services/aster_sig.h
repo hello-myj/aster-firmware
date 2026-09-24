@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * .mja package signature verification (ECDSA-P256 / SHA-256).
+ * .ast package signature verification (ECDSA-P256 / SHA-256).
  *
  * Layout: when header.flags bit0 (ASTER_FLAG_SIGNED) is set, the LAST 64 bytes
  * of the file are a raw r||s ECDSA signature. The signed region is every byte

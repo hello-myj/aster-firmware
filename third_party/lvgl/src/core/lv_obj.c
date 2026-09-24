@@ -1178,7 +1178,7 @@ static void lv_obj_children_add_state(lv_obj_t * obj, lv_state_t state)
     for(uint32_t i = 0; i < child_count; i++) {
         lv_obj_t * child = lv_obj_get_child(obj, i);
         if(child) {
-            /* MJX-PATCH: STATE_TRICKLE is transitive (see PATCHES.md) */
+            /* ASTER-PATCH: STATE_TRICKLE is transitive (see PATCHES.md) */
             lv_state_t new_state = child->state | state;
             if(child->state != new_state) {
                 update_obj_state(child, new_state);
@@ -1200,7 +1200,7 @@ static void lv_obj_children_remove_state(lv_obj_t * obj, lv_state_t state)
     for(uint32_t i = 0; i < child_count; i++) {
         lv_obj_t * child = lv_obj_get_child(obj, i);
         if(child) {
-            /* MJX-PATCH: STATE_TRICKLE is transitive (see PATCHES.md) */
+            /* ASTER-PATCH: STATE_TRICKLE is transitive (see PATCHES.md) */
             lv_state_t new_state = child->state & (~state);
             if(child->state != new_state) {
                 update_obj_state(child, new_state);

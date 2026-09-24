@@ -5,9 +5,11 @@ Project-owned code was refactored from the local MJX project at commit
 The original project was not modified. See LICENSE for the retained license.
 
 Aster renames the application namespace, separates repositories, relocates dependencies,
-and adds independently versioned contract/target distribution. Fixed-width MJA1/MJXI,
-cpfont and file-transfer wire markers preserve their format names; Aster product/target
-checks and the new API names require rebuilding old applications.
+and adds independently versioned contract/target distribution. The fixed-width markers
+were renamed with it: ASTP packages, ASTI icons, ASTR asset blobs and the ASTERFS
+file-transfer protocol. None of the pre-rename MJX spellings are accepted, so packages
+built before the rename -- and firmware flashed before it -- are rejected on sight;
+old applications must be rebuilt.
 
 Third-party source, binary and asset license notices are retained at their locations.
 Firmware includes WAMR (Apache-2.0 with LLVM exception), LVGL (MIT), minimp3 (CC0),

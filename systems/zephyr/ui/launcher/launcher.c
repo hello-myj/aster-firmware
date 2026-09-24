@@ -359,7 +359,7 @@ static lv_obj_t *status_dot(lv_obj_t *parent, int x, int y)
 	return o;
 }
 
-/* 16 B MJXI header + A8 payload in rodata -> LVGL descriptor. Same
+/* 16 B ASTI header + A8 payload in rodata -> LVGL descriptor. Same
  * validation as the on-disk path: a malformed blob leaves the descriptor
  * zeroed, so the image widget finds no decoder and draws nothing instead of
  * walking a geometry read out of the payload. */
@@ -448,7 +448,7 @@ static int decode_app_icon(const char *app_id, lv_image_dsc_t *dsc)
 		break;
 	case ASTER_ICON_CF_RGB565A8:
 		/* LVGL locates the alpha plane at data + stride * h, which is
-		 * exactly where MJXI packs it (lv_image_decoder.c,
+		 * exactly where ASTI packs it (lv_image_decoder.c,
 		 * img_width_to_stride: RGB565A8 strides at w * 2). */
 		cf = LV_COLOR_FORMAT_RGB565A8;
 		stride = (uint32_t)h.w * 2u;

@@ -26,7 +26,7 @@ SDK/示例应用、PC 工具与文档。
 | `sdk/toolchain/wamrc` | WAMR AOT 编译器（xtensa LLVM 分支构建） | Apache-2.0 WITH LLVM-exception | 由 `firmware/modules/wamr/wamr-compiler` 源码构建 |
 | `sdk/toolchain/binaryen/bin/wasm-opt` | binaryen 130 | Apache-2.0 WITH LLVM-exception | 可选体积优化；上游 <https://github.com/WebAssembly/binaryen> |
 | `sdk/vendor/lvgl/` | LVGL 9.5.0（仅保留头文件与所需 .c，`prune_src.sh` 可复现） | MIT | 系统 UI 图形库。ABI 3.0 起只由固件侧 LVGL 底座使用（桌面 launcher + 字体池 + screenshot），guest app 不再链接。上游 <https://lvgl.io>，`LICENCE.txt` 原样携带 |
-| `sdk/assets/icons/lucide/` | Lucide 图标（离线渲染为 MJXI `.bin`，作 app 包根 `icon.bin` 桌面瓦片） | ISC（MIT 兼容） | 仅取矢量图形，逐文件上游头注明；`NOTICE` 随目录携带 |
+| `sdk/assets/icons/lucide/` | Lucide 图标（离线渲染为 ASTI `.bin`，作 app 包根 `icon.bin` 桌面瓦片） | ISC（MIT 兼容） | 仅取矢量图形，逐文件上游头注明；`NOTICE` 随目录携带 |
 | `firmware/modules/prettypoly/pretty-poly.h` | pretty-poly — 超采样多边形光栅器（tile 式，X1/X4/X16 抗锯齿） | MIT | 本地打补丁：分配钩子改用 2 KB bump arena、`qsort`→插入排序、`M_PI` 兜底（picolibc）。上游 <https://github.com/lowfatcode/pretty-poly> |
 | `sdk/assets/fonts/DroidSansFallbackFull.ttf` | Android Droid Sans Fallback（**仅 CJK + PUA，无 ASCII**，是合成基底） | Apache-2.0 | 许可原文 `DroidSansFallbackFull.LICENSE`；上游 <https://android.googlesource.com/platform/frameworks/base/+/master/data/fonts/> |
 | `sdk/assets/fonts/ui.ttf`（构建产物，不入 git） | 全局唯一界面字体：`build_ui_ttf.py` 将 DejaVu Sans 拉丁字形嫁接进 Droid，推送为 `/SD:/aster/fonts/ui.ttf`，LVGL tiny_ttf 流式渲染（cpfont 兜底与码点来源）；系统桌面与 guest app 的 gfx 文字共用 | Apache-2.0 + Bitstream Vera（字形级混合） | DejaVu 义务见 `sdk/assets/fonts/NOTICE` |

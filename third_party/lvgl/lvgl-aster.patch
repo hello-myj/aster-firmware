@@ -1,13 +1,13 @@
-diff --git a/sdk/vendor/lvgl/src/core/lv_obj.c b/sdk/vendor/lvgl/src/core/lv_obj.c
+diff --git a/third_party/lvgl/src/core/lv_obj.c b/third_party/lvgl/src/core/lv_obj.c
 index 3ba67b9..b4b40a2 100644
---- a/sdk/vendor/lvgl/src/core/lv_obj.c
-+++ b/sdk/vendor/lvgl/src/core/lv_obj.c
+--- a/third_party/lvgl/src/core/lv_obj.c
++++ b/third_party/lvgl/src/core/lv_obj.c
 @@ -1178,7 +1178,12 @@ static void lv_obj_children_add_state(lv_obj_t * obj, lv_state_t state)
      for(uint32_t i = 0; i < child_count; i++) {
          lv_obj_t * child = lv_obj_get_child(obj, i);
          if(child) {
 -            lv_obj_add_state(child, state);
-+            /* MJX-PATCH: STATE_TRICKLE is transitive (see PATCHES.md) */
++            /* ASTER-PATCH: STATE_TRICKLE is transitive (see PATCHES.md) */
 +            lv_state_t new_state = child->state | state;
 +            if(child->state != new_state) {
 +                update_obj_state(child, new_state);
@@ -21,7 +21,7 @@ index 3ba67b9..b4b40a2 100644
          lv_obj_t * child = lv_obj_get_child(obj, i);
          if(child) {
 -            lv_obj_remove_state(child, state);
-+            /* MJX-PATCH: STATE_TRICKLE is transitive (see PATCHES.md) */
++            /* ASTER-PATCH: STATE_TRICKLE is transitive (see PATCHES.md) */
 +            lv_state_t new_state = child->state & (~state);
 +            if(child->state != new_state) {
 +                update_obj_state(child, new_state);

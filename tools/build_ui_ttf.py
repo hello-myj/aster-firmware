@@ -10,8 +10,8 @@
 #
 #   python3 tools/build_ui_ttf.py [--droid PATH] [--dejavu PATH]
 #
-# Output: resources/fonts/ui.ttf  (pushed to /SD:/aster/fonts/ui.ttf by
-# aster_deploy.ensure_ui_ttf).
+# Output: resources/fonts/ui.ttf -- an intermediate only. build_cpfont.py bakes
+# it into the on-card ui_<px>.cpfont faces (resources/fonts/NOTICE).
 
 import argparse
 import copy

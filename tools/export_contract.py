@@ -10,6 +10,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def abi_version():
+    """The ABI triple, read from the header that defines it. Derived rather
+    than restated: the bundle's api.json, lock.json and the default output
+    filename all have to agree with system.h, and a second spelling of the
+    number is a second thing to forget."""
+    version = (ROOT / "contract/include/aster/system.h").read_text()
+    return ".".join(re.search(r'#define\s+ASTER_ABI_' + key + r'\s+(\d+)', version)[1]
+                    for key in ("MAJOR", "MINOR", "PATCH"))
+
+
 def bundle_files():
     files = {str(p.relative_to(ROOT / "contract")): p.read_bytes()
              for p in (ROOT / "contract/include").rglob("*.h")}
@@ -20,11 +30,10 @@ def bundle_files():
     names = set(re.findall(r'REG_NATIVE_FUNC\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,', table))
     names.update(re.findall(r'\{\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,', table))
     version = (ROOT / "contract/include/aster/system.h").read_text()
-    abi = ".".join(re.search(r'#define\s+ASTER_ABI_' + key + r'\s+(\d+)', version)[1]
-                   for key in ("MAJOR", "MINOR", "PATCH"))
+    abi = abi_version()
     api = {"schema": 1, "product": "aster", "abi": abi,
            "imports": {"env": sorted(names | signatures.keys())},
-           "signatures": signatures, "package_format": "MJA1",
+           "signatures": signatures, "package_format": "ASTP",
            "runtime": {"name": "wamr", "version": "2.4.3"},
            "aot_backends": {"xtensa": "xtensa-esp32s3", "riscv32": "riscv",
                             "thumbv7": "thumb-v7", "thumbv8": "cortex-m", "x86_64": "x86-64"}}
@@ -44,7 +53,8 @@ def bundle_files():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=ROOT / "dist/aster-contract-3.2.0.zip")
+    parser.add_argument("--output", type=Path,
+                        default=ROOT / f"dist/aster-contract-{abi_version()}.zip")
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as archive:

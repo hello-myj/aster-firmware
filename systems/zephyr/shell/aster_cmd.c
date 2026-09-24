@@ -301,7 +301,7 @@ static int cmd_app_list(const struct shell *sh, size_t argc, char **argv)
 static int cmd_app_install(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc < 2) {
-		shell_error(sh, "usage: aster app install <path.mja>");
+		shell_error(sh, "usage: aster app install <path.ast>");
 		return -EINVAL;
 	}
 	int err = aster_app_mgr_install(argv[1]);
@@ -462,7 +462,7 @@ static int cmd_app_info(const struct shell *sh, size_t argc, char **argv)
 		 * what the runtime will actually act on, and the two are read
 		 * through different parsers (manifest JSON here, the flattened
 		 * on-disk line in the scan). */
-		const char *on = aster_mja_orientation_name(r->want_orientation);
+		const char *on = aster_pkg_orientation_name(r->want_orientation);
 		shell_print(sh, "orient:   %s", on ? on : "any (follows panel)");
 	}
 	return 0;
@@ -882,7 +882,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_sys,
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_app,
 	SHELL_CMD(list, NULL, "installed apps", cmd_app_list),
-	SHELL_CMD_ARG(install, NULL, "install <path.mja>", cmd_app_install, 2, 0),
+	SHELL_CMD_ARG(install, NULL, "install <path.ast>", cmd_app_install, 2, 0),
 	SHELL_CMD_ARG(uninstall, NULL, "uninstall <id>", cmd_app_uninstall, 2, 0),
 	SHELL_CMD_ARG(start, NULL, "start <id>", cmd_app_start, 2, 0),
 	SHELL_CMD_ARG(stop, NULL, "stop <id>", cmd_app_stop, 2, 0),

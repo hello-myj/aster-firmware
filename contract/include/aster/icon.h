@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: MIT
- * MJXI icon blob (16 B header + packed pixel payload), shared definition.
+ * ASTI icon blob (16 B header + packed pixel payload), shared definition.
  *
  * Not an app-facing import: this is the container the firmware reads for
  * launcher tiles, kept here (with the rest of the ABI) because producer
  * (sdk/tools/icon_convert.py) and consumers must agree byte for byte.
  *
- * MJXI is the on-disk pixel format of every icon that reaches the panel: app
- * drawer tiles (/SD:/aster/apps/<id>/icon.bin, extracted out of the .mja icon
+ * ASTI is the on-disk pixel format of every icon that reaches the panel: app
+ * drawer tiles (/SD:/aster/apps/<id>/icon.bin, extracted out of the .ast icon
  * section) and the built-in launcher's chrome icons (rodata, baked by
  * sdk/tools/launcher_font_gen.py). Both are produced by
  * sdk/tools/icon_convert.py; this header is the single source of truth for
@@ -15,7 +15,7 @@
  * Layout, little-endian on disk:
  *
  *   off  sz  field
- *    0    4  magic "MJXI" (4 raw bytes)
+ *    0    4  magic "ASTI" (4 raw bytes)
  *    4    2  version (ASTER_ICON_VERSION)
  *    6    2  width in pixels
  *    8    2  height in pixels
@@ -28,7 +28,7 @@
  *   A8        w * h
  *   RGB565    w * h * 2, u16 little-endian
  *   RGB565A8  w * h * 3: a full RGB565 plane, then a full A8 plane
- * Bytes past the payload are ignored (the .mja section is padded to 4).
+ * Bytes past the payload are ignored (the .ast section is padded to 4).
  *
  * Do NOT overlay a packed struct on the blob, and do NOT compare the magic
  * as a u32: the blob is a little-endian byte stream, so a big-endian host
@@ -44,7 +44,7 @@
 #include "error.h"
 
 /* Header */
-#define ASTER_ICON_MAGIC        "MJXI"
+#define ASTER_ICON_MAGIC        "ASTI"
 #define ASTER_ICON_MAGIC_LEN    4u
 #define ASTER_ICON_HDR_SIZE     16u
 #define ASTER_ICON_VERSION      1u
@@ -130,8 +130,8 @@ static inline uint32_t aster_icon_payload_size(uint8_t cf, uint16_t w, uint16_t 
 	return n > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)n;
 }
 
-/* Parse + validate one MJXI blob. `buf` is the blob as stored (the whole
- * .mja icon section, the contents of icon.bin, or a rodata icon array) and
+/* Parse + validate one ASTI blob. `buf` is the blob as stored (the whole
+ * .ast icon section, the contents of icon.bin, or a rodata icon array) and
  * `len` the bytes available at it; bytes past header+payload are allowed.
  * On ASTER_OK *out (when non-NULL) receives the host-order fields and the
  * payload starts at buf + ASTER_ICON_HDR_SIZE.

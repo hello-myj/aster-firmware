@@ -16,7 +16,7 @@
 
 #include <lvgl.h>
 
-/* LVGL image-asset budget (MJXI app icons; font metrics live in dedicated
+/* LVGL image-asset budget (ASTI app icons; font metrics live in dedicated
  * PSRAM allocations in font_sd.c, not here). cpfont files reach ~5 MB. */
 #define ASTER_UI_ASSET_BUDGET   (256u * 1024u)
 #define ASTER_UI_ASSET_FILE_MAX (32u * 1024u * 1024u)

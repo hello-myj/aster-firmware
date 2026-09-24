@@ -135,7 +135,7 @@ static struct {
 static void orient_lease_take(const aster_app_rec_t *rec)
 {
 	const int want = rec->want_orientation;
-	const char *name = aster_mja_orientation_name((int8_t)want);
+	const char *name = aster_pkg_orientation_name((int8_t)want);
 	int cur, err;
 
 	if (!name) {
@@ -161,13 +161,13 @@ static void orient_lease_take(const aster_app_rec_t *rec)
 		 * mystery on the glass. */
 		LOG_WRN("app %s declared %s, which this panel refused (%d); "
 			"starting on %s", rec->id, name, err,
-			aster_mja_orientation_name((int8_t)cur));
+			aster_pkg_orientation_name((int8_t)cur));
 		return;
 	}
 	orient_lease.from = (int8_t)cur;
 	orient_lease.to = (int8_t)want;
 	LOG_INF("app %s: window -> %s (was %s)", rec->id, name,
-		aster_mja_orientation_name((int8_t)cur));
+		aster_pkg_orientation_name((int8_t)cur));
 }
 
 /* Give the window back. Called on BOTH ways out of worker_fn -- an app that
@@ -195,16 +195,16 @@ static void orient_lease_release(void)
 		 * orient`). That is newer intent than the lease, and undoing
 		 * it would look like the shell command silently failed. */
 		LOG_INF("orientation: left as %s; the panel was turned while "
-			"the %s lease was held", aster_mja_orientation_name((int8_t)cur),
-			aster_mja_orientation_name(set_to));
+			"the %s lease was held", aster_pkg_orientation_name((int8_t)cur),
+			aster_pkg_orientation_name(set_to));
 		return;
 	}
 	if (aster_plat_display_orientation_set(back_to)) {
 		LOG_ERR("orientation: could not restore the %s window",
-			aster_mja_orientation_name(back_to));
+			aster_pkg_orientation_name(back_to));
 	} else {
 		LOG_INF("orientation: window -> %s",
-			aster_mja_orientation_name(back_to));
+			aster_pkg_orientation_name(back_to));
 	}
 }
 

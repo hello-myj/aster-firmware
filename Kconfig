@@ -406,8 +406,8 @@ choice ASTER_SYSTEM_UI_PKG
 	  screen instead of the built-in native launcher. The reference
 	  "aster.launcher.desktop" package has been folded into the firmware
 	  (CONFIG_ASTER_LAUNCHER_NATIVE); pick this only to point the home at
-	  your own launcher .mja (each screen size / color depth / theme is
-	  its own .mja). Layout lives in the package, not in this Kconfig.
+	  your own launcher .ast (each screen size / color depth / theme is
+	  its own .ast). Layout lives in the package, not in this Kconfig.
 
 config ASTER_SYSTEM_UI_CUSTOM
 	bool "Custom app id..."
@@ -532,7 +532,7 @@ config ASTER_CPU_ARCH_ID
 	default 3 if ASTER_CPU_ARCH_RISCV
 	default 4 if ASTER_CPU_ARCH_X86
 
-# ASTER_AOT_TARGET_* (see aster_mja.h): the target this platform prefers for AOT.
+# ASTER_AOT_TARGET_* (see aster_pkg.h): the target this platform prefers for AOT.
 # Derived from the chosen CPU arch where the mapping is unambiguous. Arm has
 # both thumb-v7 and cortex-m encodings, so it is left 0 (no AOT extraction)
 # unless the board port sets CONFIG_ASTER_AOT_TARGET_ID explicitly.
@@ -667,11 +667,11 @@ endmenu
 menu "Package security"
 
 choice ASTER_SIGNATURE_POLICY
-	prompt ".mja signature verification policy"
+	prompt ".ast signature verification policy"
 	default ASTER_SIGNATURE_ALLOW_UNSIGNED
 	help
 	  Selects how the installer treats ECDSA-P256/SHA-256 signatures in
-	  MJA1 packages. The signature covers every byte of the file except the
+	  ASTP packages. The signature covers every byte of the file except the
 	  signature block itself (header reserved fields carry sig_off/len).
 
 config ASTER_SIGNATURE_OFF

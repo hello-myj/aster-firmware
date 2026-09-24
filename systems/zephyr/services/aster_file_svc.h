@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: MIT
  * ASTER file-transfer service on the native USB-CDC (Serial-JTAG) port.
  *
- * V1 has no other bulk transport for .mja packages when the SD card is not
+ * V1 has no other bulk transport for .ast packages when the SD card is not
  * reachable from the PC (no card reader / WSL). A tiny line protocol on
  * /dev/ttyACMx complements the CH340 shell:
  *
- *   host -> device:  "MJXPUT <abs-path> <len> <crc32-hex> [resume-off]\r\n"
+ *   host -> device:  "ASTERPUT <abs-path> <len> <crc32-hex> [resume-off]\r\n"
  *                    (header alone; NO body yet)
  *   device -> host:  "ACK <off>\r\n"                   go-token: device is
  *                      ready; stream <len - off> raw bytes starting at byte
@@ -25,8 +25,8 @@
  *                    | "ERR retry\r\n"   crc/length mismatch: .part discarded,
  *                      restart at resume-off=0 (whole file)
  *                    | "ERR <code>\r\n"  hard error (bad path, ENODEV, ...)
- *   host -> device:  "MJXPING\r\n"
- *   device -> host:  "PONG sd=<0|1>\r\n"
+ *   host -> device:  "ASTERPING\r\n"
+ *   device -> host:  "PONG sd=<0|1> product=<id> target=<id> abi=<n.n> ...\r\n"
  *
  * Because the host is gated on every ACK, the device never has to drain a
  * rejected or aborted body: on the gated path there is no pipelined binary in
@@ -36,7 +36,7 @@
  * channel: the line reader accepts only buffers that can still become a
  * command and discards anything else as it arrives (cdc_read_line, CMD_PREFIX),
  * so the next command is answered normally instead of being glued to the
- * debris. Without that, "abcd" + "MJXPING" arrived as one line, was answered
+ * debris. Without that, "abcd" + "ASTERPING" arrived as one line, was answered
  * -EINVAL, and the reply the host wanted came up to LINE_TMO_MS (30 s) late.
  * The whole-file crc32 is recomputed
  * from the on-disk .part, so a transfer assembled across several resumed

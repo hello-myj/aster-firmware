@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: MIT
- * .mja package parser (docs/mja-format.md).
+ * .ast package parser (docs/package-format.md).
  */
-#ifndef ASTER_MJA_H
-#define ASTER_MJA_H
+#ifndef ASTER_PKG_H
+#define ASTER_PKG_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -10,9 +10,9 @@
 #include <aster/error.h>
 #include <aster/display.h>
 
-#define ASTER_MJA_MAGIC   "MJA1"
-#define ASTER_MJA_HDRSIZE 64
-#define ASTER_MJA_HDRSIZE_ASSETS 72
+#define ASTER_PKG_MAGIC   "ASTP"
+#define ASTER_PKG_HDRSIZE 64
+#define ASTER_PKG_HDRSIZE_ASSETS 72
 
 /* Capacity of the NORMALIZED manifest that install writes and the registry
  * reads. One number, because three separate buffers have to agree on it and
@@ -23,9 +23,9 @@
  * that IS listed as ASTER_ENOENT. Fix overflow here, never at a call site. */
 #define ASTER_MANIFEST_MAX 832
 
-#define ASTER_MJA_FLAG_SIGNED  1u
-/* bit1 reserved: was ASTER_MJA_FLAG_HAS_UI (UIB1 ui.bin), dropped in ABI 3.0 */
-#define ASTER_MJA_FLAG_ASSETS  4u
+#define ASTER_PKG_FLAG_SIGNED  1u
+/* bit1 reserved: was ASTER_PKG_FLAG_HAS_UI (UIB1 ui.bin), dropped in ABI 3.0 */
+#define ASTER_PKG_FLAG_ASSETS  4u
 
 #define ASTER_AOT_TARGET_NONE      0u
 #define ASTER_AOT_TARGET_XTENSA    1u
@@ -43,7 +43,7 @@
  * spell it: absence is the only form. Deliberate, because the alternative
  * ("any"/"auto"/"default" all being valid) is a vocabulary in which a typo
  * silently becomes a request. A misspelled value is dropped with a warning
- * instead (aster_mja_norm_orientation) -- an app that asked to be pinned must
+ * instead (aster_pkg_norm_orientation) -- an app that asked to be pinned must
  * not quietly get the other orientation.
  *
  * NOTE: 0 is ASTER_ORIENT_PORTRAIT, so a struct that was memset to zero does
@@ -80,12 +80,12 @@ typedef struct {
 } aster_manifest_t;
 
 /* Parse + validate header from an in-memory image. Sections returned. */
-int aster_mja_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
+int aster_pkg_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 		  const uint8_t **wasm, size_t *wasm_len,
 		  const uint8_t **aot, size_t *aot_len, uint32_t *aot_target);
 
 /* Install a package file into /SD:/aster/apps/<id>. Validates ABI + caps. */
-int aster_mja_install_file(const char *src_path);
+int aster_pkg_install_file(const char *src_path);
 
 /* Minimal JSON helpers (objects are flat-ish; nested one level allowed) */
 int aster_json_str(const char *json, const char *key, char *out, size_t n);
@@ -94,14 +94,14 @@ int aster_json_str_array(const char *json, const char *key, char arr[][24], int 
 /* extract a nested object body into out (caller-owned buf) */
 int aster_json_obj(const char *json, const char *key, char *out, size_t n);
 /* Copy src if it is game/tool/system; otherwise empty. */
-void aster_mja_norm_category(const char *src, char *dst, size_t n);
+void aster_pkg_norm_category(const char *src, char *dst, size_t n);
 /* "portrait"/"landscape" -> ASTER_ORIENT_x; anything else, including no key at
  * all, -> ASTER_ORIENT_ANY. Callers that had a KEY and got ASTER_ORIENT_ANY back
  * should log it: that is a package asking for something this build does not
  * understand, which is worth saying out loud once at install time. */
-int8_t aster_mja_norm_orientation(const char *src);
+int8_t aster_pkg_norm_orientation(const char *src);
 /* ASTER_ORIENT_x -> the manifest spelling, ASTER_ORIENT_ANY -> NULL. The inverse
  * of the above, so the string vocabulary exists in exactly one file. */
-const char *aster_mja_orientation_name(int8_t o);
+const char *aster_pkg_orientation_name(int8_t o);
 
 #endif

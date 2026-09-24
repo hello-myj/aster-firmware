@@ -1,12 +1,27 @@
 # ASTER ABI Specification
 
-Status: **3.2 is the current release** (additive over the 3.0 breaking release) —
-the wasm-side widget runtime (`aster/ui.h`, `ui.bin`, `ASTER_EVENT_UI`) was deleted
+Status: **3.3 is the current release**. No `aster_*` API changed: 3.3 renames the
+fixed-width container and wire markers to their Aster spellings (ASTP packages,
+ASTI icons, ASTR asset blobs, ASTERFS transfer). That break is at the byte level,
+not the API level -- the "breaking changes bump major" rule below governs the API
+surface -- and it announces itself: a pre-rename package fails the magic check on
+install, and a pre-rename host fails the ASTERFS handshake. The
+last API-level change was 3.2, additive over the 3.0 breaking release — the
+wasm-side widget runtime (`aster/ui.h`, `ui.bin`, `ASTER_EVENT_UI`) was deleted
 outright; guest apps now draw only through the gfx engine
 ([gfx-engine.md](gfx-engine.md)). Additive changes bump minor; breaking changes
 require a major bump. The changelog below stays for history; symbols removed in
 3.0 (and 2.0) are listed in their entry and no longer appear in the §3 tables.
 
+> **3.3（标识改名，2026-09）**：`aster_*` API 一行未动。改的是固定宽度标识——
+> 包魔数 `MJA1`→`ASTP`、图标魔数 `MJXI`→`ASTI`、资源块魔数 `MJR1`→`ASTR`、
+> 传输记号 `MJX{PING,PUT,FS}`→`ASTER{PING,PUT,FS}`，包扩展名 `.mja`→`.ast`，
+> 板卡标识 `mjgame.esp32s3.lckfb`→`aster.esp32s3.lckfb`。**旧包在安装时挂在
+> magic 校验上，旧主机挂在 ASTERFS 握手上**——两侧都是拒绝，不是误解析。
+> 已装的旧包需要重编重装；固件需重烧。之所以是 minor 而不是 major：本文件的
+> 「破坏性 bump major」管的是 API 面，而这里面上什么都没变，格式版本
+> （`fmt_ver`, 见 [package-format.md](package-format.md)）也没有变。
+>
 > **3.2（增量，2026-09）**：新增 `aster_audio_get_info`（`audio.h`），**并删除**
 > `ASTER_AUDIO_RATE` / `_CHANNELS` / `_BITS` 三个宏（源码级破坏，但**报文兼容**
 > —— 树内与所有已发布的 app 都没引用过它们）。理由：这三个数是**板级事实**
@@ -60,7 +75,7 @@ require a major bump. The changelog below stays for history; symbols removed in
 > Guest app 的界面只有一条路径：自己持有 RGB565 surface + **gfx 命令引擎**
 > （[gfx-engine.md](gfx-engine.md)）。系统桌面不走 app ABI（固件内置 LVGL
 > launcher），不受影响。
-> 包格式：`.mja` 头 56..63 字节改为保留位（必须 0），`flags` bit1 保留；
+> 包格式：`.ast` 头 56..63 字节改为保留位（必须 0），`flags` bit1 保留；
 > `CONFIG_ASTER_UI_RUNTIME` → `CONFIG_ASTER_LVGL`（语义变为「LVGL 底座：
 > 桌面 + 字体池 + screenshot」）。删除的示例 app：`clock.ui` / `reader.ui` /
 > `filer.ui` / `flush.ui` / `music`（阅读器与播放器界面将用绘图引擎重做）。
@@ -206,7 +221,7 @@ uses. `crt.c` is linked `--whole-archive` so the weak stubs are always present.
 
 The SDK `crt.c` also emits an exported **data symbol `__aster_abi`** = ASTER_ABI_VERSION.
 V1 enforces ABI compatibility through the **package manifest** (`abi.min` major
-must equal the device major; see `mja-format.md` and `aster_mja.c`), not by reading
+must equal the device major; see `package-format.md` and `aster_pkg.c`), not by reading
 this wasm data symbol — WAMR's embed API exposes no global/data lookup in the
 pinned version, so `__aster_abi` is kept as a forward-compat marker that tooling
 and future loaders can assert on.

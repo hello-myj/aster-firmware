@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: MIT
- * TJpgDec configuration for MJX imgdec. Based on the LVGL vendored copy
+ * TJpgDec configuration for ASTER imgdec. Based on the LVGL vendored copy
  * (TJpgDec R0.03, (C)ChaN 2021), tuned for our use:
- *   JD_FORMAT=1 -> output native small-endian RGB565 (matches the MJX
- *                  canvas / mjx_plat_display_write_at pixel format).
+ *   JD_FORMAT=1 -> output native small-endian RGB565 (matches the ASTER
+ *                  canvas / aster_plat_display_write_at pixel format).
  *   JD_USE_SCALE=1 -> enable the 1/2,1/4,1/8 hardware-free DCT scaling we
  *                  use to keep the decoded buffer small before the final
  *                  bilinear fit.

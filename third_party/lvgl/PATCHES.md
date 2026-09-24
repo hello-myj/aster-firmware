@@ -7,11 +7,15 @@
 
 | 机制 | 文件 | 作用 |
 |---|---|---|
-| 补丁 | `lvgl-mjx.patch` | 记录改动本身 |
+| 补丁 | `lvgl-aster.patch` | 记录改动本身 |
 | 重放 | `prune_src.sh` 第 7 步 | prune 之后自动打回来 |
-| 闸门 | `sdk/tools/check_lvgl_patch.py` | 没打上就**响亮地失败** |
+| 闸门 | **缺**（见下） | 没打上就**响亮地失败** |
 
-改完这里的东西要跑 `python3 sdk/tools/check_lvgl_patch.py`。
+第 7 步的回放路径原先指向重构前的 `sdk/vendor/lvgl/`，且补丁自身的路径前缀也是同一处旧
+路径，所以 `patch -p1 --forward` 其实从来没打上过、失败被 `|| true` 吞掉；闸门脚本
+`check_lvgl_patch.py` 在当前仓库里也不存在（原先那行会以非零码退出，但被脚本末尾的
+`echo` 掩盖）。两条已随本次改名修正到 `third_party/lvgl/`，**闸门仍缺**：在补上之前，
+prune 之后必须手工确认 `third_party/lvgl/src/core/lv_obj.c` 里仍有 `ASTER-PATCH:` 标记。
 
 ---
 

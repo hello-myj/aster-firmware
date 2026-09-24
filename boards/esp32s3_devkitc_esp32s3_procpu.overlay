@@ -487,7 +487,7 @@
 };
 
 /* Native USB-CDC (Serial-JTAG) on the same Type-C port: used by the ASTER
- * file-transfer service (services/aster_file_svc.c) to ship .mja packages to
+ * file-transfer service (services/aster_file_svc.c) to ship .ast packages to
  * the SD card without a card reader. Console/shell stays on uart0/CH340. */
 &usb_serial {
 	status = "okay";

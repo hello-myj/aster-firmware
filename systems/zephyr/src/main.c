@@ -68,7 +68,7 @@ int main(void)
 		}
 	}
 
-	/* .mja push service on the native USB-CDC port (ttyACM*) */
+	/* .ast push service on the native USB-CDC port (ttyACM*) */
 	err = aster_file_svc_start();
 	if (err && err != -ENOTSUP) {
 		LOG_WRN("file svc: %d (CDC push disabled)", err);

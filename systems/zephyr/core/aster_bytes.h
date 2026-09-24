@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * Endianness helpers shared by every binary parser (MJA packages, .mja
+ * Endianness helpers shared by every binary parser (ASTP packages, .ast
  * signatures, imgdec BMP/PNG/JPEG, ID3 tags/lyrics).
  *
  * freestanding on purpose: pp_gfx.c compiles under a host compiler for the

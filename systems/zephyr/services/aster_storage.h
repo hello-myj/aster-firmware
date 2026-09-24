@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: MIT
  * Storage: SD mount + ASTER directory conventions (design doc sec.74).
  *
- * /SD:/aster/apps/<id>/package.mja|app.wasm|app.aot|manifest.json|data|assets
- * /SD:/aster/install/   (drop directory for .mja files)
+ * /SD:/aster/apps/<id>/package.ast|app.wasm|app.aot|manifest.json|data|assets
+ * /SD:/aster/install/   (drop directory for .ast files)
  * /SD:/aster/system/kv  (per-app kv files: <id>.<key>)
  */
 #ifndef ASTER_STORAGE_H

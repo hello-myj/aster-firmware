@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-#include "aster_mja.h"
+#include "aster_pkg.h"
 #include "aster_sig.h"
 #include "aster_storage.h"
 #include "aster_sysinfo.h"
@@ -15,9 +15,9 @@
 #include <aster/aster.h>
 #include <aster/icon.h>
 
-LOG_MODULE_REGISTER(aster_mja, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(aster_pkg, LOG_LEVEL_INF);
 
-struct mja_header {
+struct pkg_header {
 	uint8_t  magic[4];
 	uint16_t fmt_ver;
 	uint16_t hdr_size;
@@ -42,19 +42,19 @@ static bool in_bounds(uint32_t off, size_t len, size_t total, size_t base)
 	return o >= base && o <= total && len <= total - o;
 }
 
-int aster_mja_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
+int aster_pkg_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 		  const uint8_t **wasm, size_t *wasm_len,
 		  const uint8_t **aot, size_t *aot_len, uint32_t *aot_target)
 {
-	if (size < ASTER_MJA_HDRSIZE) {
+	if (size < ASTER_PKG_HDRSIZE) {
 		return ASTER_ECORRUPT;
 	}
-	if (memcmp(img, ASTER_MJA_MAGIC, 4) != 0) {
+	if (memcmp(img, ASTER_PKG_MAGIC, 4) != 0) {
 		return ASTER_ECORRUPT;
 	}
 	uint16_t hdr_size = aster_le16(img + 6);
 	if (aster_le16(img + 4) != 1 ||
-	    (hdr_size != ASTER_MJA_HDRSIZE && hdr_size != ASTER_MJA_HDRSIZE_ASSETS) ||
+	    (hdr_size != ASTER_PKG_HDRSIZE && hdr_size != ASTER_PKG_HDRSIZE_ASSETS) ||
 	    size < hdr_size) {
 		return ASTER_ECORRUPT;
 	}
@@ -69,7 +69,7 @@ int aster_mja_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 	 * Packages must write zeros; anything else is ignored, not rejected. */
 	uint32_t aso = 0, asl = 0;
 
-	if (hdr_size >= ASTER_MJA_HDRSIZE_ASSETS) {
+	if (hdr_size >= ASTER_PKG_HDRSIZE_ASSETS) {
 		aso = aster_le32(img + 64);
 		asl = aster_le32(img + 68);
 	}
@@ -99,7 +99,7 @@ int aster_mja_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 		if (!in_bounds(aso, asl, size, hdr_size) || asl < 16) {
 			return ASTER_ECORRUPT;
 		}
-		if (memcmp(img + aso, "MJR1", 4) != 0) {
+		if (memcmp(img + aso, "ASTR", 4) != 0) {
 			return ASTER_ECORRUPT;
 		}
 	}
@@ -144,7 +144,7 @@ int aster_mja_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 		char cat[16];
 
 		if (aster_json_str(jbuf, "category", cat, sizeof(cat)) >= 0) {
-			aster_mja_norm_category(cat, m->category, sizeof(m->category));
+			aster_pkg_norm_category(cat, m->category, sizeof(m->category));
 		}
 	}
 	{
@@ -152,7 +152,7 @@ int aster_mja_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 
 		if (aster_json_str(jbuf, "orientation", orient,
 				 sizeof(orient)) >= 0) {
-			m->orientation = aster_mja_norm_orientation(orient);
+			m->orientation = aster_pkg_norm_orientation(orient);
 			if (m->orientation == ASTER_ORIENT_ANY) {
 				/* Drop the key rather than guess a default: a
 				 * package that asked to be pinned and misspelled
@@ -236,7 +236,7 @@ int aster_mja_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 	return ASTER_OK;
 }
 
-int8_t aster_mja_norm_orientation(const char *src)
+int8_t aster_pkg_norm_orientation(const char *src)
 {
 	if (!src || !src[0]) {
 		return ASTER_ORIENT_ANY;
@@ -250,9 +250,9 @@ int8_t aster_mja_norm_orientation(const char *src)
 	return ASTER_ORIENT_ANY;
 }
 
-const char *aster_mja_orientation_name(int8_t o)
+const char *aster_pkg_orientation_name(int8_t o)
 {
-	/* The two spellings are shared with aster_mja_norm_orientation above and
+	/* The two spellings are shared with aster_pkg_norm_orientation above and
 	 * with sdk/tools/{build,verify_mja}.py. A third state ("any") has no
 	 * spelling on purpose: see ASTER_ORIENT_ANY in the header. */
 	switch (o) {
@@ -265,7 +265,7 @@ const char *aster_mja_orientation_name(int8_t o)
 	}
 }
 
-void aster_mja_norm_category(const char *src, char *dst, size_t n)
+void aster_pkg_norm_category(const char *src, char *dst, size_t n)
 {
 	if (!dst || n == 0) {
 		return;
@@ -418,7 +418,7 @@ static int load_file(const char *path, uint8_t **buf, size_t *len)
 	if (err) {
 		return err;
 	}
-	/* packages go to PSRAM: an LVGL-class app .mja (400 KB+) never fits the
+	/* packages go to PSRAM: an LVGL-class app .ast (400 KB+) never fits the
 	 * small internal k_malloc heap (same backing as the start-path loader) */
 	uint8_t *b = aster_psram_alloc(st.size + 1);
 	if (!b) {
@@ -558,7 +558,7 @@ static int extract_mjr1(const uint8_t *blob, size_t len, const char *appdir)
 	uint16_t n;
 	uint32_t table;
 
-	if (len < 16 || memcmp(blob, "MJR1", 4) != 0 || aster_le16(blob + 4) != 1) {
+	if (len < 16 || memcmp(blob, "ASTR", 4) != 0 || aster_le16(blob + 4) != 1) {
 		return ASTER_ECORRUPT;
 	}
 	n = aster_le16(blob + 6);
@@ -629,7 +629,7 @@ static int extract_mjr1(const uint8_t *blob, size_t len, const char *appdir)
 	return ASTER_OK;
 }
 
-int aster_mja_install_file(const char *src_path)
+int aster_pkg_install_file(const char *src_path)
 {
 	uint8_t *img = NULL;
 	size_t size = 0;
@@ -642,7 +642,7 @@ int aster_mja_install_file(const char *src_path)
 	aster_manifest_t m;
 	const uint8_t *wasm; size_t wlen;
 	const uint8_t *aot; size_t alen; uint32_t atarget;
-	err = aster_mja_parse(img, size, &m, &wasm, &wlen, &aot, &alen, &atarget);
+	err = aster_pkg_parse(img, size, &m, &wasm, &wlen, &aot, &alen, &atarget);
 	if (err) {
 		LOG_ERR("install: parse %s (%d)", src_path, err);
 		aster_psram_free(img);
@@ -656,7 +656,7 @@ int aster_mja_install_file(const char *src_path)
 	bool aot_ok = alen && atarget == CONFIG_ASTER_AOT_TARGET_ID;
 
 	/* Signature gate BEFORE anything is written to the app dir. Policy is
-	 * compile-time (docs/mja-format.md); a tampered or alien-keyed package
+	 * compile-time (docs/package-format.md); a tampered or alien-keyed package
 	 * can never reach the launch path. */
 	err = aster_sig_check(img, size);
 	if (err) {
@@ -700,13 +700,13 @@ int aster_mja_install_file(const char *src_path)
 		fs_closedir(&dir);
 	}
 
-	/* copy package.mja -- SOURCE IS PSRAM: the SD controller's DMA cannot
+	/* copy package.ast -- SOURCE IS PSRAM: the SD controller's DMA cannot
 	 * read external RAM, a raw fs_write here lands 0-byte or partially
 	 * corrupt files on disk (observed: app.aot 0 B -> silent interpreter
 	 * fallback at ~2 fps; "主" glyph byte-hole in app.wasm -> tofu).
 	 * aster_fs_write_safe shuttles through an internal-RAM bounce. */
 	char dst[192];
-	snprintf(dst, sizeof(dst), "%s/package.mja", appdir);
+	snprintf(dst, sizeof(dst), "%s/package.ast", appdir);
 	struct fs_file_t f;
 	fs_file_t_init(&f);
 	err = fs_open(&f, dst, FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC);
@@ -768,7 +768,7 @@ int aster_mja_install_file(const char *src_path)
 			m.id, atarget, (unsigned)CONFIG_ASTER_AOT_TARGET_ID);
 	}
 
-	/* launcher tile: MJXI at /SD:/aster/apps/<id>/icon.bin */
+	/* launcher tile: ASTI at /SD:/aster/apps/<id>/icon.bin */
 	snprintf(dst, sizeof(dst), "%s/icon.bin", appdir);
 	if (m.icon_len && in_bounds(m.icon_off, m.icon_len, size, m.hdr_size) &&
 	    aster_icon_parse(img + m.icon_off, m.icon_len, NULL) == ASTER_OK) {
@@ -790,7 +790,7 @@ int aster_mja_install_file(const char *src_path)
 			(void)fs_unlink(dst);
 		}
 		if (m.icon_len) {
-			LOG_WRN("install: icon not MJXI, skip %s", m.id);
+			LOG_WRN("install: icon not ASTI, skip %s", m.id);
 		}
 	}
 
@@ -890,9 +890,9 @@ int aster_mja_install_file(const char *src_path)
 	 * line, not the package. A value that was not understood is
 	 * ASTER_ORIENT_ANY here and is omitted, which is the same thing the
 	 * package would have meant by leaving the key out. */
-	if (r >= 0 && aster_mja_orientation_name(m.orientation) != NULL) {
+	if (r >= 0 && aster_pkg_orientation_name(m.orientation) != NULL) {
 		r = snprintf(line + w, sizeof(line) - w, ",\"orientation\":\"%s\"",
-			     aster_mja_orientation_name(m.orientation));
+			     aster_pkg_orientation_name(m.orientation));
 		if (r < 0 || r >= (int)sizeof(line) - w) {
 			r = -1;
 		} else {

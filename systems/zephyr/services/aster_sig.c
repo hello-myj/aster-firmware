@@ -1,9 +1,9 @@
 #include <zephyr/sys/util.h>
 /* SPDX-License-Identifier: MIT
- * .mja signature verification. See aster_sig.h for the layout contract.
+ * .ast signature verification. See aster_sig.h for the layout contract.
  */
 #include "aster_sig.h"
-#include "aster_mja.h"
+#include "aster_pkg.h"
 /* Outside the CONFIG_ASTER_SIGNATURE_VERIFY block below on purpose: the header
  * stays available whichever policy is compiled in, so a change of branch can
  * never turn into a surprise build break. */
@@ -107,7 +107,7 @@ int aster_sig_check(const uint8_t *img, size_t size)
 	ARG_UNUSED(size);
 	return ASTER_OK;
 #else
-	if (size < ASTER_MJA_HDRSIZE) {
+	if (size < ASTER_PKG_HDRSIZE) {
 		return ASTER_ECORRUPT;
 	}
 	uint32_t flags = aster_le32(img + 8);
@@ -118,7 +118,7 @@ int aster_sig_check(const uint8_t *img, size_t size)
 		return ASTER_OK; /* allow-unsigned */
 #endif
 	}
-	if (size < (size_t)ASTER_MJA_HDRSIZE + ASTER_SIG_LEN) {
+	if (size < (size_t)ASTER_PKG_HDRSIZE + ASTER_SIG_LEN) {
 		return ASTER_ECORRUPT; /* claims signed but too small */
 	}
 	const uint8_t *sig = img + size - ASTER_SIG_LEN;

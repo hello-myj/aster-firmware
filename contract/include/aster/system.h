@@ -5,7 +5,16 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 3
-#define ASTER_ABI_MINOR 2  /* 3.2 (additive): aster_audio_get_info -- the native
+#define ASTER_ABI_MINOR 3  /* 3.3 (breaking, no API change): the fixed-width
+                          * container and wire markers were renamed with the
+                          * rest of the MJX-era spellings -- ASTP packages,
+                          * ASTI icons, ASTR asset blobs, the ASTERFS transfer
+                          * protocol. Nothing in the aster_* API moved, but a
+                          * 3.2 device and a 3.3 package do not understand each
+                          * other's bytes, so the minor bump is what makes the
+                          * mismatch visible at the handshake instead of at the
+                          * first parse. 3.2 (additive):
+                          * aster_audio_get_info -- the native
                           * PCM format is a per-board fact and must be asked
                           * for; the ASTER_AUDIO_RATE/_CHANNELS/_BITS macros it
                           * replaces are deleted, because they were a board's

@@ -171,7 +171,7 @@ int aster_app_mgr_scan(void)
 			 * for this buffer, or truncated by a failed install, makes a
 			 * package that is fully on disk yet never appears. Skipping
 			 * in silence is what kept that invisible; the bound here and
-			 * the one in aster_mja_install_file must stay consistent. */
+			 * the one in aster_pkg_install_file must stay consistent. */
 			LOG_WRN("app dir %s: no readable manifest, skipped", ent.name);
 			continue;
 		}
@@ -234,11 +234,11 @@ int aster_app_mgr_scan(void)
 			struct fs_dirent st;
 
 			if (aster_json_str(jbuf, "category", cat, sizeof(cat)) >= 0) {
-				aster_mja_norm_category(cat, r->category, sizeof(r->category));
+				aster_pkg_norm_category(cat, r->category, sizeof(r->category));
 			}
 			if (aster_json_str(jbuf, "orientation", orient,
 					 sizeof(orient)) >= 0) {
-				r->want_orientation = aster_mja_norm_orientation(orient);
+				r->want_orientation = aster_pkg_norm_orientation(orient);
 			}
 			snprintf(path, sizeof(path), "%s/%s/icon.bin", ASTER_APPS_DIR, r->id);
 			r->has_icon = fs_stat(path, &st) == 0 &&
@@ -297,7 +297,7 @@ const aster_app_rec_t *aster_app_mgr_find(const char *id)
 
 int aster_app_mgr_install(const char *src_path)
 {
-	int err = aster_mja_install_file(src_path);
+	int err = aster_pkg_install_file(src_path);
 	if (err == ASTER_OK) {
 		aster_app_mgr_scan();
 	}
@@ -416,7 +416,7 @@ int aster_app_mgr_read_manifest(const char *id, aster_manifest_t *m)
 
 		if (aster_json_str(jbuf, "orientation", orient,
 				 sizeof(orient)) >= 0) {
-			m->orientation = aster_mja_norm_orientation(orient);
+			m->orientation = aster_pkg_norm_orientation(orient);
 		}
 	}
 	return ASTER_OK;

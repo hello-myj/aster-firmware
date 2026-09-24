@@ -68,11 +68,16 @@ static void cdc_reply(const char *fmt, ...)
 	}
 }
 
-/* Every command line begins with these (aster_file_svc.h "MJXPING"/"MJXPUT ").
- * Shortening this to something that is not a common prefix of the whole
- * command set silently disables the re-sync below for the command it no longer
- * matches -- a line would then be dropped instead of answered. */
+/* Every command line begins with CMD_PREFIX. The tokens are built from it by
+ * concatenation rather than written out a second time: the reader below keeps a
+ * byte only while it still continues CMD_PREFIX, so a token that does not
+ * actually start with the prefix is discarded before the dispatcher can see it
+ * -- dropped instead of answered, with no reply and no error. Spelling the two
+ * independently is what let them drift apart once; this makes that
+ * unrepresentable. */
 #define CMD_PREFIX "ASTER"
+#define CMD_PING   CMD_PREFIX "PING"  /* "ASTERPING" */
+#define CMD_PUT    CMD_PREFIX "PUT "  /* "ASTERPUT " */
 
 /* Bytes discarded since the last completed line: a client that pipelined a
  * body it should have held back, or one that died mid-line, leaves debris here
@@ -85,9 +90,10 @@ static uint32_t s_line_drops;
  * The reader keeps the buffer only while it can still become a command: until
  * CMD_PREFIX has matched, any byte that does not continue it is discarded on
  * the spot. That is the difference between a client that pipelines and a
- * channel that dies -- measured with aster_negtest's B2 cases (a rejected MJXPUT
- * whose body was sent anyway): the leftover "abcd" used to sit in the buffer
- * and GLUE itself to the next command, so "abcdMJXPING" arrived as one line,
+ * channel that dies -- measured with aster_negtest's B2 cases (a rejected
+ * ASTERPUT whose body was sent anyway): the leftover "abcd" used to sit in the
+ * buffer and GLUE itself to the next command, so "abcdASTERPING" arrived as one
+ * line,
  * was answered -EINVAL, and the reply the host was actually waiting for came
  * up to LINE_TMO_MS later -- 30 s, indistinguishable from a hang.
  *
@@ -112,7 +118,7 @@ static int cdc_read_line(char *line, size_t max, int64_t timeout_ms)
 					LOG_WRN("fsvc: dropped %u byte(s) that "
 						"cannot start a command (a "
 						"pipelined body, or a host not "
-						"speaking MJXFS)", s_line_drops);
+						"speaking ASTERFS)", s_line_drops);
 					s_line_drops = 0;
 				}
 				return (int)n;
@@ -359,7 +365,7 @@ static void fsvc_fn(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
 	char line[LINE_MAX];
 
-	cdc_reply("MJXFS 3 sd=%d", aster_storage_mounted() ? 1 : 0);
+	cdc_reply("ASTERFS 3 sd=%d", aster_storage_mounted() ? 1 : 0);
 
 	for (;;) {
 		int n = cdc_read_line(line, sizeof(line), LINE_TMO_MS);
@@ -367,27 +373,30 @@ static void fsvc_fn(void *p1, void *p2, void *p3)
 			k_msleep(IDLE_MS);
 			continue;
 		}
-		if (strncmp(line, "MJXPING", 7) == 0) {
+		if (strcmp(line, CMD_PING) == 0) {
 			aster_system_info_t info;
-            aster_sysinfo_get(&info);
-            cdc_reply("PONG sd=%d product=aster target=%s abi=%u.%u caps=%llx",
-                      aster_storage_mounted() ? 1 : 0, CONFIG_ASTER_TARGET_ID,
-                      ASTER_ABI_MAJOR, ASTER_ABI_MINOR, (unsigned long long)info.feature_flags);
-		} else if (strncmp(line, "MJXPUT ", 7) == 0) {
+
+			aster_sysinfo_get(&info);
+			cdc_reply("PONG sd=%d product=aster target=%s abi=%u.%u caps=%llx",
+				  aster_storage_mounted() ? 1 : 0, CONFIG_ASTER_TARGET_ID,
+				  ASTER_ABI_MAJOR, ASTER_ABI_MINOR,
+				  (unsigned long long)info.feature_flags);
+		} else if (strncmp(line, CMD_PUT, sizeof(CMD_PUT) - 1) == 0) {
 			char path[160];
 			uint32_t len = 0, crc = 0, off = 0;
-			char *sp1 = strchr(line + 7, ' ');
+			const char *args = line + (sizeof(CMD_PUT) - 1);
+			char *sp1 = strchr(args, ' ');
 
 			if (!sp1) {
 				cdc_reply("ERR %d", -EINVAL);
 				continue;
 			}
-			size_t plen = (size_t)(sp1 - (line + 7));
+			size_t plen = (size_t)(sp1 - args);
 			if (plen >= sizeof(path)) {
 				cdc_reply("ERR %d", -ENAMETOOLONG);
 				continue;
 			}
-			memcpy(path, line + 7, plen);
+			memcpy(path, args, plen);
 			path[plen] = 0;
 			char *sp2 = strchr(sp1 + 1, ' ');
 			if (!sp2) {
@@ -396,7 +405,7 @@ static void fsvc_fn(void *p1, void *p2, void *p3)
 			}
 			len = (uint32_t)strtoul(sp1 + 1, NULL, 10);
 			crc = (uint32_t)strtoul(sp2 + 1, NULL, 16);
-			/* optional 4th field: resume byte offset (MJXFS 2) */
+			/* optional 4th field: resume byte offset (ASTERFS 2) */
 			char *sp3 = strchr(sp2 + 1, ' ');
 			if (sp3) {
 				off = (uint32_t)strtoul(sp3 + 1, NULL, 10);
@@ -424,7 +433,7 @@ int aster_file_svc_start(void)
 	k_thread_create(&fsvc_thread, fsvc_stack, K_THREAD_STACK_SIZEOF(fsvc_stack),
 			fsvc_fn, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
 	k_thread_name_set(&fsvc_thread, "aster_fsvc");
-	LOG_INF("file svc on USB-CDC (MJXPUT <path> <len> <crc32> [resume-off])");
+	LOG_INF("file svc on USB-CDC (ASTERPUT <path> <len> <crc32> [resume-off])");
 	return 0;
 #else
 	return -ENOTSUP;

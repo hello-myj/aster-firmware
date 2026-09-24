@@ -3,7 +3,7 @@
 target_sources(app PRIVATE
 	aster_sysinfo.c
 	aster_storage.c
-	aster_mja.c
+	aster_pkg.c
 	aster_app_mgr.c
 	aster_kv.c
 	aster_logring.c

@@ -22,7 +22,7 @@ cp "$ROOT/lvgl.h" "$ROOT/lv_version.h" "$V/" 2>/dev/null || cp "$ROOT/lv_version
 [ -f "$ROOT/LICENCE.txt" ] && cp "$ROOT/LICENCE.txt" "$V/"
 cd "$V/src"
 
-# 1. platform drivers: we blit to our own surface via the MJX bridge.
+# 1. platform drivers: we blit to our own surface via the ASTER bridge.
 find drivers -name "*.c" -delete
 
 # 2. heavy optional libs (keep bin_decoder + rle: native image format).
@@ -59,7 +59,7 @@ find . -type f ! -name "*.c" ! -name "*.h" -delete
 #    Applied from the repo root because the patch carries repo-root paths.
 #    --forward makes a re-run idempotent; the checker below is what decides.
 cd "$V/../../.."
-patch -p1 --forward < sdk/vendor/lvgl/lvgl-mjx.patch || true
+patch -p1 --forward < third_party/lvgl/lvgl-aster.patch || true
 python3 sdk/tools/check_lvgl_patch.py
 
 echo "vendored src: $(find "$V/src" -name '*.c' | wc -l) .c, $(du -sh "$V/src" | cut -f1)"

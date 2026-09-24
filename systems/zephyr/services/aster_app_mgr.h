@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "aster_mja.h"
+#include "aster_pkg.h"
 
 typedef enum {
 	ASTER_APP_STATE_STOPPED = 0,
@@ -40,7 +40,7 @@ typedef struct {
 	 * report said "rebuild for 231", an id no package has. The manifest
 	 * on disk was right all along; the field was the liar. */
 	uint32_t        aot_skip;
-	bool            has_icon;   /* install dir has icon.bin (MJXI) */
+	bool            has_icon;   /* install dir has icon.bin (ASTI) */
 	char            category[16]; /* game / tool / system / empty */
 	/* Orientation the package asked for (ASTER_ORIENT_x), or ASTER_ORIENT_ANY
 	 * when it asked for none. NOT zero-initialisable: 0 is portrait, so a

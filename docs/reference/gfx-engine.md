@@ -331,7 +331,7 @@ tile（角落只占 1/8 的 tile，却付 100% 的遍历）。12.9 ms → 4.7 ms
 | `s_front[0..1]`（`CONFIG_ASTER_DISP_FLIP_DBUF`） | 2 × 150 KB | flip 双缓冲：一块在被 DMA 送、一块在被画 |
 
 **三块都来自 `SMH_REG_ATTR_EXTERNAL`——和 WAMR 池、8 档 cpfont 常驻表、
-LVGL 池、相机、`.mja` 安装缓冲是同一个堆**（PSRAM 8 MB，`ESP_SPIRAM_HEAP_SIZE`
+LVGL 池、相机、`.ast` 安装缓冲是同一个堆**（PSRAM 8 MB，`ESP_SPIRAM_HEAP_SIZE`
 7.5 MB），没有分隔配额。加这两块 flip 前缓冲时正好把相机挤死：相机 3 个
 150 KB 缓冲走的是 `CONFIG_VIDEO_BUFFER_USE_SHARED_MULTI_HEAP`（该模式下
 `VIDEO_BUFFER_POOL_HEAP_SIZE` 不生效），要 450 KB，而当时堆里只剩
