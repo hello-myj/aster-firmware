@@ -233,6 +233,10 @@ int  aster_plat_audio_record(uint8_t *pcm, size_t size);
 int  aster_plat_audio_beep(uint32_t duration_ms, uint32_t hz);
 int  aster_plat_audio_set_volume(int percent); /* 0..100 */
 int  aster_plat_audio_get_volume(void);        /* 0..100 */
+int  aster_plat_audio_effect_load(const char *path);
+int  aster_plat_audio_effect_play(uint32_t handle);
+int  aster_plat_audio_effect_unload(uint32_t handle);
+void aster_plat_audio_effect_reset(void);
 /* Stream WAV/PCM/MP3 from the filesystem; no whole-file copy. */
 int  aster_plat_audio_start_path(const char *path);
 int  aster_plat_audio_play_path(const char *path);

@@ -98,13 +98,17 @@ def main():
     print(f"  rr-ring r=10 corner cut: {'OK' if cut else 'FAIL'}")
     ascii_art(g, "rr ring 60x44 r=10")
     allok &= cut
+    edge = bool(px[60 * W + 106] and px[61 * W + 106] and
+                not px[62 * W + 106])
+    print(f"  rr-ring 2px straight edge: {'OK' if edge else 'FAIL'}")
+    allok &= edge
 
     print("== stadium 224x40 (r = h/2, arcs meet) ==")
     x, y, w, h = STADIUM_FILL
     allok &= fill_check(region(px, x, y, x + w, y + h), "stadium fill",
                         w * h - (4 - math.pi) * 400)
     x, y, w, h = STADIUM_RING
-    allok &= ring_check(region(px, x, y, x + w, y + h), "stadium ring 1px")
+    allok &= ring_check(region(px, x, y, x + w, y + h), "stadium ring 2px")
 
     print("== ellipse FILL ==")
     for cx, rx, ry in ELLS:
@@ -116,6 +120,11 @@ def main():
     for cx, rx, ry in ELLS:
         g = region(px, cx - rx, RING_CY - ry, cx + rx + 1, RING_CY + ry + 1)
         allok &= ring_check(g, f"ell-ring rx={rx} ry={ry}")
+    circle_top = (px[(RING_CY - 20) * W + 30] and
+                  px[(RING_CY - 19) * W + 30] and
+                  not px[(RING_CY - 17) * W + 30])
+    print(f"  circle 2px cardinal stroke: {'OK' if circle_top else 'FAIL'}")
+    allok &= bool(circle_top)
     ascii_art(region(px, 30 - 20, RING_CY - 20, 30 + 21, RING_CY + 21),
               "circle ring r=20 (the 'lines missing' case)")
 

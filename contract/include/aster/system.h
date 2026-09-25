@@ -5,7 +5,9 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 3
-#define ASTER_ABI_MINOR 3  /* 3.3 (breaking, no API change): the fixed-width
+#define ASTER_ABI_MINOR 4  /* 3.4 (additive): short effect load/play/unload can
+                          * mix PCM effects over a background audio session.
+                          * 3.3 (breaking, no API change): the fixed-width
                           * container and wire markers were renamed with the
                           * rest of the MJX-era spellings -- ASTP packages,
                           * ASTI icons, ASTR asset blobs, the ASTERFS transfer

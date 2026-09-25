@@ -94,7 +94,7 @@ static int draw_rr(int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_t r,
 					  corners[i].x1, corners[i].y1 };
 			int32_t bx0, by0, bx1, by1;
 
-			if (ppg_path(&T, xy, (int)n, outline ? 1.0f : 0.0f, col,
+			if (ppg_path(&T, xy, (int)n, outline ? 2.0f : 0.0f, col,
 				     &cl, &bx0, &by0, &bx1, &by1) != 0) {
 				return -1;
 			}
@@ -104,10 +104,10 @@ static int draw_rr(int32_t x, int32_t y, uint32_t w, uint32_t h, uint32_t r,
 			span(x, y + R, x1, y1 - R, col);
 			span(x + R, y1 - R, x1 - R, y1, col);
 		} else {
-			span(x + R, y, x1 - R, y + 1, col);
-			span(x + R, y1 - 1, x1 - R, y1, col);
-			span(x, y + R, x + 1, y1 - R, col);
-			span(x1 - 1, y + R, x1, y1 - R, col);
+			span(x + R, y, x1 - R, y + 2, col);
+			span(x + R, y1 - 2, x1 - R, y1, col);
+			span(x, y + R, x + 2, y1 - R, col);
+			span(x1 - 2, y + R, x1, y1 - R, col);
 		}
 		return rc;
 	}
@@ -140,7 +140,7 @@ static int draw_ell(int32_t cx, int32_t cy, uint32_t rx, uint32_t ry,
 	uint32_t n = aster_gfx_ell_polygon(xy, cx, cy, rx, ry);
 	int32_t bx0, by0, bx1, by1;
 
-	return ppg_path(&T, xy, (int)n, stroke ? 1.5f : 0.0f, col, NULL,
+	return ppg_path(&T, xy, (int)n, stroke ? 2.0f : 0.0f, col, NULL,
 			&bx0, &by0, &bx1, &by1);
 }
 
@@ -207,7 +207,7 @@ int main(int argc, char **argv)
 	draw_rr(76, 8, 60, 44, 10, 0, ACC);
 	draw_rr(144, 8, 60, 44, 22, 0, ACC3);
 
-	/* --- row 2: the same three as 1px OUTLINE rings (the case the user
+	/* --- row 2: the same three as 2px OUTLINE rings (the case the user
 	 * reported as "rectangles abnormal") --- */
 	draw_rr(8, 60, 60, 44, 3, 1, WHITE);
 	draw_rr(76, 60, 60, 44, 10, 1, ACC);

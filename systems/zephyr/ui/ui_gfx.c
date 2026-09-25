@@ -278,7 +278,7 @@ static uint32_t row_inset(uint32_t r, uint32_t h, uint32_t yy)
 
 /* Rounded rect. Primary path: pretty-poly exact-coverage AA -- the four
  * corner circles are sampled into one convex closed polygon and filled
- * (or stroked as a 1 px even-odd ring for outline=1). If the renderer
+ * (or stroked as a 2 px even-odd ring for outline=1). If the renderer
  * refuses (arena pressure), fall back to the legacy integer scanline
  * stitcher below, which is crisp but stair-steps.
  * The contour sampling itself lives in gfx_shapes.h so the host-side shape
@@ -287,9 +287,6 @@ static void op_rect_round_legacy(ppg_target_t *t, int32_t x, int32_t y, uint32_t
 				 uint32_t h, uint32_t r, uint32_t outline,
 				 uint16_t col, acc_t *acc)
 {
-	int32_t prev_lo = 0, prev_hi = 0;
-	bool have_prev = false;
-
 	for (uint32_t yy = 0; yy < h; yy++) {
 		int32_t py = y + (int32_t)yy;
 		uint32_t inset = row_inset(r, h, yy);
@@ -303,15 +300,17 @@ static void op_rect_round_legacy(ppg_target_t *t, int32_t x, int32_t y, uint32_t
 			run_px(t, py, sx, ex, col, acc);
 			continue;
 		}
-		if (yy == 0u || yy + 1u == h) {
+		if (yy < 2u || yy + 2u >= h || w <= 4u || h <= 4u) {
 			run_px(t, py, sx, ex, col, acc);
-		} else if (have_prev) {
-			run_px(t, py, sx, prev_lo, col, acc);
-			run_px(t, py, ex, prev_hi, col, acc);
+		} else {
+			uint32_t inner_r = r > 2u ? r - 2u : 0u;
+			uint32_t inner_inset = row_inset(inner_r, h - 4u, yy - 2u);
+			int32_t inner_lo = x + 2 + (int32_t)inner_inset;
+			int32_t inner_hi = x + (int32_t)w - 3 - (int32_t)inner_inset;
+
+			run_px(t, py, sx, inner_lo - 1, col, acc);
+			run_px(t, py, inner_hi + 1, ex, col, acc);
 		}
-		prev_lo = sx;
-		prev_hi = ex;
-		have_prev = true;
 	}
 }
 
@@ -337,7 +336,7 @@ static void fill_span(ppg_target_t *t, int32_t x0, int32_t y0, int32_t x1, int32
 /* Rounded rect, in one of two shapes:
  *
  *   fill    -- the full rounded body
- *   outline -- a 1 px ring just inside the outer contour
+ *   outline -- a 2 px ring just inside the outer contour
  *
  * Only the four corner squares carry a curved boundary; everything else is
  * axis-aligned and lands on exact integer spans. So the contour goes to
@@ -406,7 +405,7 @@ static void op_rect_round(ppg_target_t *t, const aster_gfx_cmd_t *c, acc_t *acc)
 			int32_t bx0, by0, bx1, by1;
 
 			if (ppg_path(t, xy, (int)n,
-				     outline ? 1.0f : 0.0f, col, &cl, &bx0, &by0,
+				     outline ? 2.0f : 0.0f, col, &cl, &bx0, &by0,
 				     &bx1, &by1) != 0) {
 				/* Out of arena or bad contour: fall back for
 				 * the whole shape rather than leave it half
@@ -431,13 +430,11 @@ static void op_rect_round(ppg_target_t *t, const aster_gfx_cmd_t *c, acc_t *acc)
 		return;
 	}
 
-	/* Ring: 1 px along the top/bottom edges and the left/right edges,
-	 * which the inset-by-1 contour leaves exactly on the outer pixel
-	 * row/column. w/r are clamped above, so both edges exist. */
-	fill_span(t, x + R, y, x1 - R, y + 1, col, acc);
-	fill_span(t, x + R, y1 - 1, x1 - R, y1, col, acc);
-	fill_span(t, x, y + R, x + 1, y1 - R, col, acc);
-	fill_span(t, x1 - 1, y + R, x1, y1 - R, col, acc);
+	/* Straight spans use the same 2 px inset as the curved corners. */
+	fill_span(t, x + R, y, x1 - R, y + 2, col, acc);
+	fill_span(t, x + R, y1 - 2, x1 - R, y1, col, acc);
+	fill_span(t, x, y + R, x + 2, y1 - R, col, acc);
+	fill_span(t, x1 - 2, y + R, x1, y1 - R, col, acc);
 }
 
 static void op_ellipse(ppg_target_t *t, const aster_gfx_cmd_t *c, acc_t *acc)
@@ -462,7 +459,7 @@ static void op_ellipse(ppg_target_t *t, const aster_gfx_cmd_t *c, acc_t *acc)
 	int32_t ix0, iy0, ix1, iy1;
 
 	if (ppg_path(t, xy, (int)n,
-		     stroke ? 1.0f : 0.0f, col, NULL, &ix0, &iy0, &ix1,
+		     stroke ? 2.0f : 0.0f, col, NULL, &ix0, &iy0, &ix1,
 		     &iy1) == 0) {
 		return;
 	}

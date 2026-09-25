@@ -10,8 +10,8 @@ stroke rings and the rounded panel can be probed analytically:
 A "ring missing" bug shows up as panel/background colour all along the ring
 radius; a "gap" bug leaves an angular run with no ring pixel.
 
-Note the ring is 1 px wide and antialiased, so a pixel on the analytic radius
-is often a partial blend: match by hue dominance (r > g, b > g), not by
+The ring is antialiased, so a pixel on the analytic radius can still be a
+partial blend: match by hue dominance (r > g, b > g), not by
 distance to the exact stroke colour, and allow +-1.5 px radially.
 
 usage: gfx_device_check.py shot.png
@@ -30,7 +30,7 @@ N = 72
 
 
 def reddish(c):
-    """Stroke hue dominance. A 1 px AA ring lands on 25%-covered pixels in
+    """Stroke hue dominance. An AA ring lands on partly covered pixels in
     places (r=82 vs the full 244), so this is deliberately loose; it still
     rejects the panel fill (28,34,52) and the gradient background (16,28,66)."""
     r, g, b = c

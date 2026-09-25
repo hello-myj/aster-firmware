@@ -65,8 +65,9 @@ ASTER_I("aster_audio_get_info") int32_t aster_audio_get_info(aster_audio_info_t 
 
 /* ---- 1.7 ---- */
 
-/* DAC volume 0..100 (0 = mute, 100 = unity / 0 dB). Percent is loudness
- * (even dB steps), not a linear amplitude scale. Applies immediately. */
+/* DAC volume 0..100 (0 = mute). The reference ES8311 port reaches +6 dB at
+ * 100; loud sources may distort at the high end. This is a loudness control,
+ * not a linear amplitude scale. Applies immediately. */
 ASTER_I("aster_audio_set_volume") int32_t aster_audio_set_volume(int32_t percent);
 /* Returns 0..100, or a negative aster_error_t. */
 ASTER_I("aster_audio_get_volume") int32_t aster_audio_get_volume(void);
@@ -81,6 +82,17 @@ ASTER_I("aster_audio_record") int32_t aster_audio_record(uint8_t *pcm, uint32_t 
  * Needs AUDIO_OUTPUT plus the `fs` permission. Returns ASTER_OK, ASTER_ENODEV,
  * ASTER_EPERM, ASTER_EINVAL, ASTER_ENOENT, or ASTER_EIO. */
 ASTER_I("aster_audio_start_file") int32_t aster_audio_start_file(const char *path, uint32_t path_len);
+
+/* ABI 3.4: preload up to four short native-format stereo PCM WAV effects
+ * (max 64 KiB each) from a sandboxed path before starting music. Returns a
+ * positive handle or ASTER_* error. play mixes one effect into the current
+ * background stream without replacing it, or plays over silence when idle.
+ * Different handles play together; replaying one handle restarts that cue.
+ * Unload releases its PSRAM copy.
+ * load requires the fs permission. */
+ASTER_I("aster_audio_effect_load") int32_t aster_audio_effect_load(const char *path, uint32_t path_len);
+ASTER_I("aster_audio_effect_play") int32_t aster_audio_effect_play(uint32_t handle);
+ASTER_I("aster_audio_effect_unload") int32_t aster_audio_effect_unload(uint32_t handle);
 
 ASTER_I("aster_audio_pause") int32_t aster_audio_pause(void);   /* ESTATE if idle */
 ASTER_I("aster_audio_resume") int32_t aster_audio_resume(void); /* ESTATE if idle */

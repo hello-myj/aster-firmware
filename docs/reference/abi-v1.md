@@ -1,12 +1,13 @@
 # ASTER ABI Specification
 
-Status: **3.3 is the current release**. No `aster_*` API changed: 3.3 renames the
+Status: **3.4 is the current release**. 3.4 adds preloaded PCM effect mixing and
+extends the reference board's volume range to +6 dB at 100. 3.3 renames the
 fixed-width container and wire markers to their Aster spellings (ASTP packages,
 ASTI icons, ASTR asset blobs, ASTERFS transfer). That break is at the byte level,
 not the API level -- the "breaking changes bump major" rule below governs the API
 surface -- and it announces itself: a pre-rename package fails the magic check on
 install, and a pre-rename host fails the ASTERFS handshake. The
-last API-level change was 3.2, additive over the 3.0 breaking release — the
+previous API-level change was 3.2, additive over the 3.0 breaking release — the
 wasm-side widget runtime (`aster/ui.h`, `ui.bin`, `ASTER_EVENT_UI`) was deleted
 outright; guest apps now draw only through the gfx engine
 ([gfx-engine.md](gfx-engine.md)). Additive changes bump minor; breaking changes
@@ -361,9 +362,12 @@ Gated by capability bits; `start_file` also needs manifest `fs`. 2.0 removed
 |---|---|
 | `aster_audio_record` | `(i32,i32)i32` (pcm ptr, size bytes) — blocks; `EBUSY` if a session is running |
 | **[3.2]** `aster_audio_get_info` | `(i32,i32)i32` (info ptr, struct_size) — native PCM format. `size` < 8 (size+version) is `EINVAL`; a size between 8 and `sizeof(aster_audio_info_t)` is filled as far as it goes |
-| **[1.7]** `aster_audio_set_volume` | `(i32)i32` (0..100, 0 = mute, 100 = 0 dB) |
+| **[1.7]** `aster_audio_set_volume` | `(i32)i32` (0..100, 0 = mute; reference board 100 = +6 dB) |
 | **[1.7]** `aster_audio_get_volume` | `()i32` — 0..100, or a negative error |
 | **[1.9]** `aster_audio_start_file` | `(i32,i32)i32` (path ptr, len) — stream sandboxed path, background |
+| **[3.4]** `aster_audio_effect_load` | `(i32,i32)i32` (path ptr, len) — preload native stereo PCM WAV; positive handle or error |
+| **[3.4]** `aster_audio_effect_play` | `(i32)i32` (handle) — mix effects over a playing stream or silence when idle; different handles overlap, replaying a handle restarts it |
+| **[3.4]** `aster_audio_effect_unload` | `(i32)i32` (handle) — release effect buffer |
 | **[1.7]** `aster_audio_pause` | `()i32` — `ESTATE` if idle |
 | **[1.7]** `aster_audio_resume` | `()i32` — `ESTATE` if idle |
 | **[1.7]** `aster_audio_stop` | `()i32` — OK if already idle |
@@ -547,9 +551,12 @@ UTF-8 lyrics collected at start: ID3 USLT/SYLT first, else a sibling `.lrc`.
 ```c
 int32_t aster_audio_record(uint8_t *pcm, uint32_t size);       /* fills size bytes, blocks */
 
-int32_t aster_audio_set_volume(int32_t percent);               /* 0..100, 0=mute, 100=0 dB */
+int32_t aster_audio_set_volume(int32_t percent);               /* 0..100, 0=mute */
 int32_t aster_audio_get_volume(void);
 int32_t aster_audio_start_file(const char *path, uint32_t path_len); /* sandbox path, stream */
+int32_t aster_audio_effect_load(const char *path, uint32_t path_len); /* 3.4, positive handle */
+int32_t aster_audio_effect_play(uint32_t handle);              /* 3.4, mixes over stream or silence */
+int32_t aster_audio_effect_unload(uint32_t handle);            /* 3.4 */
 int32_t aster_audio_pause(void);
 int32_t aster_audio_resume(void);
 int32_t aster_audio_stop(void);
@@ -564,15 +571,16 @@ int32_t aster_audio_get_lyrics(char *buf, uint32_t size);      /* 1.13, UTF-8, 0
 - `ASTER_EINVAL` if `size` is 0, the pointer is outside the app's memory, or PCM
   size is not a stereo-frame multiple; `set_volume` also rejects values
   outside 0..100;
-- Volume percent is **loudness** (even dB steps from −40 dB at 1 % to 0 dB at
-  100 %); 0 is mute. It is not a linear amplitude or raw DAC register scale;
+- Volume percent is **loudness** (−40 dB near 1 %, 0 dB near 91 %, +6 dB at
+  100 % on the reference board); 0 is mute. High levels can distort loud sources;
 - `ASTER_EBUSY` if `record` is called while a background session is running;
   `start_file` replaces the current session;
 - `ASTER_ESTATE` if `pause`/`resume`/`seek` is called while idle; `stop` is OK when idle;
 - `ASTER_EPERM` if `start_file` is called without manifest `fs`;
 - `ASTER_ENOENT` if `start_file` path does not exist;
 - `ASTER_EIO` if the codec or I2S path fails, or an MP3 payload cannot be decoded.
-- There is still no mixer and no async completion event. `start_file` streams
+- ABI 3.4 mixes one preloaded effect over the background stream; there is no
+  async effect completion event. `start_file` streams
   from the sandbox (SD-backed `/music/…` or app-private paths) with no
   whole-file copy, so the worker keeps running; pause/resume from a button.
   Blocking `record` is for short capture bursts on a frame callback.

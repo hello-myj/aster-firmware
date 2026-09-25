@@ -37,6 +37,9 @@ LOG_MODULE_REGISTER(aster_audio, LOG_LEVEL_INF);
 #define MP3_FIFO_SAMP   2048
 #define STREAM_WIN      16384
 #define MP3_NEED        2304
+#define EFFECT_SLOTS    4
+#define EFFECT_MAX      (64u * 1024u)
+#define EFFECT_IDLE_BLOCKS ((2u * CONFIG_ASTER_AUDIO_RATE * ASTER_PLAT_AUDIO_FRAME) / AUDIO_BLOCK)
 
 /* Named, not indexed: this used to be index 1 of a shared io-gpios array, so a
  * board that listed its control pins in a different order would drive the
@@ -67,10 +70,17 @@ static uint8_t i2s_queued;
 static uint8_t g_vol = AUDIO_VOL_DEF;
 static K_MUTEX_DEFINE(audio_lock);
 static K_MUTEX_DEFINE(sess_mu);
+static K_MUTEX_DEFINE(effect_mu);
 static K_SEM_DEFINE(play_go, 0, 1);
 static K_SEM_DEFINE(play_wake, 0, 1);
 
 static struct fs_file_t sess_file;
+static struct {
+	uint8_t *pcm;
+	size_t size;
+	size_t off;
+	bool playing;
+} effects[EFFECT_SLOTS];
 
 static struct {
 	uint8_t *buf;
@@ -87,6 +97,8 @@ static struct {
 	bool stop;
 	bool mp3;
 	bool from_file;
+	bool effect_only;
+	bool effect_closing;
 	bool file_open;
 	bool seek_pending;
 	int err;
@@ -131,29 +143,33 @@ static int codec_rd(uint8_t addr, uint8_t reg, uint8_t *val)
 static uint8_t vol_to_reg(uint8_t percent)
 {
 	/* REG32 is linear in dB: 0x00 = -95.5 dB, 0xBF = 0 dB, 0xFF = +32 dB.
-	 * Mapping percent onto the full 0x00..0xFF range made 60 % sit ~50 dB
-	 * below 100 %, so the horn went quiet. ABI 0..100 is loudness: mute at
-	 * 0, then -40 dB .. 0 dB (unity) so the steps sound even. */
+	 * Preserve the old mapping through 80 (80 = -8 dB), then extend the top
+	 * of the 0..100 ABI scale to +6 dB. Hot mastered tracks can distort at
+	 * the high end; no software gain is applied to the PCM samples. */
 	int db10;
 	int reg;
 
 	if (percent == 0) {
 		return 0;
 	}
-	db10 = -400 + (int)percent * 4;
+	db10 = percent <= 80 ? -400 + (int)percent * 4 :
+		-80 + ((int)percent - 80) * 7;
 	reg = (db10 * 2) / 10 + 191;
 	if (reg < 1) {
 		reg = 1;
 	}
-	if (reg > 0xBF) {
-		reg = 0xBF;
+	if (reg > 0xCB) {
+		reg = 0xCB;
 	}
 	return (uint8_t)reg;
 }
 
 static int es8311_apply_vol(void)
 {
-	(void)codec_wr(DAC_ADDR, 0x32, vol_to_reg(g_vol));
+	int err = codec_wr(DAC_ADDR, 0x32, vol_to_reg(g_vol));
+	if (err) {
+		return err;
+	}
 	return codec_wr(DAC_ADDR, 0x31, g_vol == 0 ? 0x60 : 0x00);
 }
 
@@ -457,6 +473,33 @@ static int i2s_kick(bool *started, bool force)
 
 static int i2s_submit(void *blk, bool *started)
 {
+	/* Mix every active effect with the background before saturating once.
+	 * Separate voices let a movement cue finish underneath an eat cue. */
+	k_mutex_lock(&effect_mu, K_FOREVER);
+	int16_t *dst = blk;
+	size_t bytes[EFFECT_SLOTS];
+	for (int slot = 0; slot < EFFECT_SLOTS; slot++) {
+		bytes[slot] = effects[slot].playing ?
+			MIN(effects[slot].size - effects[slot].off, (size_t)AUDIO_BLOCK) : 0;
+	}
+	for (size_t i = 0; i < AUDIO_BLOCK / sizeof(int16_t); i++) {
+		int32_t value = dst[i];
+		for (int slot = 0; slot < EFFECT_SLOTS; slot++) {
+			if (i * sizeof(int16_t) < bytes[slot]) {
+				const int16_t *src = (const int16_t *)(effects[slot].pcm +
+									effects[slot].off);
+				value += src[i];
+			}
+		}
+		dst[i] = (int16_t)CLAMP(value, -32768, 32767);
+	}
+	for (int slot = 0; slot < EFFECT_SLOTS; slot++) {
+		effects[slot].off += bytes[slot];
+		if (effects[slot].off >= effects[slot].size) {
+			effects[slot].playing = false;
+		}
+	}
+	k_mutex_unlock(&effect_mu);
 	int err = i2s_write(i2s_dev, blk, AUDIO_BLOCK);
 
 	if (err) {
@@ -538,6 +581,8 @@ static void sess_clear_locked(void)
 	sess.stop = false;
 	sess.mp3 = false;
 	sess.from_file = false;
+	sess.effect_only = false;
+	sess.effect_closing = false;
 	sess.seek_pending = false;
 	sess.state = ASTER_AUDIO_IDLE;
 }
@@ -1066,9 +1111,10 @@ static void player_loop(void *a, void *b, void *c)
 		size_t size = sess.size;
 		bool from_file = sess.from_file;
 		bool is_mp3 = sess.mp3;
+		bool effect_only = sess.effect_only;
 		if (sess.stop || size == 0 ||
 		    (from_file && !sess.file_open) ||
-		    (!from_file && !buf)) {
+		    (!from_file && !buf && !effect_only)) {
 			sess_clear_locked();
 			k_mutex_unlock(&sess_mu);
 			continue;
@@ -1113,6 +1159,7 @@ static void player_loop(void *a, void *b, void *c)
 
 		bool started = false;
 		int recovered = 0;
+		uint32_t effect_idle_blocks = 0;
 		while (true) {
 			k_mutex_lock(&sess_mu, K_FOREVER);
 			if (sess.stop) {
@@ -1173,11 +1220,38 @@ static void player_loop(void *a, void *b, void *c)
 			}
 			size_t off = sess.off;
 			k_mutex_unlock(&sess_mu);
-			if (!from_file && off >= size && !(is_mp3 && mp3p.fifo_n)) {
+			if (!from_file && !effect_only && off >= size && !(is_mp3 && mp3p.fifo_n)) {
 				break;
 			}
 			k_mutex_lock(&audio_lock, K_FOREVER);
-			if (from_file && is_mp3) {
+			if (effect_only) {
+				err = feed_silence(&started);
+				k_mutex_lock(&effect_mu, K_FOREVER);
+				bool active = false;
+				for (int i = 0; i < EFFECT_SLOTS; i++) {
+					active |= effects[i].playing;
+				}
+				k_mutex_unlock(&effect_mu);
+				effect_idle_blocks = active ? 0 : effect_idle_blocks + 1;
+				if (err == 0 && effect_idle_blocks > EFFECT_IDLE_BLOCKS) {
+					/* Mark the closing interval under the same locks as play.
+					 * A concurrent cue waits for IDLE and starts a new session. */
+					k_mutex_lock(&sess_mu, K_FOREVER);
+					k_mutex_lock(&effect_mu, K_FOREVER);
+					active = false;
+					for (int i = 0; i < EFFECT_SLOTS; i++) {
+						active |= effects[i].playing;
+					}
+					if (!active && !sess.stop) {
+						sess.effect_closing = true;
+						err = 1;
+					} else {
+						effect_idle_blocks = 0;
+					}
+					k_mutex_unlock(&effect_mu);
+					k_mutex_unlock(&sess_mu);
+				}
+			} else if (from_file && is_mp3) {
 				size_t before;
 				bool eof = false;
 
@@ -1631,9 +1705,167 @@ int aster_plat_audio_get_volume(void)
 	return g_vol;
 }
 
+int aster_plat_audio_effect_load(const char *path)
+{
+	struct fs_dirent st;
+	struct fs_file_t file;
+	uint8_t header[44];
+	uint8_t *pcm = NULL;
+	int slot = -1;
+	int err;
+	uint32_t length;
+
+	if (!path || !path[0] || !aster_storage_mounted()) {
+		return -EINVAL;
+	}
+	if (CONFIG_ASTER_AUDIO_BITS != 16 || CONFIG_ASTER_AUDIO_CHANNELS != 2) {
+		return -ENOTSUP;
+	}
+	k_mutex_lock(&effect_mu, K_FOREVER);
+	for (int i = 0; i < EFFECT_SLOTS; i++) {
+		if (!effects[i].pcm) {
+			slot = i;
+			break;
+		}
+	}
+	if (slot < 0) {
+		err = -ENOMEM;
+		goto done;
+	}
+	err = fs_stat(path, &st);
+	if (err) {
+		goto done;
+	}
+	if (st.size < sizeof(header)) {
+		err = -EINVAL;
+		goto done;
+	}
+	fs_file_t_init(&file);
+	err = fs_open(&file, path, FS_O_READ);
+	if (err) {
+		goto done;
+	}
+	err = aster_fs_read_safe(&file, header, sizeof(header));
+	if (err != sizeof(header) || memcmp(header, "RIFF", 4) != 0 ||
+	    memcmp(header + 8, "WAVEfmt ", 8) != 0 ||
+	    aster_le32(header + 16) != 16 || aster_le16(header + 20) != 1 ||
+	    aster_le16(header + 22) != 2 ||
+	    aster_le32(header + 24) != CONFIG_ASTER_AUDIO_RATE ||
+	    aster_le16(header + 34) != 16 ||
+	    memcmp(header + 36, "data", 4) != 0) {
+		err = -EINVAL;
+		goto close;
+	}
+	length = aster_le32(header + 40);
+	if (!length || length > EFFECT_MAX || (length % ASTER_PLAT_AUDIO_FRAME) ||
+	    length > (size_t)st.size - sizeof(header)) {
+		err = -EINVAL;
+		goto close;
+	}
+	pcm = aster_psram_alloc(length);
+	if (!pcm) {
+		err = -ENOMEM;
+		goto close;
+	}
+	err = aster_fs_read_safe(&file, pcm, length);
+	if (err != (int)length) {
+		err = -EIO;
+		aster_psram_free(pcm);
+		goto close;
+	}
+	effects[slot].pcm = pcm;
+	effects[slot].size = length;
+	err = slot + 1;
+close:
+	fs_close(&file);
+done:
+	k_mutex_unlock(&effect_mu);
+	return err;
+}
+
+int aster_plat_audio_effect_play(uint32_t handle)
+{
+	if (!handle || handle > EFFECT_SLOTS) {
+		return -EINVAL;
+	}
+	int64_t deadline = k_uptime_get() + 500;
+
+retry:
+	k_mutex_lock(&sess_mu, K_FOREVER);
+	if (sess.effect_closing) {
+		k_mutex_unlock(&sess_mu);
+		if (k_uptime_get() >= deadline) {
+			return -EAGAIN;
+		}
+		k_msleep(1);
+		goto retry;
+	}
+	if (sess.state == ASTER_AUDIO_PAUSED) {
+		k_mutex_unlock(&sess_mu);
+		return -EAGAIN;
+	}
+	k_mutex_lock(&effect_mu, K_FOREVER);
+	if (!effects[handle - 1].pcm) {
+		k_mutex_unlock(&effect_mu);
+		k_mutex_unlock(&sess_mu);
+		return -EINVAL;
+	}
+	effects[handle - 1].off = 0;
+	effects[handle - 1].playing = true;
+	k_mutex_unlock(&effect_mu);
+	if (sess.state == ASTER_AUDIO_IDLE) {
+		sess.effect_only = true;
+		sess.size = 1; /* worker needs a live session, PCM comes from effect slot */
+		sess.off = 0;
+		sess.err = 0;
+		sess.state = ASTER_AUDIO_PLAYING;
+		k_sem_give(&play_go);
+	}
+	k_mutex_unlock(&sess_mu);
+	return 0;
+}
+
+int aster_plat_audio_effect_unload(uint32_t handle)
+{
+	if (!handle || handle > EFFECT_SLOTS) {
+		return -EINVAL;
+	}
+	k_mutex_lock(&effect_mu, K_FOREVER);
+	effects[handle - 1].playing = false;
+	effects[handle - 1].off = 0;
+	if (effects[handle - 1].pcm) {
+		aster_psram_free(effects[handle - 1].pcm);
+		effects[handle - 1].pcm = NULL;
+		effects[handle - 1].size = 0;
+	}
+	k_mutex_unlock(&effect_mu);
+	return 0;
+}
+
+void aster_plat_audio_effect_reset(void)
+{
+	k_mutex_lock(&effect_mu, K_FOREVER);
+	for (int i = 0; i < EFFECT_SLOTS; i++) {
+		effects[i].playing = false;
+		effects[i].off = 0;
+		if (effects[i].pcm) {
+			aster_psram_free(effects[i].pcm);
+			effects[i].pcm = NULL;
+			effects[i].size = 0;
+		}
+	}
+	k_mutex_unlock(&effect_mu);
+}
+
 int aster_plat_audio_stop(void)
 {
 	k_mutex_lock(&sess_mu, K_FOREVER);
+	k_mutex_lock(&effect_mu, K_FOREVER);
+	for (int i = 0; i < EFFECT_SLOTS; i++) {
+		effects[i].playing = false;
+		effects[i].off = 0;
+	}
+	k_mutex_unlock(&effect_mu);
 	if (sess.state == ASTER_AUDIO_IDLE) {
 		k_mutex_unlock(&sess_mu);
 		return 0;

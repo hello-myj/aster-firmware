@@ -1336,6 +1336,60 @@ static int32_t n_audio_start_file(wasm_exec_env_t env, uint32_t off, uint32_t le
 #endif
 }
 
+static int32_t n_audio_effect_load(wasm_exec_env_t env, uint32_t off, uint32_t len)
+{
+	int32_t e = audio_out_gate();
+	aster_app_ctx_t *ctx;
+	char apath[160];
+	char real[256];
+
+	if (e != ASTER_OK) {
+		return e;
+	}
+	ctx = ctx_of(env);
+	if (!ctx || !aster_ctx_perm(ctx, ASTER_PERM_FS)) {
+		return ASTER_EPERM;
+	}
+	if (app_str(env, off, len, apath, sizeof(apath)) < 0 ||
+	    sandbox_map(ctx, apath, real, sizeof(real)) != 0) {
+		return ASTER_EINVAL;
+	}
+#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+	int handle = aster_plat_audio_effect_load(real);
+	return handle > 0 ? handle : map_audio_err(handle);
+#else
+	return ASTER_ENODEV;
+#endif
+}
+
+static int32_t n_audio_effect_play(wasm_exec_env_t env, uint32_t handle)
+{
+	ARG_UNUSED(env);
+	int32_t e = audio_out_gate();
+	if (e != ASTER_OK) {
+		return e;
+	}
+#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+	return map_audio_err(aster_plat_audio_effect_play(handle));
+#else
+	return ASTER_ENODEV;
+#endif
+}
+
+static int32_t n_audio_effect_unload(wasm_exec_env_t env, uint32_t handle)
+{
+	ARG_UNUSED(env);
+	int32_t e = audio_out_gate();
+	if (e != ASTER_OK) {
+		return e;
+	}
+#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+	return map_audio_err(aster_plat_audio_effect_unload(handle));
+#else
+	return ASTER_ENODEV;
+#endif
+}
+
 static int32_t n_audio_pause(wasm_exec_env_t env)
 {
 	ARG_UNUSED(env);
@@ -2179,6 +2233,9 @@ static NativeSymbol syms[] = {
 	{ "aster_audio_get_lyrics", (void *)n_audio_get_lyrics, "(ii)i", NULL },
 	{ "aster_audio_get_state", (void *)n_audio_get_state, "(ii)i", NULL },
 	{ "aster_audio_get_volume", (void *)n_audio_get_volume, "()i", NULL },
+	{ "aster_audio_effect_load", (void *)n_audio_effect_load, "(ii)i", NULL },
+	{ "aster_audio_effect_play", (void *)n_audio_effect_play, "(i)i", NULL },
+	{ "aster_audio_effect_unload", (void *)n_audio_effect_unload, "(i)i", NULL },
 	{ "aster_audio_pause", (void *)n_audio_pause, "()i", NULL },
 	{ "aster_audio_record", (void *)n_audio_record, "(ii)i", NULL },
 	{ "aster_audio_resume", (void *)n_audio_resume, "()i", NULL },

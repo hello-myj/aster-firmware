@@ -865,6 +865,10 @@ static void worker_fn(void *p1, void *p2, void *p3)
 		worker_result = ctx_startup(ctx);
 		if (worker_result != ASTER_OK) {
 			current = NULL;
+#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+			(void)aster_plat_audio_stop();
+			aster_plat_audio_effect_reset();
+#endif
 			/* the ctx never ran: hand the record back, aster_app_start
 			 * published it as RUNNING before the handoff */
 			aster_app_mgr_set_state(ctx->id, ASTER_APP_STATE_STOPPED, 0);
@@ -891,6 +895,11 @@ static void worker_fn(void *p1, void *p2, void *p3)
 		/* teardown (wasm calls must run on this thread) */
 		call_fn(ctx, ctx->f_stop, 0, NULL);
 		call_fn(ctx, ctx->f_destroy, 0, NULL);
+#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+		/* Reclaim native effect buffers even if a guest callback trapped. */
+		(void)aster_plat_audio_stop();
+		aster_plat_audio_effect_reset();
+#endif
 
 		char id[64];
 		strncpy(id, ctx->id, sizeof(id) - 1);
