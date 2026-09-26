@@ -30,6 +30,29 @@ LOG_MODULE_REGISTER(aster_cam, LOG_LEVEL_INF);
 static const struct gpio_dt_spec cam_pwdn =
 	GPIO_DT_SPEC_GET_OR(DT_PATH(zephyr_user), cam_pwdn_gpios, {0});
 
+/* The GC0308 sends RGB565 high byte first and the LCD_CAM stores the pair in
+ * that order, so the DMA buffer reads as big-endian u16: byte 0 carries
+ * R[4:0] G[5:3], byte 1 carries G[2:0] B[4:0]. Every other ASTER buffer --
+ * surfaces, the ABI's ASTER_PIXEL_RGB565 (contract/include/aster/types.h),
+ * the panel path's `src_le` -- is little-endian, so an unswapped frame shows
+ * up as swapped colours: red where blue/green should be, mottled
+ * green/magenta confetti over the whole picture.
+ *
+ * Swapping is done here rather than with the DVP node's `invert-byte-order`
+ * property: that sets LCD_CAM's cam_byte_order bit, which in 8-bit input
+ * mode (cam_2byte_en = 0) makes the DMA write nothing at all -- a capture
+ * comes back as 153600 zero bytes.
+ */
+static void swap_bytes_rgb565(uint8_t *buf, size_t len)
+{
+	for (size_t i = 0; i + 1 < len; i += 2) {
+		uint8_t b0 = buf[i];
+
+		buf[i] = buf[i + 1];
+		buf[i + 1] = b0;
+	}
+}
+
 /* Shared capture core: DVP one-shot, hand the RGB565 frame to sink().
  * sink NULL = probe-only (power up, stream, discard, power down). The sink
  * receives the driver's own DMA buffer -- copying/writing happens there so
@@ -116,6 +139,10 @@ static int cam_capture_core(int (*sink)(const uint8_t *rgb565, size_t len, void 
 		goto release;
 	}
 	sys_cache_data_invd_range(got->buffer, bsz);
+	swap_bytes_rgb565(got->buffer, bsz);
+	/* We just wrote through the cache: push the swapped bytes out so the
+	 * buffer is in a defined state when it goes back to the pool. */
+	sys_cache_data_flush_range(got->buffer, bsz);
 	if (sink) {
 		err = sink(got->buffer, CAM_BYTES, ud);
 	}
