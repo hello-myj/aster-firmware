@@ -9,4 +9,5 @@ target_sources(app PRIVATE
 	aster_logring.c
 	aster_file_svc.c
 	aster_sig.c
+	aster_time.c
 )

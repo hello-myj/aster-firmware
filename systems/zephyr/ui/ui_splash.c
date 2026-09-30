@@ -5,7 +5,7 @@
  * screen. Deliberately font-free: everything is block pixels (hand-coded
  * 5x7/3x5 glyphs), because the whole wait is for fonts to become ready.
  *
- * Paint = one logical-width x 96 RGB565 band pushed straight through
+ * Paint = one current-window-width x 96 RGB565 band pushed straight through
  * aster_plat_display_write_at at ~8 fps; costs nothing from the LVGL pool
  * and cannot be blocked by the font state machine it reports.
  */
@@ -15,28 +15,17 @@
 #include <zephyr/logging/log.h>
 
 #include "ui_splash.h"
-#include "ui_geom.h"
 #include "aster_mem.h"
 #include "aster_platform.h"
 #include "font_sd.h"
 
 LOG_MODULE_REGISTER(aster_splash, LOG_LEVEL_INF);
 
-/* The band IS the logical width, not a 240 px strip. It used to be the
- * literal 240 with a y of 104, which was a correct picture of one panel:
- * on a 320-wide screen write_at accepted the band happily and the remaining
- * 80 columns kept whatever the panel had -- panel noise, which is the exact
- * thing the splash exists to cover. Sizing to ASTER_UI_W fixes the coverage
- * and makes every `(SPL_W - w) / 2` below centre on the screen for free. */
-#define SPL_W    ASTER_UI_W
+/* The panel starts at its DT size (320x240 on the reference board), then
+ * boot switches it to portrait (240x320). The splash is painted after that
+ * switch, so compile-time DT dimensions cannot describe its window. */
 #define SPL_H    96
-#define SPL_Y0   ((ASTER_UI_H - SPL_H) / 2)	/* centred band */
 #define SPL_PERIOD 125u	/* repaint at ~8 fps: enough motion, cheap SPI */
-
-/* SPL_Y0 is unsigned arithmetic on a difference: a logical screen shorter
- * than the band wraps to a huge y and write_at drops the whole paint, which
- * would leave the splash invisible with no error anywhere. */
-BUILD_ASSERT(ASTER_UI_H >= SPL_H, "logical screen is shorter than the splash band");
 
 /* ASTER wordmark, 5x7, x3 scale, centred. */
 static const uint8_t GLYPH_M[7] = { 0x11, 0x1B, 0x15, 0x11, 0x11, 0x11, 0x11 };
@@ -56,14 +45,15 @@ static const uint8_t GLYPH_PCT[5] = { 5, 1, 2, 4, 5 };
 static const int8_t SPIN_R = 14;
 
 static uint16_t *s_band;		/* PSRAM, W*H, native RGB565 */
+static uint32_t s_w, s_y0;
 static bool s_on;
 static uint32_t s_next_ms;
 static uint32_t s_phase;
 
 static void px(int x, int y, uint16_t c)
 {
-	if ((unsigned)x < SPL_W && (unsigned)y < SPL_H) {
-		s_band[(size_t)y * SPL_W + x] = c;
+	if ((unsigned)x < s_w && (unsigned)y < SPL_H) {
+		s_band[(size_t)y * s_w + x] = c;
 	}
 }
 
@@ -108,12 +98,12 @@ static void paint(uint32_t prog)
 	const uint16_t COL = 0xFFFFu, BG = 0x0000u;
 	int i;
 
-	memset(s_band, 0, SPL_W * SPL_H * 2);
+	memset(s_band, 0, (size_t)s_w * SPL_H * sizeof(*s_band));
 
 	/* wordmark ASTER, 15x21 each, 8 px gaps, centred near the top */
 	{
 		int total = 15 * 3 + 8 * 2;
-		int lx = (SPL_W - total) / 2;
+		int lx = ((int)s_w - total) / 2;
 		int ly = 8;
 
 		blit(GLYPH_M, 7, 5, 3, lx, ly, COL);
@@ -140,7 +130,7 @@ static void paint(uint32_t prog)
 
 	/* progress bar: 160x8 frame, filled by prog% */
 	{
-		int bx = (SPL_W - 160) / 2, by = 46;
+		int bx = ((int)s_w - 160) / 2, by = 46;
 
 		for (int x = 0; x < 160; x++) {
 			px(bx + x, by, COL);
@@ -159,23 +149,42 @@ static void paint(uint32_t prog)
 		}
 
 		/* percent digits under the bar */
-		draw_num(SPL_W / 2 - 16, 62, prog, COL);
-		blit(GLYPH_PCT, 5, 3, 2, SPL_W / 2 + (prog >= 100 ? 14 : 8), 62,
+		draw_num((int)s_w / 2 - 16, 62, prog, COL);
+		blit(GLYPH_PCT, 5, 3, 2, (int)s_w / 2 + (prog >= 100 ? 14 : 8), 62,
 		     COL);
 	}
 	ARG_UNUSED(BG);
 
-	(void)aster_plat_display_write_at((const uint8_t *)s_band, 0, SPL_Y0,
-					SPL_W, SPL_H, SPL_W);
+	int err = aster_plat_display_write_at((const uint8_t *)s_band, 0, s_y0,
+					     s_w, SPL_H, s_w);
+
+	if (err) {
+		LOG_ERR("splash write %ux%u at y=%u failed: %d",
+			(unsigned)s_w, SPL_H, (unsigned)s_y0, err);
+	} else if (s_phase == 1u) {
+		LOG_INF("splash first frame %ux%u at y=%u",
+			(unsigned)s_w, SPL_H, (unsigned)s_y0);
+	}
 }
 
 void aster_splash_boot(void)
 {
+	aster_display_info_t di = { .size = sizeof(di), .version = 1 };
+
 	if (s_on) {
 		return;
 	}
-	s_band = aster_psram_alloc(SPL_W * SPL_H * 2);
+	if (aster_plat_display_get_info(0, &di) != ASTER_OK ||
+	    di.width < 160u || di.height < SPL_H) {
+		LOG_ERR("splash: invalid display window %ux%u",
+			(unsigned)di.width, (unsigned)di.height);
+		return;
+	}
+	s_w = di.width;
+	s_y0 = (di.height - SPL_H) / 2u;
+	s_band = aster_psram_alloc((size_t)s_w * SPL_H * sizeof(*s_band));
 	if (!s_band) {
+		LOG_ERR("splash: band allocation failed");
 		return;
 	}
 	s_on = true;
@@ -204,5 +213,6 @@ void aster_splash_off(void)
 	}
 	aster_psram_free(s_band);
 	s_band = NULL;
+	s_w = s_y0 = 0;
 	s_on = false;
 }

@@ -34,6 +34,24 @@ config ASTER_APP_STACK_SIZE
 	default 32768
 	depends on ASTER_WAMR
 
+config ASTER_TIMEZONE_OFFSET_MINUTES
+	int "Local time zone offset from UTC (minutes)"
+	range -720 840
+	default 480
+	depends on ASTER
+	help
+	  Local calendar fields returned by the read-only wall-clock API and shown
+	  by the launcher use this fixed offset. The UTC Unix timestamp is unchanged.
+
+config ASTER_TIME_DEFAULT_EPOCH
+	int "Default UTC Unix time before network synchronization"
+	range 0 2147483647
+	default 1767196800
+	depends on ASTER
+	help
+	  Fallback wall clock set at boot until SNTP succeeds. The default value
+	  corresponds to 2026-01-01 00:00 at UTC+8.
+
 menu "Hardware platform port"
 
 choice ASTER_PLATFORM_PORT

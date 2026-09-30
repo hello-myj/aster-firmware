@@ -268,26 +268,70 @@ typedef struct {
 	char ip[16];
 	int8_t rssi;
 	int state;
+	uint8_t security;
 	const char *state_txt;
 	const char *sec_txt;
 } aster_wifi_status_t;
+
+enum aster_plat_wifi_state {
+	ASTER_PLAT_WIFI_STATE_DISCONNECTED = 0,
+	ASTER_PLAT_WIFI_STATE_DISABLED,
+	ASTER_PLAT_WIFI_STATE_INACTIVE,
+	ASTER_PLAT_WIFI_STATE_SCANNING,
+	ASTER_PLAT_WIFI_STATE_AUTHENTICATING,
+	ASTER_PLAT_WIFI_STATE_ASSOCIATING,
+	ASTER_PLAT_WIFI_STATE_ASSOCIATED,
+	ASTER_PLAT_WIFI_STATE_FOUR_WAY,
+	ASTER_PLAT_WIFI_STATE_GROUP_HANDSHAKE,
+	ASTER_PLAT_WIFI_STATE_COMPLETED,
+	ASTER_PLAT_WIFI_STATE_UNKNOWN,
+};
+
+enum aster_plat_wifi_security {
+	ASTER_PLAT_WIFI_SECURITY_OPEN = 0,
+	ASTER_PLAT_WIFI_SECURITY_PERSONAL,
+	ASTER_PLAT_WIFI_SECURITY_ENTERPRISE,
+	ASTER_PLAT_WIFI_SECURITY_WEP,
+	ASTER_PLAT_WIFI_SECURITY_OTHER = 255,
+};
 
 int  aster_plat_wifi_scan(aster_wifi_ap_t *out, int max, int *count);
 int  aster_plat_wifi_connect(const char *ssid, const char *psk);
 int  aster_plat_wifi_disconnect(void);
 int  aster_plat_wifi_status(aster_wifi_status_t *st);
 const char *aster_plat_wifi_sec_txt(uint8_t security);
+uint32_t aster_plat_wifi_security_class(uint8_t security);
+uint32_t aster_plat_wifi_state_class(int state);
 
-/* The SSID this device was last asked to join, since boot (0, or -ENOENT
- * when it has never been asked, or -EBUSY when a connect is in flight --
- * this one never blocks, so it is safe on the UI thread). RAM only: there
- * is deliberately no credential store, so a reboot forgets. */
+/* Nonblocking Wi-Fi job interface used by SDK imports and the system UI.
+ * Scan/connect operations execute on a dedicated Wi-Fi work queue. */
+enum aster_plat_wifi_operation {
+	ASTER_PLAT_WIFI_OP_NONE = 0,
+	ASTER_PLAT_WIFI_OP_SCAN,
+	ASTER_PLAT_WIFI_OP_CONNECT,
+	ASTER_PLAT_WIFI_OP_DISCONNECT,
+	ASTER_PLAT_WIFI_OP_RECONNECT,
+	ASTER_PLAT_WIFI_OP_FORGET,
+};
+int  aster_plat_wifi_scan_start(void);
+int  aster_plat_wifi_scan_results(aster_wifi_ap_t *out, int max, int *count);
+int  aster_plat_wifi_connect_start(const char *ssid, const char *psk);
+int  aster_plat_wifi_disconnect_start(void);
+int  aster_plat_wifi_reconnect_start(void);
+int  aster_plat_wifi_forget_start(void);
+void aster_plat_wifi_operation(uint32_t *operation, uint32_t *last_operation,
+			       int *last_result);
+
+/* Called after the SD card mounts: loads the saved profile and queues the
+ * boot reconnect without delaying system UI startup. */
+int  aster_plat_wifi_storage_ready(void);
+int  aster_plat_wifi_forget(void);
+
+/* The SSID of the last successful join, held in RAM after load from the
+ * system KV profile (0, -ENOENT if none, -EBUSY during a join). */
 int  aster_plat_wifi_last_ssid(char *buf, size_t n);
-/* Re-issue that same request, PSK included -- the credentials only ever
- * live in the port, so "connect again" is not something a caller can
- * reconstruct from the SSID alone. Blocking (up to the connect + DHCP
- * timeouts), so never from the UI thread. -ENOENT when there is nothing
- * to reconnect to. */
+/* Blocking platform operation; SDK and UI callers should queue the async
+ * variant. -ENOENT when no successful profile is available. */
 int  aster_plat_wifi_reconnect(void);
 
 

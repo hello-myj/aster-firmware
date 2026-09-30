@@ -16,6 +16,7 @@
 #include "aster_kv.h"
 #include "aster_perms.h"
 #include "aster_platform.h"
+#include "aster_time.h"
 #if IS_ENABLED(CONFIG_ASTER_IMGDEC)
 #include "imgdec.h"
 #endif
@@ -226,6 +227,27 @@ static int32_t n_time_now_ms(wasm_exec_env_t env)
 	}
 	uint64_t t = (uint64_t)k_uptime_get() - ctx->start_ms;
 	return (int32_t)t;
+}
+
+static int32_t n_time_get(wasm_exec_env_t env, uint32_t out_off, uint32_t size)
+{
+	aster_time_info_t info;
+	uint32_t copy_size;
+	uint8_t *dst;
+
+	if (size < 2 * sizeof(uint32_t)) {
+		return ASTER_EINVAL;
+	}
+	copy_size = MIN(size, sizeof(info));
+	dst = buf(env, out_off, copy_size);
+	if (!dst) {
+		return ASTER_EINVAL;
+	}
+	if (aster_time_read(&info) != 0) {
+		return ASTER_EIO;
+	}
+	memcpy(dst, &info, copy_size);
+	return ASTER_OK;
 }
 
 /* ============ timer ============ */
@@ -1505,6 +1527,205 @@ static int32_t n_audio_get_lyrics(wasm_exec_env_t env, uint32_t off, uint32_t si
 #endif
 }
 
+/* ============ Wi-Fi station (ABI 3.5, permission "wifi") ============ */
+
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+static int32_t map_wifi_err(int err)
+{
+	if (!err) return ASTER_OK;
+	if (err == -EINVAL) return ASTER_EINVAL;
+	if (err == -ENODEV) return ASTER_ENODEV;
+	if (err == -ENOTSUP) return ASTER_ENOTSUP;
+	if (err == -EBUSY) return ASTER_EBUSY;
+	if (err == -EAGAIN || err == -EINPROGRESS) return ASTER_EAGAIN;
+	if (err == -ENOMEM) return ASTER_ENOMEM;
+	if (err == -ENOENT) return ASTER_ENOENT;
+	if (err == -ETIMEDOUT) return ASTER_ETIMEDOUT;
+	return ASTER_EIO;
+}
+
+static int32_t wifi_gate(wasm_exec_env_t env)
+{
+	aster_app_ctx_t *ctx = ctx_of(env);
+
+	if (!ctx) return ASTER_EBADF;
+	if (!aster_ctx_perm(ctx, ASTER_PERM_WIFI)) return ASTER_EPERM;
+	return aster_sysinfo_has_feature(ASTER_FEATURE_WIFI) ? ASTER_OK : ASTER_ENOTSUP;
+}
+#endif
+
+static int32_t n_wifi_scan_start(wasm_exec_env_t env)
+{
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+	int32_t gate = wifi_gate(env);
+	return gate ? gate : map_wifi_err(aster_plat_wifi_scan_start());
+#else
+	ARG_UNUSED(env);
+	return ASTER_ENOTSUP;
+#endif
+}
+
+static int32_t n_wifi_scan_results(wasm_exec_env_t env, uint32_t out_off,
+				   uint32_t capacity)
+{
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+	int32_t gate = wifi_gate(env);
+	aster_wifi_ap_t rows[ASTER_WIFI_AP_MAX];
+	int count = 0;
+	int err;
+	uint64_t bytes;
+	uint8_t *dst;
+
+	if (gate) return gate;
+	if (capacity == 0 || capacity > ASTER_WIFI_AP_MAX) return ASTER_EINVAL;
+	bytes = (uint64_t)capacity * sizeof(aster_wifi_ap_info_t);
+	if (bytes > UINT32_MAX) return ASTER_EINVAL;
+	dst = buf(env, out_off, (uint32_t)bytes);
+	if (!dst) return ASTER_EINVAL;
+	err = aster_plat_wifi_scan_results(rows, (int)capacity, &count);
+	if (err) return map_wifi_err(err);
+	for (int i = 0; i < count; i++) {
+		aster_wifi_ap_info_t ap = {
+			.size = sizeof(ap),
+			.version = 1,
+			.rssi = rows[i].rssi,
+			.channel = rows[i].channel,
+			.security = aster_plat_wifi_security_class(rows[i].security),
+		};
+		memcpy(ap.ssid, rows[i].ssid, sizeof(ap.ssid));
+		memcpy(dst + (size_t)i * sizeof(ap), &ap, sizeof(ap));
+	}
+	return count;
+#else
+	ARG_UNUSED(env); ARG_UNUSED(out_off); ARG_UNUSED(capacity);
+	return ASTER_ENOTSUP;
+#endif
+}
+
+static int32_t n_wifi_connect(wasm_exec_env_t env, uint32_t ssid_off,
+			      uint32_t ssid_len, uint32_t password_off,
+			      uint32_t password_len)
+{
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+	int32_t gate = wifi_gate(env);
+	char ssid[ASTER_WIFI_SSID_MAX + 1];
+	char password[65] = {0};
+
+	if (gate) return gate;
+	if (ssid_len == 0 || ssid_len > ASTER_WIFI_SSID_MAX || password_len > 64 ||
+	    app_str(env, ssid_off, ssid_len, ssid, sizeof(ssid)) < 0 ||
+	    strlen(ssid) != ssid_len) {
+		return ASTER_EINVAL;
+	}
+	if (password_len &&
+	    (app_str(env, password_off, password_len, password,
+		     sizeof(password)) < 0 || strlen(password) != password_len)) {
+		return ASTER_EINVAL;
+	}
+	return map_wifi_err(aster_plat_wifi_connect_start(ssid,
+							 password_len ? password : NULL));
+#else
+	ARG_UNUSED(env); ARG_UNUSED(ssid_off); ARG_UNUSED(ssid_len);
+	ARG_UNUSED(password_off); ARG_UNUSED(password_len);
+	return ASTER_ENOTSUP;
+#endif
+}
+
+static int32_t n_wifi_disconnect(wasm_exec_env_t env)
+{
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+	int32_t gate = wifi_gate(env);
+	return gate ? gate : map_wifi_err(aster_plat_wifi_disconnect_start());
+#else
+	ARG_UNUSED(env);
+	return ASTER_ENOTSUP;
+#endif
+}
+
+static int32_t n_wifi_reconnect(wasm_exec_env_t env)
+{
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+	int32_t gate = wifi_gate(env);
+	return gate ? gate : map_wifi_err(aster_plat_wifi_reconnect_start());
+#else
+	ARG_UNUSED(env);
+	return ASTER_ENOTSUP;
+#endif
+}
+
+static int32_t n_wifi_forget(wasm_exec_env_t env)
+{
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+	int32_t gate = wifi_gate(env);
+	return gate ? gate : map_wifi_err(aster_plat_wifi_forget_start());
+#else
+	ARG_UNUSED(env);
+	return ASTER_ENOTSUP;
+#endif
+}
+
+static int32_t n_wifi_status(wasm_exec_env_t env, uint32_t out_off,
+			     uint32_t out_size)
+{
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+	const uint32_t min_size = offsetof(aster_wifi_info_t, last_result) +
+				  sizeof(((aster_wifi_info_t *)0)->last_result);
+	aster_wifi_status_t platform = {0};
+	aster_wifi_info_t status = {0};
+	uint32_t operation = ASTER_PLAT_WIFI_OP_NONE;
+	uint32_t last_operation = ASTER_PLAT_WIFI_OP_NONE;
+	int last_result = -ENOENT;
+	int32_t gate = wifi_gate(env);
+	uint8_t *dst;
+	uint32_t copy_size;
+	int err;
+
+	if (gate) return gate;
+	if (out_size < min_size) return ASTER_EINVAL;
+	copy_size = MIN(out_size, (uint32_t)sizeof(status));
+	dst = buf(env, out_off, copy_size);
+	if (!dst) return ASTER_EINVAL;
+	err = aster_plat_wifi_status(&platform);
+	if (err) return map_wifi_err(err);
+	aster_plat_wifi_operation(&operation, &last_operation, &last_result);
+	status.size = sizeof(status);
+	status.version = 1;
+	status.state = aster_plat_wifi_state_class(platform.state);
+	status.operation = operation;
+	status.last_operation = last_operation;
+	status.last_result = map_wifi_err(last_result);
+	status.rssi = platform.rssi;
+	status.security = aster_plat_wifi_security_class(platform.security);
+	memcpy(status.ssid, platform.ssid, sizeof(status.ssid));
+	memcpy(status.ipv4, platform.ip, sizeof(status.ipv4));
+	memcpy(dst, &status, copy_size);
+	return ASTER_OK;
+#else
+	ARG_UNUSED(env); ARG_UNUSED(out_off); ARG_UNUSED(out_size);
+	return ASTER_ENOTSUP;
+#endif
+}
+
+static int32_t n_wifi_get_saved_ssid(wasm_exec_env_t env, uint32_t out_off,
+				     uint32_t capacity)
+{
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+	int32_t gate = wifi_gate(env);
+	uint8_t *dst;
+	int err;
+
+	if (gate) return gate;
+	if (capacity < ASTER_WIFI_SSID_MAX + 1) return ASTER_EINVAL;
+	dst = buf(env, out_off, ASTER_WIFI_SSID_MAX + 1);
+	if (!dst) return ASTER_EINVAL;
+	err = aster_plat_wifi_last_ssid((char *)dst, ASTER_WIFI_SSID_MAX + 1);
+	return map_wifi_err(err);
+#else
+	ARG_UNUSED(env); ARG_UNUSED(out_off); ARG_UNUSED(capacity);
+	return ASTER_ENOTSUP;
+#endif
+}
+
 /* ============ fs ============ */
 
 static int fs_slot(aster_app_ctx_t *ctx)
@@ -2281,9 +2502,18 @@ static NativeSymbol syms[] = {
 	{ "aster_gfx_bmp_free", (void *)n_gfx_bmp_free, "(i)i", NULL },
 	{ "aster_system_get_abi_version", (void *)n_system_get_abi, "()i", NULL },
 	{ "aster_system_has_feature", (void *)n_system_has_feature, "(i)i", NULL },
+	{ "aster_time_get", (void *)n_time_get, "(ii)i", NULL },
 	{ "aster_time_now_ms", (void *)n_time_now_ms, "()i", NULL },
 	{ "aster_timer_create", (void *)n_timer_create, "(iiii)i", NULL },
 	{ "aster_timer_destroy", (void *)n_timer_destroy, "(i)i", NULL },
+	{ "aster_wifi_connect", (void *)n_wifi_connect, "(iiii)i", NULL },
+	{ "aster_wifi_disconnect", (void *)n_wifi_disconnect, "()i", NULL },
+	{ "aster_wifi_forget", (void *)n_wifi_forget, "()i", NULL },
+	{ "aster_wifi_get_saved_ssid", (void *)n_wifi_get_saved_ssid, "(ii)i", NULL },
+	{ "aster_wifi_reconnect", (void *)n_wifi_reconnect, "()i", NULL },
+	{ "aster_wifi_scan_results", (void *)n_wifi_scan_results, "(ii)i", NULL },
+	{ "aster_wifi_scan_start", (void *)n_wifi_scan_start, "()i", NULL },
+	{ "aster_wifi_status", (void *)n_wifi_status, "(ii)i", NULL },
 };
 
 NativeSymbol *aster_native_symbols(void)

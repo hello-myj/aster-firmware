@@ -103,7 +103,7 @@ BUILD_ASSERT(QP_SHEET_MAX_H + 12 <= ASTER_UI_H,
 #define QPANEL_KV_VOL "volume"
 #endif
 
-/* ---------- state (UI thread, except s_wifi_busy) ---------- */
+/* ---------- state (UI thread) ---------- */
 static const aster_qpanel_theme_ops_t *s_ops;
 static aster_qpanel_palette_t s_pal;
 
@@ -114,8 +114,6 @@ static lv_obj_t *s_vol_slider, *s_vol_val;
 #if IS_ENABLED(CONFIG_ASTER_WIFI)
 static lv_obj_t *s_dot_wifi, *s_wifi_lbl, *s_wifi_sub;
 static lv_obj_t *s_wifi_btn, *s_wifi_btn_lbl;
-/* Read on the UI thread, written by the Wi-Fi worker. */
-static atomic_t s_wifi_busy = ATOMIC_INIT(0);
 #endif
 static lv_obj_t *s_theme_name, *s_theme_btn;
 static lv_obj_t *s_dot_sd, *s_sd_lbl;
@@ -482,36 +480,10 @@ void aster_qpanel_restore_volume(void)
 #endif /* CONFIG_ASTER_AUDIO */
 
 #if IS_ENABLED(CONFIG_ASTER_WIFI)
-/* Own work queue, not the system one: k_work_submit() on the sysworkq
- * would put a call that blocks for up to 50 s (connect + DHCP) in front of
- * the cpfont metric streams, which run there. Starting it lazily keeps the
- * 2 KB of internal-DRAM stack out of images that never open this panel. */
-static K_THREAD_STACK_DEFINE(s_wifi_stack, 2048);
-static struct k_work_q s_wifi_q;
-static bool s_wifi_q_up;
-
-static void wifi_work_fn(struct k_work *w)
-{
-	int err = aster_plat_wifi_reconnect();
-
-	atomic_set(&s_wifi_busy, 0);
-	LOG_INF("qpanel: wifi reconnect -> %d", err);
-}
-static K_WORK_DEFINE(s_wifi_work, wifi_work_fn);
-
 static void wifi_connect_start(void)
 {
-	if (!s_wifi_q_up) {
-		k_work_queue_start(&s_wifi_q, s_wifi_stack,
-				   K_THREAD_STACK_SIZEOF(s_wifi_stack),
-				   K_PRIO_PREEMPT(12), NULL);
-		s_wifi_q_up = true;
-	}
-	if (k_work_submit_to_queue(&s_wifi_q, &s_wifi_work) < 0) {
-		return; /* already queued or running: one join at a time */
-	}
-	atomic_set(&s_wifi_busy, 1);
-	LOG_INF("qpanel: wifi reconnect dispatched");
+	int err = aster_plat_wifi_reconnect_start();
+	LOG_INF("qpanel: wifi reconnect dispatched -> %d", err);
 }
 
 static void wifi_refresh(void);
@@ -519,16 +491,17 @@ static void wifi_refresh(void);
 static void on_wifi_btn(lv_event_t *e)
 {
 	aster_wifi_status_t ws;
+	uint32_t operation = ASTER_PLAT_WIFI_OP_NONE;
+	int err;
 
 	ARG_UNUSED(e);
-	if (atomic_get(&s_wifi_busy)) {
+	aster_plat_wifi_operation(&operation, NULL, NULL);
+	if (operation != ASTER_PLAT_WIFI_OP_NONE) {
 		return; /* the button is inert until the join resolves */
 	}
 	if (aster_plat_wifi_status(&ws) == 0 && ws.state == WIFI_STATE_COMPLETED) {
-		/* Cheap (a net_mgmt request, no wait), unlike connect -- this
-		 * is the one Wi-Fi action that may run on the UI thread. */
-		LOG_INF("qpanel: wifi disconnect -> %d",
-			aster_plat_wifi_disconnect());
+		err = aster_plat_wifi_disconnect_start();
+		LOG_INF("qpanel: wifi disconnect dispatched -> %d", err);
 	} else {
 		wifi_connect_start();
 	}
@@ -539,6 +512,7 @@ static void wifi_refresh(void)
 {
 	aster_wifi_status_t ws;
 	char last[ASTER_WIFI_SSID_MAX + 1];
+	uint32_t operation = ASTER_PLAT_WIFI_OP_NONE;
 	int err;
 	bool linked, remembered, busy;
 
@@ -550,7 +524,8 @@ static void wifi_refresh(void)
 	/* -EBUSY while a join is in flight, and -ENOENT when the device has
 	 * never been told to join anything. Same reading either way here. */
 	remembered = aster_plat_wifi_last_ssid(last, sizeof(last)) == 0;
-	busy = atomic_get(&s_wifi_busy) != 0;
+	aster_plat_wifi_operation(&operation, NULL, NULL);
+	busy = operation != ASTER_PLAT_WIFI_OP_NONE;
 
 	set_label(s_wifi_lbl, aster_ui_wifi_word(err ? -1 : ws.state));
 	dot_color(s_dot_wifi, linked ? s_pal.accent : s_pal.dim);
@@ -576,16 +551,18 @@ static void wifi_refresh(void)
 		}
 	}
 
-	/* One control, three readings. There is no credential store and no
-	 * keyboard, so the only join this panel can offer is the network the
-	 * device was last told to join (from `hw wifi connect`); with none,
-	 * the button is not shown at all rather than shown dead. */
+	/* The panel can reconnect the saved profile or disconnect the current
+	 * link. New credentials are entered through `hw wifi connect` or an app
+	 * using the Wi-Fi ABI; with no saved profile, do not show a dead button. */
 	if (!s_wifi_btn) {
 		return;
 	}
 	if (busy) {
 		lv_obj_clear_flag(s_wifi_btn, LV_OBJ_FLAG_HIDDEN);
-		set_label(s_wifi_btn_lbl, "连接中");
+		set_label(s_wifi_btn_lbl,
+			  operation == ASTER_PLAT_WIFI_OP_SCAN ? "扫描中" :
+			  operation == ASTER_PLAT_WIFI_OP_DISCONNECT ? "断开中" :
+			  operation == ASTER_PLAT_WIFI_OP_FORGET ? "处理中" : "连接中");
 		lv_obj_set_style_text_color(s_wifi_btn_lbl, hexc(s_pal.dim), 0);
 	} else if (linked || remembered) {
 		lv_obj_clear_flag(s_wifi_btn, LV_OBJ_FLAG_HIDDEN);

@@ -53,6 +53,12 @@ int main(void)
 	} else {
 		(void)aster_app_mgr_init();
 		LOG_INF("apps registered: %d", aster_app_mgr_count());
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+		int wifi_err = aster_plat_wifi_storage_ready();
+		if (wifi_err) {
+			LOG_WRN("Wi-Fi startup profile: %d", wifi_err);
+		}
+#endif
 	}
 
 	if (IS_ENABLED(CONFIG_ASTER_WAMR)) {

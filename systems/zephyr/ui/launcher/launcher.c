@@ -22,6 +22,7 @@
 #include "aster_kv.h"
 #include "aster_sysinfo.h"
 #include "aster_platform.h"
+#include "aster_time.h"
 
 #if IS_ENABLED(CONFIG_ASTER_WIFI)
 /* The WiFi readout needs WIFI_STATE_COMPLETED; ui_wifi.h holds the switch
@@ -262,7 +263,7 @@ static lv_obj_t *s_home, *s_drawer, *s_list;
  * drawer keeps only its app counter. s_lb_wifi_d is the second WiFi line
  * (SSID and address) and is hidden rather than blanked when there is no
  * link. */
-static lv_obj_t *s_lb_clock, *s_lb_up, *s_lb_soc;
+static lv_obj_t *s_lb_clock, *s_lb_up, *s_lb_date;
 static lv_obj_t *s_lb_wifi, *s_lb_wifi_d, *s_lb_sd;
 static lv_obj_t *s_dot_wifi, *s_dot_sd;
 static lv_obj_t *s_drawer_n;
@@ -710,8 +711,7 @@ static void build_drawer(void)
 }
 
 /* Only touch a label when the text actually changed. lv_label_set_text()
- * reallocs and invalidates unconditionally, and the WiFi/SD lines change
- * maybe twice per boot while this runs at 1 Hz. */
+ * reallocs and invalidates unconditionally. */
 static void set_label(lv_obj_t *o, const char *s)
 {
 	const char *cur;
@@ -724,6 +724,11 @@ static void set_label(lv_obj_t *o, const char *s)
 		return;
 	}
 	lv_label_set_text(o, s);
+	/* Runtime status strings (date, Wi-Fi and uptime) differ from the
+	 * placeholders passed to mk_label(). Queue their CJK glyphs too; otherwise
+	 * only the prebuilt digits appear on the first refresh. All launcher labels
+	 * resolve to the same baked body face. */
+	aster_ui_font_warm(ASTER_FONT_UI_PX, s);
 }
 
 static void dot_color(lv_obj_t *d, uint32_t c)
@@ -733,41 +738,50 @@ static void dot_color(lv_obj_t *d, uint32_t c)
 	}
 }
 
-/* ---------- status (1 Hz; the clock is uptime -- there is no RTC) ---------- */
+/* ---------- status (1 Hz; wall clock and monotonic uptime stay separate) ---------- */
 
 static void refresh_home(void)
 {
 	const launcher_theme_t *th = &s_themes[s_theme];
-	uint32_t s = (uint32_t)(k_uptime_get() / 1000u);
-	char clock[16], up[40];
+	uint64_t run_s = (uint64_t)k_uptime_get() / 1000u;
+	uint32_t s = (uint32_t)run_s;
+	aster_time_info_t now;
+	char clock[24], up[40], date[32];
 
 	if (s == s_last_sec || !s_lb_clock) {
 		return;
 	}
 	s_last_sec = s;
 
-	snprintf(clock, sizeof(clock), "%02u:%02u:%02u",
-		 (unsigned)((s / 3600u) % 100u), (unsigned)((s / 60u) % 60u),
-		 (unsigned)(s % 60u));
-	set_label(s_lb_clock, clock);
-	snprintf(up, sizeof(up), "运行 %02u:%02u", (unsigned)(s / 3600u),
-		 (unsigned)((s / 60u) % 60u));
-	set_label(s_bar_clock, up);
+	if (aster_time_read(&now) == 0) {
+		snprintf(clock, sizeof(clock), "%02u:%02u:%02u",
+			 (unsigned)now.hour, (unsigned)now.minute,
+			 (unsigned)now.second);
+		snprintf(date, sizeof(date), "%s %04d-%02u-%02u",
+			 (now.flags & ASTER_TIME_FLAG_SYNCED) ? "同步" : "默认",
+			 (int)now.year, (unsigned)now.month, (unsigned)now.day);
+		snprintf(up, sizeof(up),
+			 (now.flags & ASTER_TIME_FLAG_SYNCED) ? "%02u:%02u" : "默认 %02u:%02u",
+			 (unsigned)now.hour, (unsigned)now.minute);
+		set_label(s_lb_clock, clock);
+		set_label(s_lb_date, date);
+		set_label(s_bar_clock, up);
+	} else {
+		set_label(s_lb_clock, "--:--:--");
+		set_label(s_lb_date, "默认时间");
+		set_label(s_bar_clock, "默认 --:--");
+	}
 
-	/* One fact per line. This started as a single "esp32s3 · 已运行 0时0分"
-	 * and measured 229 px inside a 240 px label -- 11 px of headroom, which
-	 * a two-digit hour would have eaten. Splitting it means neither line can
-	 * reach the edge: the widest uptime ("99时59分") is about 149 px and the
-	 * SoC name is set once at boot. */
+	/* Runtime remains monotonic, so SNTP corrections cannot jump it. */
 	snprintf(up, sizeof(up), "已运行 %u时%u分",
-		 (unsigned)((s / 3600u) % 100u), (unsigned)((s / 60u) % 60u));
+		 (unsigned)(run_s / 3600u), (unsigned)((run_s / 60u) % 60u));
 	set_label(s_lb_up, up);
 
 #if IS_ENABLED(CONFIG_ASTER_WIFI)
 	{
 		aster_wifi_status_t ws;
 		int err = aster_plat_wifi_status(&ws);
-		/* `linked`, not `up`: the uptime string above owns that name. */
+		/* Link state is independent of both wall clock and runtime. */
 		int linked = !err && ws.state == WIFI_STATE_COMPLETED;
 
 		set_label(s_lb_wifi, linked ? "已连接" : "未连接");
@@ -845,6 +859,35 @@ static lv_obj_t *home_card(int x, int y, int w, int h, uint32_t color)
 	return o;
 }
 
+static void build_page_indicator(lv_obj_t *parent, int active_page,
+				 int width, int height)
+{
+	const launcher_theme_t *th = &s_themes[s_theme];
+	int left = (width - 24) / 2;
+	int y = height - 20;
+	lv_obj_t *dot;
+
+	/* Two matching page marks: the inactive one is the navigation target. */
+	for (int page = 0; page < 2; page++) {
+		bool active = page == active_page;
+		int x = left + (page == 0 ? 0 : (active_page == 0 ? 18 : 10));
+		dot = lv_obj_create(parent);
+		lv_obj_set_size(dot, active ? 14 : 6, 6);
+		lv_obj_set_pos(dot, x, y);
+		lv_obj_set_style_bg_color(dot,
+			hexc(active ? th->accent : th->dim), 0);
+		lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+		lv_obj_set_style_radius(dot, 3, 0);
+		lv_obj_set_style_border_width(dot, 0, 0);
+		no_scroll(dot);
+		if (!active) {
+			lv_obj_add_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+			lv_obj_add_event_cb(dot, on_click, LV_EVENT_CLICKED,
+					    (void *)(intptr_t)(page == 0 ? 2 : 1));
+		}
+	}
+}
+
 static void build_home(void)
 {
 	const launcher_theme_t *th = &s_themes[s_theme];
@@ -880,14 +923,13 @@ static void build_home(void)
 		lv_obj_set_style_border_opa(o, LV_OPA_30, 0);
 		lv_obj_clear_flag(o, LV_OBJ_FLAG_CLICKABLE);
 	}
-	l = mk_label(card, "运行时间", th->tert, 16, 0);
-	lv_obj_set_pos(l, 14, 12);
+	s_lb_date = mk_label(card, "默认 2026-01-01", th->tert, 16, 0);
+	lv_obj_set_pos(s_lb_date, 14, 12);
 	s_lb_clock = mk_label(card, "00:00:00", th->clock, 20, 0);
 	lv_obj_set_pos(s_lb_clock, 14, 39);
 	lv_obj_set_style_text_letter_space(s_lb_clock, 2, 0);
 	s_lb_up = mk_label(card, "", th->tert, 16, 0);
 	lv_obj_set_pos(s_lb_up, 14, 78);
-	s_lb_soc = NULL;
 
 	card = home_card(nx, ny, cw, 78, th->pill_bg);
 	mk_icon(card, 14, 14, &s_chrome[ICO_WIFI], th->accent);
@@ -907,15 +949,7 @@ static void build_home(void)
 	s_lb_sd = mk_label(card, "SD", th->tert, 16, 0);
 	lv_obj_set_pos(s_lb_sd, 40, 7);
 
-	o = lv_button_create(s_home);
-	flat(o, th->bg);
-	lv_obj_set_size(o, 120, 28);
-	lv_obj_set_pos(o, (dw - 120) / 2, dh - 30);
-	lv_obj_set_style_radius(o, 14, 0);
-	lv_obj_set_style_bg_color(o, hexc(th->bg), 0);
-	lv_obj_add_event_cb(o, on_click, LV_EVENT_CLICKED, (void *)1);
-	l = mk_label(o, "打开应用  >", th->accent, 16, 1);
-	lv_obj_center(l);
+	build_page_indicator(s_home, 0, dw, dh);
 	s_font_warn = lv_obj_create(s_home);
 	flat(s_font_warn, 0xEF4444);
 	lv_obj_set_size(s_font_warn, dw, 3);
@@ -929,7 +963,6 @@ static void build_drawer_page(void)
 	uint32_t dw = aster_ui_lvgl_width();
 	uint32_t dh = aster_ui_lvgl_height();
 	lv_obj_t *scr = aster_ui_lvgl_screen();
-	lv_obj_t *o;
 
 	s_drawer = lv_obj_create(scr);
 	lv_obj_set_size(s_drawer, (int32_t)dw, (int32_t)dh);
@@ -937,7 +970,7 @@ static void build_drawer_page(void)
 	flat(s_drawer, th->bg);
 
 	s_drawer_n = NULL;
-	s_bar_clock = mk_label(s_drawer, "运行 00:00", th->tert, 16, 0);
+	s_bar_clock = mk_label(s_drawer, "默认 00:00", th->tert, 16, 0);
 	lv_obj_set_pos(s_bar_clock, 12, 9);
 	s_bar_wifi = lv_image_create(s_drawer);
 	lv_image_set_src(s_bar_wifi, &s_chrome[ICO_WIFI]);
@@ -995,25 +1028,8 @@ static void build_drawer_page(void)
 	lv_obj_set_style_bg_opa(s_list, LV_OPA_COVER,
 				LV_PART_SCROLLBAR | LV_STATE_SCROLLED);
 
-	/* page dots: drawer active (left dot -> home) */
-	o = lv_obj_create(s_drawer);
-	lv_obj_set_size(o, 6, 6);
-	lv_obj_set_pos(o, (int32_t)((dw - 20) / 2), (int32_t)dh - 20);
-	lv_obj_set_style_bg_color(o, hexc(th->dim), 0);
-	lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-	lv_obj_set_style_radius(o, 3, 0);
-	lv_obj_set_style_border_width(o, 0, 0);
-	no_scroll(o);
-	lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);
-	lv_obj_add_event_cb(o, on_click, LV_EVENT_CLICKED, (void *)2);
-	o = lv_obj_create(s_drawer);
-	lv_obj_set_size(o, 14, 6);
-	lv_obj_set_pos(o, (int32_t)((dw - 20) / 2 + 10), (int32_t)dh - 20);
-	lv_obj_set_style_bg_color(o, hexc(th->accent), 0);
-	lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-	lv_obj_set_style_radius(o, 3, 0);
-	lv_obj_set_style_border_width(o, 0, 0);
-	no_scroll(o);
+	/* Drawer active; matching home/apps page indicator. */
+	build_page_indicator(s_drawer, 1, (int)dw, (int)dh);
 }
 
 /* ---------- quick-settings sheet ---------- */
@@ -1173,7 +1189,8 @@ void aster_launcher_show(void)
 	 * drawer's icons warm their own face, per label, in build_drawer().
 	 * The old pair (48 for the hero clock, 14 for the status line) both
 	 * landed on the same cpfont slot and queued the same codepoints twice. */
-	aster_ui_font_warm(ASTER_FONT_UI_PX, "0123456789:/-AMPM ");
+	aster_ui_font_warm(ASTER_FONT_UI_PX,
+		"0123456789:/-AMPM 同步默认已运行时分连接网络未挂载");
 	build_home();
 	build_drawer_page();
 	build_drawer();
@@ -1200,7 +1217,7 @@ void aster_launcher_hide(void)
 		lv_obj_clean(aster_ui_lvgl_screen());
 	}
 	s_home = s_drawer = s_list = NULL;
-	s_lb_clock = s_lb_up = s_lb_soc = NULL;
+	s_lb_clock = s_lb_up = s_lb_date = NULL;
 	s_lb_wifi = s_lb_wifi_d = s_lb_sd = NULL;
 	s_dot_wifi = s_dot_sd = NULL;
 	s_drawer_n = s_font_warn = NULL;

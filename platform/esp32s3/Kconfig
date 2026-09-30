@@ -90,9 +90,10 @@ config ASTER_WIFI
 	select NET_L2_WIFI_MGMT
 	select ASTER_HAS_WIFI
 	help
-	  Station-mode Wi-Fi for the `hw wifi` shell (scan, connect,
-	  disconnect, status). No App ABI yet, no SoftAP, no credential
-	  storage. Capability bit ASTER_HAS_WIFI follows this switch.
-	  IPv6 is left off to save RAM.
+	  Station-mode Wi-Fi for the `hw wifi` shell, system quick settings and
+	  SDK apps. Supports scan, open/WPA personal joins, status, disconnect,
+	  one saved profile and boot reconnect. Credentials are stored in the
+	  system KV on the SD card. SoftAP and IPv6 are not enabled.
+	  Capability bit ASTER_HAS_WIFI follows this switch.
 
 endif # ASTER_PLATFORM_ESP32S3

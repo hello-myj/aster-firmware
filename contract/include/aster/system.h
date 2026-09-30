@@ -5,7 +5,11 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 3
-#define ASTER_ABI_MINOR 4  /* 3.4 (additive): short effect load/play/unload can
+#define ASTER_ABI_MINOR 6  /* 3.6 (additive): read-only wall-clock time,
+                          * UTC epoch milliseconds plus local calendar fields.
+                          * 3.5 (additive): station Wi-Fi scan/connect/status,
+                          * saved profile, forget and reconnect imports.
+                          * 3.4 (additive): short effect load/play/unload can
                           * mix PCM effects over a background audio session.
                           * 3.3 (breaking, no API change): the fixed-width
                           * container and wire markers were renamed with the

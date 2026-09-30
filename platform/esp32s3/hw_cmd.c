@@ -922,11 +922,61 @@ static int cmd_wifi_status(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+static int cmd_wifi_reconnect(const struct shell *sh, size_t argc, char **argv)
+{
+	int err;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	shell_print(sh, "reconnecting saved network ...");
+	err = aster_plat_wifi_reconnect();
+	if (err) {
+		shell_print(sh, "reconnect failed (%d)", err);
+	} else {
+		shell_print(sh, "reconnected");
+	}
+	return 0;
+}
+
+static int cmd_wifi_forget(const struct shell *sh, size_t argc, char **argv)
+{
+	int err;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	err = aster_plat_wifi_forget();
+	if (err) {
+		shell_print(sh, "forget failed (%d)", err);
+	} else {
+		shell_print(sh, "saved Wi-Fi profile forgotten");
+	}
+	return 0;
+}
+
+static int cmd_wifi_saved(const struct shell *sh, size_t argc, char **argv)
+{
+	char ssid[ASTER_WIFI_SSID_MAX + 1];
+	int err;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	err = aster_plat_wifi_last_ssid(ssid, sizeof(ssid));
+	if (err) {
+		shell_print(sh, "no saved network (%d)", err);
+	} else {
+		shell_print(sh, "saved network: %s", ssid);
+	}
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_wifi,
 	SHELL_CMD(scan, NULL, "scan nearby APs", cmd_wifi_scan),
 	SHELL_CMD_ARG(connect, NULL, "join <ssid> [psk]", cmd_wifi_connect, 2, 1),
 	SHELL_CMD(disconnect, NULL, "leave current AP", cmd_wifi_disconnect),
 	SHELL_CMD(status, NULL, "station status", cmd_wifi_status),
+	SHELL_CMD(reconnect, NULL, "rejoin saved AP", cmd_wifi_reconnect),
+	SHELL_CMD(saved, NULL, "show saved AP name", cmd_wifi_saved),
+	SHELL_CMD(forget, NULL, "erase saved AP credentials", cmd_wifi_forget),
 	SHELL_SUBCMD_SET_END
 );
 #endif

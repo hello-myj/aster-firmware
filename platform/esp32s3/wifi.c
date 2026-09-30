@@ -17,11 +17,17 @@
 #include <zephyr/net/wifi.h>
 #include <zephyr/net/wifi_mgmt.h>
 
+#include "aster_kv.h"
+
 LOG_MODULE_REGISTER(aster_wifi, LOG_LEVEL_INF);
 
 #define SCAN_TO_MS   15000
 #define CONN_TO_MS   35000
 #define DHCP_TO_MS   15000
+#define DISC_TO_MS   5000
+#define WIFI_KV_ID   "aster_wifi"
+#define WIFI_KV_KEY  "profile"
+#define WIFI_PROFILE_VERSION 1u
 
 #define WIFI_EVT_SCAN   (NET_EVENT_WIFI_SCAN_RESULT | \
 			 NET_EVENT_WIFI_SCAN_DONE | \
@@ -39,6 +45,8 @@ static K_SEM_DEFINE(dhcp_done, 0, 1);
 static aster_wifi_ap_t scan_aps[ASTER_WIFI_AP_MAX];
 static int scan_n;
 static int conn_status = -1;
+static atomic_t conn_wait_kind;
+enum { CONN_WAIT_NONE, CONN_WAIT_CONNECT, CONN_WAIT_DISCONNECT };
 static char req_ssid[ASTER_WIFI_SSID_MAX + 1];
 static char req_psk[65];
 /* Kept alongside the buffer because the length is what says "open AP"
@@ -46,15 +54,121 @@ static char req_psk[65];
  * same answer back to aster_plat_wifi_connect() that it was given. */
 static size_t req_psk_len;
 
-static uint8_t sta_security(uint8_t sec)
+typedef struct {
+	uint32_t version;
+	char ssid[ASTER_WIFI_SSID_MAX + 1];
+	char psk[65];
+	uint32_t psk_len;
+} wifi_profile_t;
+
+static K_MUTEX_DEFINE(job_mu);
+static K_THREAD_STACK_DEFINE(job_stack, 3072);
+static struct k_work_q job_q;
+static bool job_q_up;
+static bool job_busy;
+static uint32_t job_op;
+static uint32_t job_last_op;
+static int job_last_result = -ENOENT;
+static aster_wifi_ap_t job_scan[ASTER_WIFI_AP_MAX];
+static int job_scan_n;
+static bool job_scan_valid;
+static char job_ssid[ASTER_WIFI_SSID_MAX + 1];
+static char job_psk[65];
+static size_t job_psk_len;
+
+static int queue_wifi_job(uint32_t op, const char *ssid, const char *psk);
+static void wifi_job_fn(struct k_work *work);
+K_WORK_DEFINE(wifi_job, wifi_job_fn);
+
+static int sta_security(uint8_t sec, enum wifi_security_type *out)
 {
 	switch (sec) {
 	case WIFI_SECURITY_TYPE_NONE:
-		return WIFI_SECURITY_TYPE_NONE;
+		*out = WIFI_SECURITY_TYPE_NONE;
+		return 0;
+	case WIFI_SECURITY_TYPE_SAE:
+	case WIFI_SECURITY_TYPE_SAE_H2E:
+	case WIFI_SECURITY_TYPE_SAE_AUTO:
+	case WIFI_SECURITY_TYPE_SAE_EXT_KEY:
+		*out = sec;
+		return 0;
+	case WIFI_SECURITY_TYPE_EAP:
+	case WIFI_SECURITY_TYPE_EAP_PEAP_MSCHAPV2:
+	case WIFI_SECURITY_TYPE_EAP_PEAP_GTC:
+	case WIFI_SECURITY_TYPE_EAP_TTLS_MSCHAPV2:
+	case WIFI_SECURITY_TYPE_EAP_PEAP_TLS:
+	case WIFI_SECURITY_TYPE_FT_EAP:
+	case WIFI_SECURITY_TYPE_FT_EAP_SHA384:
+	case WIFI_SECURITY_TYPE_WEP:
+	case WIFI_SECURITY_TYPE_WEP_OPEN:
+	case WIFI_SECURITY_TYPE_WEP_SHARED:
+		return -ENOTSUP;
 	default:
 		/* Mixed WPA/WPA2 scan results often arrive as UNKNOWN;
 		 * ESP32 then rejects connect. PSK is the working STA mode. */
-		return WIFI_SECURITY_TYPE_PSK;
+		*out = WIFI_SECURITY_TYPE_PSK;
+		return 0;
+	}
+}
+
+uint32_t aster_plat_wifi_security_class(uint8_t security)
+{
+	switch (security) {
+	case WIFI_SECURITY_TYPE_NONE:
+		return ASTER_PLAT_WIFI_SECURITY_OPEN;
+	case WIFI_SECURITY_TYPE_PSK:
+	case WIFI_SECURITY_TYPE_PSK_SHA256:
+	case WIFI_SECURITY_TYPE_SAE:
+	case WIFI_SECURITY_TYPE_SAE_H2E:
+	case WIFI_SECURITY_TYPE_SAE_AUTO:
+	case WIFI_SECURITY_TYPE_WPA_PSK:
+	case WIFI_SECURITY_TYPE_WPA_AUTO_PERSONAL:
+	case WIFI_SECURITY_TYPE_FT_PSK:
+	case WIFI_SECURITY_TYPE_FT_SAE:
+	case WIFI_SECURITY_TYPE_SAE_EXT_KEY:
+		return ASTER_PLAT_WIFI_SECURITY_PERSONAL;
+	case WIFI_SECURITY_TYPE_EAP:
+	case WIFI_SECURITY_TYPE_EAP_PEAP_MSCHAPV2:
+	case WIFI_SECURITY_TYPE_EAP_PEAP_GTC:
+	case WIFI_SECURITY_TYPE_EAP_TTLS_MSCHAPV2:
+	case WIFI_SECURITY_TYPE_EAP_PEAP_TLS:
+	case WIFI_SECURITY_TYPE_FT_EAP:
+	case WIFI_SECURITY_TYPE_FT_EAP_SHA384:
+		return ASTER_PLAT_WIFI_SECURITY_ENTERPRISE;
+	case WIFI_SECURITY_TYPE_WEP:
+	case WIFI_SECURITY_TYPE_WEP_OPEN:
+	case WIFI_SECURITY_TYPE_WEP_SHARED:
+		return ASTER_PLAT_WIFI_SECURITY_WEP;
+	default:
+		return ASTER_PLAT_WIFI_SECURITY_OTHER;
+	}
+}
+
+uint32_t aster_plat_wifi_state_class(int state)
+{
+	switch (state) {
+	case WIFI_STATE_DISCONNECTED:
+		return ASTER_PLAT_WIFI_STATE_DISCONNECTED;
+	case WIFI_STATE_INTERFACE_DISABLED:
+		return ASTER_PLAT_WIFI_STATE_DISABLED;
+	case WIFI_STATE_INACTIVE:
+		return ASTER_PLAT_WIFI_STATE_INACTIVE;
+	case WIFI_STATE_SCANNING:
+		return ASTER_PLAT_WIFI_STATE_SCANNING;
+	case WIFI_STATE_AUTHENTICATING:
+		return ASTER_PLAT_WIFI_STATE_AUTHENTICATING;
+	case WIFI_STATE_ASSOCIATING:
+		return ASTER_PLAT_WIFI_STATE_ASSOCIATING;
+	case WIFI_STATE_ASSOCIATED:
+		return ASTER_PLAT_WIFI_STATE_ASSOCIATED;
+	case WIFI_STATE_4WAY_HANDSHAKE:
+		return ASTER_PLAT_WIFI_STATE_FOUR_WAY;
+	case WIFI_STATE_GROUP_HANDSHAKE:
+		return ASTER_PLAT_WIFI_STATE_GROUP_HANDSHAKE;
+	case WIFI_STATE_COMPLETED:
+		return ASTER_PLAT_WIFI_STATE_COMPLETED;
+	default:
+		return ASTER_PLAT_WIFI_STATE_UNKNOWN;
 	}
 }
 
@@ -140,13 +254,21 @@ static void wifi_handler(struct net_mgmt_event_callback *cb, uint64_t event,
 
 		/* With WIFI_STA_AUTO_DHCPV4 the ESP32 driver raises this
 		 * only after DHCP binds, so an IP should already be there. */
-		conn_status = st ? st->status : -EIO;
-		k_sem_give(&conn_done);
+		if (atomic_get(&conn_wait_kind) == CONN_WAIT_CONNECT) {
+			conn_status = st ? st->status : -EIO;
+			k_sem_give(&conn_done);
+		}
 		break;
 	}
 	case NET_EVENT_WIFI_DISCONNECT_RESULT:
-		conn_status = -ENOTCONN;
-		k_sem_give(&conn_done);
+		if (atomic_get(&conn_wait_kind) == CONN_WAIT_DISCONNECT) {
+			conn_status = -ENOTCONN;
+			k_sem_give(&conn_done);
+		} else if (atomic_get(&conn_wait_kind) == CONN_WAIT_NONE &&
+			   req_ssid[0]) {
+			LOG_WRN("Wi-Fi link lost; queuing saved-profile reconnect");
+			(void)queue_wifi_job(ASTER_PLAT_WIFI_OP_RECONNECT, NULL, NULL);
+		}
 		break;
 	default:
 		break;
@@ -209,6 +331,7 @@ int aster_plat_wifi_scan(aster_wifi_ap_t *out, int max, int *count)
 	if (!out || max <= 0 || !count) {
 		return -EINVAL;
 	}
+	*count = 0;
 	err = wifi_ready();
 	if (err) {
 		return err;
@@ -248,6 +371,8 @@ int aster_plat_wifi_scan(aster_wifi_ap_t *out, int max, int *count)
 int aster_plat_wifi_connect(const char *ssid, const char *psk)
 {
 	struct wifi_connect_req_params params = {0};
+	char join_ssid[ASTER_WIFI_SSID_MAX + 1];
+	char join_psk[65] = {0};
 	size_t slen;
 	size_t plen;
 	int hit;
@@ -264,39 +389,55 @@ int aster_plat_wifi_connect(const char *ssid, const char *psk)
 
 	slen = strlen(ssid);
 	if (slen > ASTER_WIFI_SSID_MAX) {
-		slen = ASTER_WIFI_SSID_MAX;
+		return -EINVAL;
 	}
 	plen = (psk && psk[0]) ? strlen(psk) : 0;
 	if (plen && (plen < 8 || plen > 64)) {
 		return -EINVAL;
 	}
+	memcpy(join_ssid, ssid, slen + 1);
+	if (plen) {
+		memcpy(join_psk, psk, plen);
+	}
 
 	k_mutex_lock(&wifi_mu, K_FOREVER);
-	memcpy(req_ssid, ssid, slen);
-	req_ssid[slen] = 0;
-	if (plen) {
-		memcpy(req_psk, psk, plen);
-	}
-	req_psk[plen] = 0;
-	req_psk_len = plen;
+	/* Treat connecting to the already active SSID as success. The ESP32
+	 * driver can return -EREMOTEIO for a second connect request even though
+	 * the current link is healthy; applications commonly retry after a
+	 * timeout or revisit their network settings. Do not replace saved
+	 * credentials here, since the link may have been established with a
+	 * different (known-good) passphrase. */
+	{
+		aster_wifi_status_t current;
 
-	params.ssid = (const uint8_t *)req_ssid;
+		if (aster_plat_wifi_status(&current) == 0 &&
+		    current.state == WIFI_STATE_COMPLETED &&
+		    strcmp(current.ssid, join_ssid) == 0) {
+			k_mutex_unlock(&wifi_mu);
+			return 0;
+		}
+	}
+	params.ssid = (const uint8_t *)join_ssid;
 	params.ssid_length = (uint8_t)slen;
 	params.channel = WIFI_CHANNEL_ANY;
 	params.band = WIFI_FREQ_BAND_2_4_GHZ;
 	params.mfp = WIFI_MFP_OPTIONAL;
 	params.timeout = CONN_TO_MS / 1000;
 
-	hit = scan_find(req_ssid);
+	hit = scan_find(join_ssid);
 	if (plen == 0) {
 		params.security = WIFI_SECURITY_TYPE_NONE;
 	} else if (hit >= 0) {
-		params.security = sta_security(scan_aps[hit].security);
-		params.psk = (const uint8_t *)req_psk;
+		err = sta_security(scan_aps[hit].security, &params.security);
+		if (err) {
+			k_mutex_unlock(&wifi_mu);
+			return err;
+		}
+		params.psk = (const uint8_t *)join_psk;
 		params.psk_length = (uint8_t)plen;
 	} else {
 		params.security = WIFI_SECURITY_TYPE_PSK;
-		params.psk = (const uint8_t *)req_psk;
+		params.psk = (const uint8_t *)join_psk;
 		params.psk_length = (uint8_t)plen;
 	}
 
@@ -305,12 +446,15 @@ int aster_plat_wifi_connect(const char *ssid, const char *psk)
 	while (k_sem_take(&dhcp_done, K_NO_WAIT) == 0) {
 	}
 	conn_status = -EINPROGRESS;
+	atomic_set(&conn_wait_kind, CONN_WAIT_CONNECT);
 	err = net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &params, sizeof(params));
 	if (err) {
+		atomic_set(&conn_wait_kind, CONN_WAIT_NONE);
 		k_mutex_unlock(&wifi_mu);
 		return err;
 	}
 	err = k_sem_take(&conn_done, K_MSEC(CONN_TO_MS));
+	atomic_set(&conn_wait_kind, CONN_WAIT_NONE);
 	if (err) {
 		k_mutex_unlock(&wifi_mu);
 		return -ETIMEDOUT;
@@ -319,6 +463,25 @@ int aster_plat_wifi_connect(const char *ssid, const char *psk)
 		err = conn_status > 0 ? -EIO : conn_status;
 		k_mutex_unlock(&wifi_mu);
 		return err;
+	}
+
+	/* Keep the last known-good credentials, not a failed request. The RAM
+	 * copy powers reconnect/qpanel even when the card is later removed. */
+	memcpy(req_ssid, join_ssid, slen + 1);
+	memcpy(req_psk, join_psk, plen + 1);
+	req_psk_len = plen;
+	{
+		wifi_profile_t profile = { .version = WIFI_PROFILE_VERSION,
+			.psk_len = (uint32_t)plen };
+		memcpy(profile.ssid, join_ssid, slen + 1);
+		memcpy(profile.psk, join_psk, plen + 1);
+		int save_err = aster_kv_set(WIFI_KV_ID, WIFI_KV_KEY,
+					    &profile, sizeof(profile));
+
+		if (save_err) {
+			LOG_WRN("connected to %s but saving Wi-Fi profile failed: %d",
+				join_ssid, save_err);
+		}
 	}
 
 	fill_ip(ip, sizeof(ip));
@@ -332,14 +495,38 @@ int aster_plat_wifi_connect(const char *ssid, const char *psk)
 
 int aster_plat_wifi_disconnect(void)
 {
+	aster_wifi_status_t st;
 	int err;
 
 	err = wifi_ready();
 	if (err) {
 		return err;
 	}
+	if (aster_plat_wifi_status(&st) == 0 &&
+	    st.state != WIFI_STATE_COMPLETED &&
+	    st.state != WIFI_STATE_ASSOCIATED) {
+		return 0;
+	}
 	k_mutex_lock(&wifi_mu, K_FOREVER);
+	while (k_sem_take(&conn_done, K_NO_WAIT) == 0) {
+	}
+	conn_status = -EINPROGRESS;
+	atomic_set(&conn_wait_kind, CONN_WAIT_DISCONNECT);
 	err = net_mgmt(NET_REQUEST_WIFI_DISCONNECT, iface, NULL, 0);
+	if (!err) {
+		err = k_sem_take(&conn_done, K_MSEC(DISC_TO_MS));
+		if (err == 0 && conn_status == -ENOTCONN) {
+			err = 0;
+		} else if (err == 0) {
+			err = conn_status ? conn_status : -EIO;
+		} else if (err == -EAGAIN &&
+			   aster_plat_wifi_status(&st) == 0 &&
+			   st.state != WIFI_STATE_COMPLETED &&
+			   st.state != WIFI_STATE_ASSOCIATED) {
+			err = 0;
+		}
+	}
+	atomic_set(&conn_wait_kind, CONN_WAIT_NONE);
 	k_mutex_unlock(&wifi_mu);
 	return err;
 }
@@ -380,6 +567,9 @@ int aster_plat_wifi_reconnect(void)
 	char ssid[ASTER_WIFI_SSID_MAX + 1];
 	char psk[65];
 	bool have_psk;
+	aster_wifi_status_t st;
+	aster_wifi_ap_t aps[ASTER_WIFI_AP_MAX];
+	int ap_count = 0;
 
 	/* Locks only long enough to take a consistent copy: the actual join
 	 * re-enters aster_plat_wifi_connect(), which takes the same mutex and
@@ -395,11 +585,258 @@ int aster_plat_wifi_reconnect(void)
 	memcpy(psk, req_psk, sizeof(psk));
 	have_psk = req_psk_len != 0;
 	k_mutex_unlock(&wifi_mu);
+	if (aster_plat_wifi_status(&st) == 0 &&
+	    st.state == WIFI_STATE_COMPLETED && strcmp(st.ssid, ssid) == 0) {
+		return 0;
+	}
+	/* Re-discover the saved AP's security mode after reboot so WPA3 personal
+	 * networks do not get retried as WPA2 PSK by the fallback path. A failed
+	 * scan still permits a hidden SSID to use the ordinary PSK attempt. */
+	int scan_err = aster_plat_wifi_scan(aps, ARRAY_SIZE(aps), &ap_count);
+	if (scan_err) {
+		LOG_WRN("Wi-Fi reconnect scan failed: %d; trying saved credentials",
+			scan_err);
+	}
 
 	/* NULL, not "", for an open AP: connect() derives its PSK length
 	 * from the string and rejects anything shorter than 8 that is not
 	 * empty. */
 	return aster_plat_wifi_connect(ssid, have_psk ? psk : NULL);
+}
+
+int aster_plat_wifi_forget(void)
+{
+	aster_wifi_status_t st;
+	char saved[ASTER_WIFI_SSID_MAX + 1];
+	bool disconnect = false;
+	int err;
+
+	if (aster_plat_wifi_last_ssid(saved, sizeof(saved)) == 0 &&
+	    aster_plat_wifi_status(&st) == 0 &&
+	    st.state == WIFI_STATE_COMPLETED && strcmp(st.ssid, saved) == 0) {
+		disconnect = true;
+	}
+	if (disconnect) {
+		err = aster_plat_wifi_disconnect();
+		if (err && err != -ENOTCONN) {
+			return err;
+		}
+	}
+
+	err = aster_kv_delete(WIFI_KV_ID, WIFI_KV_KEY);
+	if (err) {
+		return err;
+	}
+	k_mutex_lock(&wifi_mu, K_FOREVER);
+	memset(req_ssid, 0, sizeof(req_ssid));
+	memset(req_psk, 0, sizeof(req_psk));
+	req_psk_len = 0;
+	k_mutex_unlock(&wifi_mu);
+	return 0;
+}
+
+static int queue_wifi_job(uint32_t op, const char *ssid, const char *psk)
+{
+	int err = 0;
+
+	k_mutex_lock(&job_mu, K_FOREVER);
+	if (!job_q_up) {
+		k_work_queue_start(&job_q, job_stack,
+				   K_THREAD_STACK_SIZEOF(job_stack),
+				   K_PRIO_PREEMPT(12), NULL);
+		job_q_up = true;
+	}
+	if (job_busy) {
+		k_mutex_unlock(&job_mu);
+		return -EBUSY;
+	}
+	if (op == ASTER_PLAT_WIFI_OP_CONNECT) {
+		if (!ssid || !ssid[0] || strlen(ssid) > ASTER_WIFI_SSID_MAX ||
+		    (psk && psk[0] && (strlen(psk) < 8 || strlen(psk) > 64))) {
+			k_mutex_unlock(&job_mu);
+			return -EINVAL;
+		}
+		strncpy(job_ssid, ssid, sizeof(job_ssid) - 1);
+		job_ssid[sizeof(job_ssid) - 1] = 0;
+		if (psk) {
+			strncpy(job_psk, psk, sizeof(job_psk) - 1);
+			job_psk[sizeof(job_psk) - 1] = 0;
+		} else {
+			job_psk[0] = 0;
+		}
+		job_psk_len = strlen(job_psk);
+	} else if (op == ASTER_PLAT_WIFI_OP_SCAN) {
+		job_scan_valid = false;
+		job_scan_n = 0;
+	}
+	job_op = op;
+	job_busy = true;
+	job_last_result = -EINPROGRESS;
+	if (k_work_submit_to_queue(&job_q, &wifi_job) < 0) {
+		job_busy = false;
+		job_op = ASTER_PLAT_WIFI_OP_NONE;
+		err = -EBUSY;
+	}
+	k_mutex_unlock(&job_mu);
+	return err;
+}
+
+static void wifi_job_fn(struct k_work *work)
+{
+	aster_wifi_ap_t found[ASTER_WIFI_AP_MAX];
+	char ssid[ASTER_WIFI_SSID_MAX + 1];
+	char psk[65];
+	size_t psk_len;
+	uint32_t op;
+	int count = 0;
+	int err;
+
+	ARG_UNUSED(work);
+	k_mutex_lock(&job_mu, K_FOREVER);
+	op = job_op;
+	memcpy(ssid, job_ssid, sizeof(ssid));
+	memcpy(psk, job_psk, sizeof(psk));
+	psk_len = job_psk_len;
+	k_mutex_unlock(&job_mu);
+
+	switch (op) {
+	case ASTER_PLAT_WIFI_OP_SCAN:
+		err = aster_plat_wifi_scan(found, ARRAY_SIZE(found), &count);
+		break;
+	case ASTER_PLAT_WIFI_OP_CONNECT:
+		err = aster_plat_wifi_connect(ssid, psk_len ? psk : NULL);
+		break;
+	case ASTER_PLAT_WIFI_OP_DISCONNECT:
+		err = aster_plat_wifi_disconnect();
+		break;
+	case ASTER_PLAT_WIFI_OP_RECONNECT:
+		err = aster_plat_wifi_reconnect();
+		break;
+	case ASTER_PLAT_WIFI_OP_FORGET:
+		err = aster_plat_wifi_forget();
+		break;
+	default:
+		err = -EINVAL;
+		break;
+	}
+
+	k_mutex_lock(&job_mu, K_FOREVER);
+	if (op == ASTER_PLAT_WIFI_OP_SCAN && err == 0) {
+		memcpy(job_scan, found, (size_t)count * sizeof(found[0]));
+		job_scan_n = count;
+		job_scan_valid = true;
+	}
+	job_last_op = op;
+	job_last_result = err;
+	job_op = ASTER_PLAT_WIFI_OP_NONE;
+	job_busy = false;
+	k_mutex_unlock(&job_mu);
+	if (err) {
+		LOG_WRN("async operation %u failed: %d", (unsigned)op, err);
+	} else {
+		LOG_INF("async operation %u completed", (unsigned)op);
+	}
+}
+
+int aster_plat_wifi_scan_start(void)
+{
+	return queue_wifi_job(ASTER_PLAT_WIFI_OP_SCAN, NULL, NULL);
+}
+
+int aster_plat_wifi_scan_results(aster_wifi_ap_t *out, int max, int *count)
+{
+	if (!out || max <= 0 || !count) {
+		return -EINVAL;
+	}
+	*count = 0;
+	k_mutex_lock(&job_mu, K_FOREVER);
+	if (job_busy && job_op == ASTER_PLAT_WIFI_OP_SCAN) {
+		k_mutex_unlock(&job_mu);
+		return -EAGAIN;
+	}
+	if (!job_scan_valid) {
+		k_mutex_unlock(&job_mu);
+		return -ENOENT;
+	}
+	if (max > job_scan_n) {
+		max = job_scan_n;
+	}
+	memcpy(out, job_scan, (size_t)max * sizeof(job_scan[0]));
+	*count = max;
+	k_mutex_unlock(&job_mu);
+	return 0;
+}
+
+int aster_plat_wifi_connect_start(const char *ssid, const char *psk)
+{
+	return queue_wifi_job(ASTER_PLAT_WIFI_OP_CONNECT, ssid, psk);
+}
+
+int aster_plat_wifi_disconnect_start(void)
+{
+	return queue_wifi_job(ASTER_PLAT_WIFI_OP_DISCONNECT, NULL, NULL);
+}
+
+int aster_plat_wifi_reconnect_start(void)
+{
+	return queue_wifi_job(ASTER_PLAT_WIFI_OP_RECONNECT, NULL, NULL);
+}
+
+int aster_plat_wifi_forget_start(void)
+{
+	return queue_wifi_job(ASTER_PLAT_WIFI_OP_FORGET, NULL, NULL);
+}
+
+void aster_plat_wifi_operation(uint32_t *operation, uint32_t *last_operation,
+			       int *last_result)
+{
+	k_mutex_lock(&job_mu, K_FOREVER);
+	if (operation) {
+		*operation = job_busy ? job_op : ASTER_PLAT_WIFI_OP_NONE;
+	}
+	if (last_operation) {
+		*last_operation = job_last_op;
+	}
+	if (last_result) {
+		*last_result = job_last_result;
+	}
+	k_mutex_unlock(&job_mu);
+}
+
+int aster_plat_wifi_storage_ready(void)
+{
+	wifi_profile_t profile;
+	size_t len = 0;
+	size_t ssid_len, psk_len;
+	int err;
+
+	memset(&profile, 0, sizeof(profile));
+	err = aster_kv_get(WIFI_KV_ID, WIFI_KV_KEY, &profile,
+			   sizeof(profile), &len);
+	if (err == -ENOENT) {
+		return 0;
+	}
+	if (err) {
+		LOG_WRN("saved Wi-Fi profile read failed: %d", err);
+		return err;
+	}
+	ssid_len = strnlen(profile.ssid, sizeof(profile.ssid));
+	psk_len = profile.psk_len;
+	if (len != sizeof(profile) || profile.version != WIFI_PROFILE_VERSION ||
+	    ssid_len == 0 || ssid_len > ASTER_WIFI_SSID_MAX ||
+	    psk_len > 64 || (psk_len != 0 && psk_len < 8) ||
+	    profile.ssid[ssid_len] != 0 || profile.psk[psk_len] != 0) {
+		LOG_WRN("saved Wi-Fi profile is invalid; forgetting it");
+		(void)aster_kv_delete(WIFI_KV_ID, WIFI_KV_KEY);
+		return -EINVAL;
+	}
+	k_mutex_lock(&wifi_mu, K_FOREVER);
+	memcpy(req_ssid, profile.ssid, ssid_len + 1);
+	memcpy(req_psk, profile.psk, psk_len + 1);
+	req_psk_len = psk_len;
+	k_mutex_unlock(&wifi_mu);
+	LOG_INF("saved Wi-Fi profile loaded for %s", req_ssid);
+	return queue_wifi_job(ASTER_PLAT_WIFI_OP_RECONNECT, NULL, NULL);
 }
 
 int aster_plat_wifi_status(aster_wifi_status_t *st)
@@ -425,6 +862,7 @@ int aster_plat_wifi_status(aster_wifi_status_t *st)
 	}
 	st->state = ws.state;
 	st->rssi = (int8_t)ws.rssi;
+	st->security = (uint8_t)ws.security;
 	st->state_txt = wifi_state_txt(ws.state);
 	st->sec_txt = wifi_security_txt(ws.security);
 	if (ws.ssid_len) {

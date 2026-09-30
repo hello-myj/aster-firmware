@@ -26,6 +26,8 @@
 #include "sensor.h"
 #include "camera.h"
 #include "audio.h"
+#include "time.h"
+#include "wifi.h"
 #include "img.h"
 #include "gfx.h"
 
