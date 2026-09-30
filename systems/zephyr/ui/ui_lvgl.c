@@ -6,6 +6,8 @@
 #include "font_sd.h"
 #include "aster_platform.h"
 #include "aster_mem.h"
+#include "aster_runtime.h"
+#include "qpanel.h"
 #if IS_ENABLED(CONFIG_ASTER_SCREENSHOT)
 #include "ui_screenshot.h"
 #endif
@@ -49,6 +51,16 @@ static uint32_t tick_cb(void)
 
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
+	/* A guest draws directly to the panel; the empty LVGL screen is not
+	 * its background. Launcher teardown and delayed font invalidations
+	 * still refresh that screen while timers and screenshot polling run.
+	 * Only the open control panel owns LVGL pixels over a running app. */
+	if (aster_app_current() && !aster_qpanel_is_open()) {
+		LOG_DBG("skip LVGL background over app: %d,%d..%d,%d",
+			area->x1, area->y1, area->x2, area->y2);
+		lv_display_flush_ready(disp);
+		return;
+	}
 	uint32_t x = (uint32_t)area->x1;
 	uint32_t y = (uint32_t)area->y1;
 	uint32_t w = (uint32_t)(area->x2 - area->x1 + 1);
