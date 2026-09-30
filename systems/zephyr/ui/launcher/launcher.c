@@ -514,11 +514,14 @@ static void on_click(lv_event_t *e)
 		persist();
 		s_dirty = true;
 		break;
-	default: /* 100 + idx -> launch app (worker-thread callback:
-		  * aster_app_start would self-deadlock -> sysworkq) */
+	default: /* 100 + idx -> enqueue app startup after this worker callback */
 		if (act >= 100 && (act - 100) < s_app_n) {
+			const char *id = s_apps[act - 100];
 			persist();
-			aster_runtime_launch_async(s_apps[act - 100]);
+			int err = aster_runtime_launch_async(id);
+			if (err != ASTER_OK) {
+				LOG_WRN("launcher: launch %s: %d", id, err);
+			}
 		}
 		break;
 	}

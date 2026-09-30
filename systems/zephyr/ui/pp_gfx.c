@@ -22,6 +22,14 @@
  * not resolve there. Same header the command engine blends with. */
 #include "../core/aster_color565.h"
 
+/* The scanline nodes and tile coverage are CPU-only scratch. Put them in the
+ * board's PSRAM BSS pool so DMA-capable internal DRAM stays available to the
+ * display and audio paths. Keep the host preview on ordinary host BSS. */
+#if defined(__ZEPHYR__)
+#define PP_WORK_BUFFER_ATTR \
+	__attribute__((section(".ext_ram.bss.pp_gfx_work"), aligned(32)))
+#endif
+
 /* ---------------- arena (must precede PP_IMPLEMENTATION) ---------------- */
 
 #define PP_ARENA_BYTES 2048u
@@ -49,6 +57,7 @@ static void *pp_alloc_hook(size_t size)
 
 #define PP_IMPLEMENTATION
 #include "pretty-poly.h"
+#undef PP_WORK_BUFFER_ATTR
 
 /* ---------------- 565 blend ---------------- */
 

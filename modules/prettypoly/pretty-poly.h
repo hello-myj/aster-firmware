@@ -388,12 +388,20 @@ pp_rect_t pp_polygon_bounds(pp_poly_t *p) {
 
 // buffer that each tile is rendered into before callback
 // allocate one extra byte to allow a small optimization in the row renderer
-uint8_t tile_buffer[PP_TILE_BUFFER_SIZE * PP_TILE_BUFFER_SIZE];
+#ifndef PP_WORK_BUFFER_ATTR
+#define PP_WORK_BUFFER_ATTR
+#define PP_WORK_BUFFER_ATTR_DEFAULTED
+#endif
+uint8_t tile_buffer[PP_TILE_BUFFER_SIZE * PP_TILE_BUFFER_SIZE] PP_WORK_BUFFER_ATTR;
 
 // polygon node buffer handles at most 16 line intersections per scanline
 // is this enough for cjk/emoji? (requires a 2kB buffer)
-int32_t nodes[PP_TILE_BUFFER_SIZE * 4][PP_MAX_NODES_PER_SCANLINE * 2];
-uint32_t node_counts[PP_TILE_BUFFER_SIZE * 4];
+int32_t nodes[PP_TILE_BUFFER_SIZE * 4][PP_MAX_NODES_PER_SCANLINE * 2] PP_WORK_BUFFER_ATTR;
+uint32_t node_counts[PP_TILE_BUFFER_SIZE * 4] PP_WORK_BUFFER_ATTR;
+#ifdef PP_WORK_BUFFER_ATTR_DEFAULTED
+#undef PP_WORK_BUFFER_ATTR_DEFAULTED
+#undef PP_WORK_BUFFER_ATTR
+#endif
 
 uint8_t _pp_alpha_map_none[2] = {0, 255};
 uint8_t _pp_alpha_map_x4[5] = {0, 63, 127, 190, 255};

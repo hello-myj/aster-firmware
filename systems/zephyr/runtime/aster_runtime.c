@@ -65,6 +65,7 @@ static int worker_result;             /* start result, valid after worker_ready 
 static struct k_sem worker_go;        /* given by aster_app_start */
 static struct k_sem worker_ready;     /* given when start resolved (ok/err) */
 static struct k_sem worker_done;      /* given when app fully torn down */
+static atomic_t worker_sync_start;    /* only synchronous callers await ready */
 
 static atomic_t display_mode_request = ATOMIC_INIT(-1);
 
@@ -851,7 +852,10 @@ static void worker_fn(void *p1, void *p2, void *p3)
         aster_launcher_hide();
 #endif
 		aster_app_ctx_t *ctx = worker_pending;
-		worker_pending = NULL;
+		/* Keep the pending reservation until startup has finished. Async
+		 * callers release app_lock before we run, so clearing it before
+		 * publishing current would allow a second launch during orientation
+		 * setup and overwrite the startup completion state. */
 
 		/* The launcher is down and this is the thread that owns LVGL:
 		 * the one moment the window can be turned without tearing a
@@ -876,8 +880,12 @@ static void worker_fn(void *p1, void *p2, void *p3)
 			 * launcher -- not another app -- that comes back, so
 			 * the window has to be put back here too. */
 			orient_lease_release();
+			LOG_WRN("app startup failed: %s (%d)", ctx->id, worker_result);
 			k_free(ctx);
-			k_sem_give(&worker_ready);
+			if (atomic_cas(&worker_sync_start, 1, 0)) {
+				k_sem_give(&worker_ready);
+			}
+			worker_pending = NULL;
 			continue;
 		}
 
@@ -888,7 +896,10 @@ static void worker_fn(void *p1, void *p2, void *p3)
 			LOG_INF("app started: %s (%s, %u KB, %s)", ctx->id, ctx->rec->name,
 				(unsigned)(ctx->img_size / 1024), ctx->is_aot ? "AOT" : "wasm");
 		}
-		k_sem_give(&worker_ready);
+		if (atomic_cas(&worker_sync_start, 1, 0)) {
+			k_sem_give(&worker_ready);
+		}
+		worker_pending = NULL;
 
 		app_event_loop(ctx);
 
@@ -944,8 +955,11 @@ static void worker_fn(void *p1, void *p2, void *p3)
 	}
 }
 
-int aster_app_start(const char *id)
+static int app_start_common(const char *id, bool wait_ready)
 {
+	if (!id || !id[0]) {
+		return ASTER_EINVAL;
+	}
 	if (!runtime_inited) {
 		return ASTER_ESTATE;
 	}
@@ -997,9 +1011,16 @@ int aster_app_start(const char *id)
 	 * `current` is set there before wasm executes, so aster_app_exit and
 	 * owner lookups work even inside aster_app_init. */
 	k_sem_reset(&worker_done); /* drop counts from a prior self-exit */
+	k_sem_reset(&worker_ready);
+	atomic_set(&worker_sync_start, wait_ready ? 1 : 0);
 	worker_pending = ctx;
 	k_sem_give(&worker_go);
+	if (!wait_ready) {
+		ret = ASTER_OK;
+		goto out;
+	}
 	if (k_sem_take(&worker_ready, K_MSEC(15000))) {
+		atomic_set(&worker_sync_start, 0);
 		LOG_ERR("worker wedged launching %s", id);
 		ret = ASTER_ETIMEDOUT;
 		goto out;
@@ -1008,6 +1029,11 @@ int aster_app_start(const char *id)
 out:
 	k_mutex_unlock(&app_lock);
 	return ret;
+}
+
+int aster_app_start(const char *id)
+{
+	return app_start_common(id, true);
 }
 
 int aster_app_stop(const char *id)
@@ -1097,16 +1123,15 @@ aster_app_ctx_t *aster_app_current(void)
  *  - home: any other app exits (clean, self-stop or crash) and the board
  *    configures a system UI -> re-launch CONFIG_ASTER_SYSTEM_UI so the device
  *    is never UI-less after boot. The UI itself exiting is final (no loop).
- * The launch is deferred to the system workqueue because aster_app_start
- * hands the worker via semaphores and the worker cannot wait on itself. */
+ * The policy handler runs on the system workqueue and enqueues the next
+ * app without waiting for the worker to initialize it. */
 
 static void relaunch_fn(struct k_work *w)
 {
 	ARG_UNUSED(w);
 	char id[64];
 
-	/* take the id only; aster_app_start re-takes app_lock itself (mutexes
-	 * are not reentrant), so we must not hold it across the call */
+	/* Copy the target under app_lock, then release it before enqueueing. */
 	k_mutex_lock(&app_lock, K_FOREVER);
 	strncpy(id, relaunch_id, sizeof(id));
 	relaunch_id[0] = 0;
@@ -1115,7 +1140,10 @@ static void relaunch_fn(struct k_work *w)
 	if (!id[0]) {
 		return;
 	}
-	int ret = aster_app_start(id);
+	/* App initialization runs on the UI worker and can need system workqueue
+	 * services (notably audio/storage). The policy handler must only enqueue;
+	 * waiting synchronously here would occupy sysworkq during that init. */
+	int ret = aster_runtime_launch_async(id);
 	if (ret != ASTER_OK) {
 		LOG_WRN("policy launch %s: %d", id, ret);
 	}
@@ -1140,24 +1168,14 @@ int aster_runtime_handoff(const char *id)
 	return ASTER_OK;
 }
 
-/* Built-in launcher card tap (worker thread, no running app): launch `id`
- * after this callback returns. The worker cannot aster_app_start itself (it
- * would wait on its own sems), so defer to the sys workqueue exactly like
- * the handoff/home policy. */
+/* Built-in launcher card tap (worker thread, no running app): enqueue `id`
+ * for startup after this callback returns, without waiting on the worker. */
 int aster_runtime_launch_async(const char *id)
 {
-	if (!runtime_inited || !id || !id[0]) {
-		return ASTER_EINVAL;
-	}
-	if (!aster_app_mgr_find(id)) {
-		return ASTER_ENOENT;
-	}
-	k_mutex_lock(&app_lock, K_FOREVER);
-	strncpy(relaunch_id, id, sizeof(relaunch_id) - 1);
-	relaunch_id[sizeof(relaunch_id) - 1] = 0;
-	k_mutex_unlock(&app_lock);
-	k_work_submit(&relaunch_work);
-	return ASTER_OK;
+	/* The launcher callback runs on worker_fn itself. Queue the ctx and return;
+	 * worker_fn consumes it on its next loop pass after LVGL dispatch finishes.
+	 * This also leaves sysworkq free while the app initializes. */
+	return app_start_common(id, false);
 }
 
 void aster_runtime_boot_ui(void)

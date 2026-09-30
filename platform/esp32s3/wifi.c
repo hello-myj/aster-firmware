@@ -62,7 +62,11 @@ typedef struct {
 } wifi_profile_t;
 
 static K_MUTEX_DEFINE(job_mu);
-static K_THREAD_STACK_DEFINE(job_stack, 3072);
+/* Connecting persists the profile through KV -> FatFS -> SDHC. That call
+ * chain exceeds 3 KB and used to overwrite the adjacent sleeping audio
+ * thread's saved context. Reserve the same stack budget as the main thread
+ * so filesystem calls and their interrupt/context-save frames fit. */
+static K_THREAD_STACK_DEFINE(job_stack, 8192);
 static struct k_work_q job_q;
 static bool job_q_up;
 static bool job_busy;

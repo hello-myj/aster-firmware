@@ -101,8 +101,9 @@ aster_app_ctx_t *aster_app_current(void);
  * the current app to quit and arranges `id` to launch after teardown. */
 int  aster_runtime_handoff(const char *id);
 
-/* Built-in launcher card tap: launch `id` via the sys workqueue (the worker
- * thread cannot aster_app_start itself). Native launcher only. */
+/* Enqueue `id` for startup on the UI worker without waiting for init.
+ * Used by launcher callbacks and the system workqueue launch policy.
+ * ASTER_OK confirms enqueueing; startup failures are reported in the log. */
 int  aster_runtime_launch_async(const char *id);
 
 /* Boot auto-start of CONFIG_ASTER_SYSTEM_UI (no-op when unset/not installed). */
