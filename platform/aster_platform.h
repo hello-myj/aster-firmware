@@ -312,7 +312,19 @@ enum aster_plat_wifi_operation {
 	ASTER_PLAT_WIFI_OP_DISCONNECT,
 	ASTER_PLAT_WIFI_OP_RECONNECT,
 	ASTER_PLAT_WIFI_OP_FORGET,
+	ASTER_PLAT_WIFI_OP_HOTSPOT_START,
+	ASTER_PLAT_WIFI_OP_HOTSPOT_STOP,
 };
+typedef struct {
+	char ssid[ASTER_WIFI_SSID_MAX + 1];
+	bool enabled;
+	bool configured;
+} aster_wifi_hotspot_status_t;
+/* NULL SSID/PSK reuse the saved hotspot. An empty PSK retains its password.
+ * The hotspot provides a local network at 192.168.4.1, without routing/NAT. */
+int aster_plat_wifi_hotspot_start(const char *ssid, const char *psk);
+int aster_plat_wifi_hotspot_stop(void);
+void aster_plat_wifi_hotspot_status(aster_wifi_hotspot_status_t *status);
 int  aster_plat_wifi_scan_start(void);
 int  aster_plat_wifi_scan_results(aster_wifi_ap_t *out, int max, int *count);
 int  aster_plat_wifi_connect_start(const char *ssid, const char *psk);

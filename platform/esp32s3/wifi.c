@@ -14,6 +14,9 @@
 #include <zephyr/net/net_ip.h>
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/dhcpv4.h>
+#if defined(CONFIG_NET_DHCPV4_SERVER)
+#include <zephyr/net/dhcpv4_server.h>
+#endif
 #include <zephyr/net/wifi.h>
 #include <zephyr/net/wifi_mgmt.h>
 
@@ -79,6 +82,9 @@ static bool job_scan_valid;
 static char job_ssid[ASTER_WIFI_SSID_MAX + 1];
 static char job_psk[65];
 static size_t job_psk_len;
+static wifi_profile_t hotspot_profile = {.version = WIFI_PROFILE_VERSION, .ssid = "ASTER"};
+static bool hotspot_enabled;
+static bool hotspot_configured;
 
 static int queue_wifi_job(uint32_t op, const char *ssid, const char *psk);
 static void wifi_job_fn(struct k_work *work);
@@ -244,7 +250,7 @@ static void fill_ip(char *dst, size_t max)
 static void wifi_handler(struct net_mgmt_event_callback *cb, uint64_t event,
 			 struct net_if *ift)
 {
-	ARG_UNUSED(ift);
+	if (ift != iface) return;
 
 	switch (event) {
 	case NET_EVENT_WIFI_SCAN_RESULT:
@@ -283,7 +289,7 @@ static void ipv4_handler(struct net_mgmt_event_callback *cb, uint64_t event,
 			 struct net_if *ift)
 {
 	ARG_UNUSED(cb);
-	ARG_UNUSED(ift);
+	if (ift != iface) return;
 
 	if (event == NET_EVENT_IPV4_DHCP_BOUND) {
 		k_sem_give(&dhcp_done);
@@ -414,11 +420,21 @@ int aster_plat_wifi_connect(const char *ssid, const char *psk)
 	{
 		aster_wifi_status_t current;
 
-		if (aster_plat_wifi_status(&current) == 0 &&
-		    current.state == WIFI_STATE_COMPLETED &&
-		    strcmp(current.ssid, join_ssid) == 0) {
-			k_mutex_unlock(&wifi_mu);
-			return 0;
+		if (aster_plat_wifi_status(&current) == 0) {
+			if (current.state == WIFI_STATE_COMPLETED &&
+			    strcmp(current.ssid, join_ssid) == 0) {
+				k_mutex_unlock(&wifi_mu);
+				return 0;
+			}
+			/* ESP32 rejects connect while already associated. Switching
+			 * networks must finish disconnect before starting the join. */
+			if (current.state == WIFI_STATE_COMPLETED ||
+			    current.state == WIFI_STATE_ASSOCIATED) {
+				k_mutex_unlock(&wifi_mu);
+				err = aster_plat_wifi_disconnect();
+				if (err) return err;
+				k_mutex_lock(&wifi_mu, K_FOREVER);
+			}
 		}
 	}
 	params.ssid = (const uint8_t *)join_ssid;
@@ -639,6 +655,116 @@ int aster_plat_wifi_forget(void)
 	return 0;
 }
 
+void aster_plat_wifi_hotspot_status(aster_wifi_hotspot_status_t *status)
+{
+	if (!status) return;
+	k_mutex_lock(&job_mu, K_FOREVER);
+	memcpy(status->ssid, hotspot_profile.ssid, sizeof(status->ssid));
+	status->enabled = hotspot_enabled;
+	status->configured = hotspot_configured;
+	k_mutex_unlock(&job_mu);
+}
+
+static int hotspot_stop(void)
+{
+#if defined(CONFIG_NET_DHCPV4_SERVER) && defined(CONFIG_WIFI_USAGE_MODE_STA_AP)
+	struct net_if *ap = net_if_get_wifi_sap();
+	if (!ap) return -ENODEV;
+	if (!hotspot_enabled) return 0;
+	int err = net_mgmt(NET_REQUEST_WIFI_AP_DISABLE, ap, NULL, 0);
+	if (err) return err;
+	(void)net_dhcpv4_server_stop(ap);
+	k_mutex_lock(&job_mu, K_FOREVER);
+	hotspot_enabled = false;
+	k_mutex_unlock(&job_mu);
+	return 0;
+#else
+	return -ENOTSUP;
+#endif
+}
+
+static int hotspot_start(const char *ssid, const char *psk)
+{
+#if defined(CONFIG_NET_DHCPV4_SERVER) && defined(CONFIG_WIFI_USAGE_MODE_STA_AP)
+	struct net_if *ap = net_if_get_wifi_sap();
+	struct net_in_addr addr, mask, pool;
+	int err;
+	if (!ap) return -ENODEV;
+	if (hotspot_enabled) {
+		err = hotspot_stop();
+		if (err) return err;
+	}
+	err = net_if_up(ap);
+	if (err && err != -EALREADY) return err;
+	net_addr_pton(NET_AF_INET, "192.168.4.1", &addr);
+	net_addr_pton(NET_AF_INET, "255.255.255.0", &mask);
+	net_addr_pton(NET_AF_INET, "192.168.4.10", &pool);
+	if (!net_if_ipv4_addr_add(ap, &addr, NET_ADDR_MANUAL, 0) ||
+	    !net_if_ipv4_set_netmask_by_addr(ap, &addr, &mask)) return -EIO;
+	err = net_dhcpv4_server_start(ap, &pool);
+	if (err) return err;
+	struct wifi_connect_req_params params = {
+		.ssid = (const uint8_t *)ssid, .ssid_length = strlen(ssid),
+		.psk = (const uint8_t *)psk, .psk_length = strlen(psk),
+		.security = WIFI_SECURITY_TYPE_PSK, .channel = 6,
+		.band = WIFI_FREQ_BAND_2_4_GHZ, .mfp = WIFI_MFP_OPTIONAL,
+	};
+	err = net_mgmt(NET_REQUEST_WIFI_AP_ENABLE, ap, &params, sizeof(params));
+	if (err) {
+		(void)net_dhcpv4_server_stop(ap);
+		return err;
+	}
+	wifi_profile_t profile = {.version = WIFI_PROFILE_VERSION, .psk_len = strlen(psk)};
+	strcpy(profile.ssid, ssid);
+	strcpy(profile.psk, psk);
+	k_mutex_lock(&job_mu, K_FOREVER);
+	hotspot_profile = profile;
+	hotspot_enabled = true;
+	hotspot_configured = true;
+	k_mutex_unlock(&job_mu);
+	err = aster_kv_set(WIFI_KV_ID, "hotspot", &profile, sizeof(profile));
+	if (err) LOG_WRN("hotspot enabled but saving configuration failed: %d", err);
+	return 0;
+#else
+	ARG_UNUSED(ssid);
+	ARG_UNUSED(psk);
+	return -ENOTSUP;
+#endif
+}
+
+int aster_plat_wifi_hotspot_start(const char *ssid, const char *psk)
+{
+	return queue_wifi_job(ASTER_PLAT_WIFI_OP_HOTSPOT_START, ssid, psk);
+}
+
+int aster_plat_wifi_hotspot_stop(void)
+{
+	return queue_wifi_job(ASTER_PLAT_WIFI_OP_HOTSPOT_STOP, NULL, NULL);
+}
+
+static void hotspot_load(void)
+{
+	wifi_profile_t profile = {0};
+	size_t len = 0;
+	int err = aster_kv_get(WIFI_KV_ID, "hotspot", &profile, sizeof(profile), &len);
+	if (err == -ENOENT) return;
+	if (err) {
+		LOG_WRN("saved hotspot read failed: %d", err);
+		return;
+	}
+	size_t slen = strnlen(profile.ssid, sizeof(profile.ssid));
+	if (len != sizeof(profile) || profile.version != WIFI_PROFILE_VERSION ||
+	    !slen || slen > ASTER_WIFI_SSID_MAX || profile.psk_len < 8 ||
+	    profile.psk_len > 63 || strnlen(profile.psk, sizeof(profile.psk)) != profile.psk_len) {
+		LOG_WRN("saved hotspot configuration is invalid");
+		return;
+	}
+	k_mutex_lock(&job_mu, K_FOREVER);
+	hotspot_profile = profile;
+	hotspot_configured = true;
+	k_mutex_unlock(&job_mu);
+}
+
 static int queue_wifi_job(uint32_t op, const char *ssid, const char *psk)
 {
 	int err = 0;
@@ -654,7 +780,18 @@ static int queue_wifi_job(uint32_t op, const char *ssid, const char *psk)
 		k_mutex_unlock(&job_mu);
 		return -EBUSY;
 	}
-	if (op == ASTER_PLAT_WIFI_OP_CONNECT) {
+	if (op == ASTER_PLAT_WIFI_OP_HOTSPOT_START) {
+		const char *name = ssid ? ssid : hotspot_profile.ssid;
+		const char *password = psk && psk[0] ? psk : hotspot_profile.psk;
+		if (!name[0] || strlen(name) > ASTER_WIFI_SSID_MAX ||
+		    strlen(password) < 8 || strlen(password) > 63) {
+			k_mutex_unlock(&job_mu);
+			return -EINVAL;
+		}
+		strcpy(job_ssid, name);
+		strcpy(job_psk, password);
+		job_psk_len = strlen(password);
+	} else if (op == ASTER_PLAT_WIFI_OP_CONNECT) {
 		if (!ssid || !ssid[0] || strlen(ssid) > ASTER_WIFI_SSID_MAX ||
 		    (psk && psk[0] && (strlen(psk) < 8 || strlen(psk) > 64))) {
 			k_mutex_unlock(&job_mu);
@@ -715,6 +852,12 @@ static void wifi_job_fn(struct k_work *work)
 		break;
 	case ASTER_PLAT_WIFI_OP_RECONNECT:
 		err = aster_plat_wifi_reconnect();
+		break;
+	case ASTER_PLAT_WIFI_OP_HOTSPOT_START:
+		err = hotspot_start(ssid, psk);
+		break;
+	case ASTER_PLAT_WIFI_OP_HOTSPOT_STOP:
+		err = hotspot_stop();
 		break;
 	case ASTER_PLAT_WIFI_OP_FORGET:
 		err = aster_plat_wifi_forget();
@@ -809,6 +952,7 @@ void aster_plat_wifi_operation(uint32_t *operation, uint32_t *last_operation,
 
 int aster_plat_wifi_storage_ready(void)
 {
+	hotspot_load();
 	wifi_profile_t profile;
 	size_t len = 0;
 	size_t ssid_len, psk_len;

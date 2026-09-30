@@ -45,6 +45,10 @@ if(CONFIG_ASTER_SCREENSHOT)
 	target_sources(app PRIVATE ui_screenshot.c)
 endif()
 
+if(CONFIG_ASTER_WIFI)
+	target_sources(app PRIVATE wifi_settings.c)
+endif()
+
 if(CONFIG_ASTER_LAUNCHER_NATIVE)
 	target_sources(app PRIVATE launcher/launcher.c)
 	target_include_directories(app PRIVATE launcher)

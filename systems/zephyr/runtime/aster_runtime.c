@@ -592,6 +592,10 @@ static void ui_service(aster_app_ctx_t *ctx)
 		}
 	}
 
+	/* The launcher normally polls the sheet. While a guest owns this
+	 * worker, service radio completion and status from this same UI thread. */
+	aster_qpanel_tick();
+
 	/* Keeps the LVGL timer alive while an app owns the worker: it services
 	 * the screenshot poll (the shell blocks on it) and drains async flush
 	 * waits. The screen tree holds the sheet and nothing else, so no

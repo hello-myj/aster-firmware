@@ -11,8 +11,7 @@
  *   EMPTY --(UI poll: header+TOC+interval tables resident)--> TABLE --(the
  *   system workqueue streams the compact metric table in 32 KB chunks)-->
  *   READY (metrics pure-RAM from then on). Bitmaps fill a bump+epoch ring
- *   (RING_BYTES 48 KB, RING_SLOTS 128 entries per size -- 4bpp doubled the
- *   byte budget without touching the slot count) lazily: warm() bursts and
+ *   (RING_BYTES 48 KB, RING_SLOTS 512 entries per size) lazily: warm() bursts and
  *   render-time misses are merged into contiguous-index runs and fetched on
  *   the system workqueue (s_lock is never held across SD I/O). A bitmap requested
  *   before it is resident renders as a correct-sized blank box and is
@@ -77,6 +76,9 @@ bool aster_font_sd_repaint_pending(void);
 /* Clear the repaint request. Called by the draw entry point (ui_gfx.c),
  * which is about to paint everything the pipeline has. */
 void aster_font_sd_repaint_ack(void);
+
+/* UI thread: monotonic update counter, unaffected by guest repaint ack. */
+uint32_t aster_font_sd_generation(void);
 
 /* Codepoint present in the baked set of `px`? (interval lookup, no I/O;
  * false while the slot is not ready.) */

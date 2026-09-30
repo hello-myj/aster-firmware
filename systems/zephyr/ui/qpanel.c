@@ -27,6 +27,7 @@
 #include "ui_geom.h"
 #include "ui_lvgl.h"
 #include "ui_wifi.h"
+#include "wifi_settings.h"
 
 #include "aster_kv.h"
 #include "aster_mem.h"
@@ -480,41 +481,23 @@ void aster_qpanel_restore_volume(void)
 #endif /* CONFIG_ASTER_AUDIO */
 
 #if IS_ENABLED(CONFIG_ASTER_WIFI)
-static void wifi_connect_start(void)
-{
-	int err = aster_plat_wifi_reconnect_start();
-	LOG_INF("qpanel: wifi reconnect dispatched -> %d", err);
-}
-
 static void wifi_refresh(void);
 
 static void on_wifi_btn(lv_event_t *e)
 {
-	aster_wifi_status_t ws;
-	uint32_t operation = ASTER_PLAT_WIFI_OP_NONE;
-	int err;
-
 	ARG_UNUSED(e);
-	aster_plat_wifi_operation(&operation, NULL, NULL);
-	if (operation != ASTER_PLAT_WIFI_OP_NONE) {
-		return; /* the button is inert until the join resolves */
-	}
-	if (aster_plat_wifi_status(&ws) == 0 && ws.state == WIFI_STATE_COMPLETED) {
-		err = aster_plat_wifi_disconnect_start();
-		LOG_INF("qpanel: wifi disconnect dispatched -> %d", err);
-	} else {
-		wifi_connect_start();
-	}
-	wifi_refresh();
+	lv_obj_set_pos(s_sheet, 4, 4);
+	lv_obj_set_size(s_sheet, aster_ui_lvgl_width() - 8,
+			aster_ui_lvgl_height() - 8);
+	aster_wifi_settings_open(s_sheet);
 }
 
 static void wifi_refresh(void)
 {
 	aster_wifi_status_t ws;
 	char last[ASTER_WIFI_SSID_MAX + 1];
-	uint32_t operation = ASTER_PLAT_WIFI_OP_NONE;
 	int err;
-	bool linked, remembered, busy;
+	bool linked, remembered;
 
 	if (!s_wifi_lbl) {
 		return;
@@ -524,8 +507,6 @@ static void wifi_refresh(void)
 	/* -EBUSY while a join is in flight, and -ENOENT when the device has
 	 * never been told to join anything. Same reading either way here. */
 	remembered = aster_plat_wifi_last_ssid(last, sizeof(last)) == 0;
-	aster_plat_wifi_operation(&operation, NULL, NULL);
-	busy = operation != ASTER_PLAT_WIFI_OP_NONE;
 
 	set_label(s_wifi_lbl, aster_ui_wifi_word(err ? -1 : ws.state));
 	dot_color(s_dot_wifi, linked ? s_pal.accent : s_pal.dim);
@@ -551,26 +532,12 @@ static void wifi_refresh(void)
 		}
 	}
 
-	/* The panel can reconnect the saved profile or disconnect the current
-	 * link. New credentials are entered through `hw wifi connect` or an app
-	 * using the Wi-Fi ABI; with no saved profile, do not show a dead button. */
+	/* Settings is available even before the first network is configured. */
 	if (!s_wifi_btn) {
 		return;
 	}
-	if (busy) {
-		lv_obj_clear_flag(s_wifi_btn, LV_OBJ_FLAG_HIDDEN);
-		set_label(s_wifi_btn_lbl,
-			  operation == ASTER_PLAT_WIFI_OP_SCAN ? "扫描中" :
-			  operation == ASTER_PLAT_WIFI_OP_DISCONNECT ? "断开中" :
-			  operation == ASTER_PLAT_WIFI_OP_FORGET ? "处理中" : "连接中");
-		lv_obj_set_style_text_color(s_wifi_btn_lbl, hexc(s_pal.dim), 0);
-	} else if (linked || remembered) {
-		lv_obj_clear_flag(s_wifi_btn, LV_OBJ_FLAG_HIDDEN);
-		set_label(s_wifi_btn_lbl, linked ? "断开" : "重连");
-		lv_obj_set_style_text_color(s_wifi_btn_lbl, hexc(s_pal.fg), 0);
-	} else {
-		lv_obj_add_flag(s_wifi_btn, LV_OBJ_FLAG_HIDDEN);
-	}
+	lv_obj_clear_flag(s_wifi_btn, LV_OBJ_FLAG_HIDDEN);
+	set_label(s_wifi_btn_lbl, "设置");
 }
 #endif /* CONFIG_ASTER_WIFI */
 
@@ -651,6 +618,9 @@ static void build(void)
 	}
 
 	load_palette();
+#if IS_ENABLED(CONFIG_ASTER_WIFI)
+	aster_wifi_settings_warm();
+#endif
 	aster_ui_font_warm(ASTER_FONT_CAPTION_PX,
 			 "快捷设置音量关闭主题切换断开重连连接中无网络记录上次横竖屏");
 	if (has_theme) {
@@ -931,6 +901,10 @@ void aster_qpanel_tick(void)
 	vol_refresh();
 #endif
 #if IS_ENABLED(CONFIG_ASTER_WIFI)
+	aster_wifi_settings_tick();
+	if (aster_wifi_settings_is_open()) {
+		return;
+	}
 	wifi_refresh();
 #endif
 	sd_refresh();

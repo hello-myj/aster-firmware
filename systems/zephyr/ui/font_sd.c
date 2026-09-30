@@ -54,7 +54,7 @@ LOG_MODULE_REGISTER(aster_fontsd, LOG_LEVEL_INF);
  * resident metric tables and A8 render scratch are depth-independent). */
 #define METRIC_RECS     2048u		/* records streamed per pass      */
 #define RING_BYTES      (48u * 1024u)	/* bitmap arena per size slot     */
-#define RING_SLOTS      128u
+#define RING_SLOTS      512u
 #define STG_SLOTS       40u		/* workq -> UI staging entries    */
 #define BURST_GLYPHS    48u		/* max glyphs merged per run      */
 #define BATCH_MAX       64u		/* queue entries popped per pass  */
@@ -205,6 +205,7 @@ static bool s_inited;
 static bool s_probe_first;	/* first discovery sweeps all slots at once */
 static uint32_t s_io_fails;	/* consecutive SD open/read failures */
 static bool s_repaint;		/* latched "the picture changed" (see below) */
+static uint32_t s_generation;	/* updates observed independently by native UI */
 static bool s_oversize_warned;	/* announced once per boot                 */
 static aster_font_sd_stats_t s_st;
 
@@ -392,10 +393,9 @@ static bool ring_put(slot_t *s, uint32_t cp, const uint8_t *src, uint32_t len)
 		memcpy(s->arena + e->off, src, len);
 		return true;
 	}
-	off = ring_alloc(s, len);
-	if (off == UINT32_MAX) {
-		return false;
-	}
+	/* Entry exhaustion can happen before the byte arena fills (ASCII
+	 * keyboard + settings). Retire the epoch in either case; otherwise a
+	 * fetched glyph is discarded and can remain blank with no repaint. */
 	for (uint32_t i = 0; i < RING_SLOTS; i++) {
 		if (s->ring[i].cp == 0) {
 			e = &s->ring[i];
@@ -403,6 +403,12 @@ static bool ring_put(slot_t *s, uint32_t cp, const uint8_t *src, uint32_t len)
 		}
 	}
 	if (!e) {
+		ring_reset(s);
+		s_st.evictions++;
+		e = &s->ring[0];
+	}
+	off = ring_alloc(s, len);
+	if (off == UINT32_MAX) {
 		return false;
 	}
 	memcpy(s->arena + off, src, len);
@@ -779,6 +785,7 @@ bool aster_font_sd_commit(void)
 		/* a caller that is about to paint sees the `dirty` return; one
 		 * that is idle sees the latch at its next repaint_pending() */
 		s_repaint = true;
+		s_generation++;
 	}
 	return dirty;
 }
@@ -1080,6 +1087,7 @@ int aster_font_sd_poll(void)
 		LOG_INF("cpfont %upx READY", (unsigned)s->px);
 		ready_edge = 1;
 		s_repaint = true;	/* this face just became drawable */
+		s_generation++;
 	}
 	/* Discovery. First sweep loads every baked file at once so the 48px
 	 * clock size is READY within the same second as 12px -- the old
@@ -1155,6 +1163,11 @@ bool aster_font_sd_repaint_pending(void)
 	(void)aster_font_sd_poll();
 	(void)aster_font_sd_commit();
 	return s_repaint;
+}
+
+uint32_t aster_font_sd_generation(void)
+{
+	return s_generation;
 }
 
 /* Drop the repaint request -- called from the draw entry point, which is

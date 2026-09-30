@@ -105,7 +105,7 @@
 #define LV_USE_ARC 0
 #define LV_USE_BAR 1
 #define LV_USE_BUTTON 1
-#define LV_USE_BUTTONMATRIX 0
+#define LV_USE_BUTTONMATRIX 1
 #define LV_USE_CALENDAR 0
 #define LV_USE_CANVAS 0
 #define LV_USE_CHART 0
@@ -130,7 +130,7 @@
 #define LV_USE_SWITCH 1
 #define LV_USE_TABLE 0
 #define LV_USE_TABVIEW 0
-#define LV_USE_TEXTAREA 0
+#define LV_USE_TEXTAREA 1
 #define LV_USE_TILEVIEW 0
 #define LV_USE_WIN 0
 #define LV_USE_OBJ_PROPERTY 0

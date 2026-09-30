@@ -157,6 +157,15 @@ int aster_ui_fonts_advance(void)
 	if (aster_font_sd_commit()) {
 		edge = 1;
 	}
+	/* Guest drawing can commit and acknowledge shared glyphs before this
+	 * service runs. Native widgets must still observe that update. */
+	static uint32_t observed_generation;
+	uint32_t generation = aster_font_sd_generation();
+
+	if (generation != observed_generation) {
+		observed_generation = generation;
+		edge = 1;
+	}
 	return edge;
 }
 
