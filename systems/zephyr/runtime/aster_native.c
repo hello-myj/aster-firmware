@@ -1022,33 +1022,83 @@ static int32_t n_input_keys_state(wasm_exec_env_t env, uint32_t codes_off, uint3
 
 /* ============ sensors (ABI 1.3, pull model) ============ */
 
-/* One I2C fetch serves both channels; a 50 ms cache keeps a tight app loop
- * from hammering the bus while staying fresher than any human gesture. */
-#define IMU_CACHE_MS 50
+/* One atomic fetch serves legacy channels and the coherent ABI 3.7 API.
+ * The APP worker owns this cache; the platform serializes sensor transactions
+ * against shell diagnostics. Retry errors after the same TTL, never publish
+ * a stale or partially filled sample on a failed fetch. */
+#define IMU_CACHE_MS 10
 static struct {
 	int64_t at_ms;
-	float a[3], g[3];
-	int ok;
+	aster_imu_sample_t sample;
+	int32_t result;
 } imu_cache = { .at_ms = -1 };
 
-static int imu_cached(void)
+static int32_t imu_cached(void)
 {
 	int64_t now = k_uptime_get();
-	if (imu_cache.ok && imu_cache.at_ms >= 0 &&
-	    now - imu_cache.at_ms < IMU_CACHE_MS) {
-		return imu_cache.ok; /* ok==1 good, negative = sticky error retried below only after TTL */
+
+	if (imu_cache.at_ms >= 0 && now - imu_cache.at_ms < IMU_CACHE_MS) {
+		return imu_cache.result;
 	}
-	float ax, ay, az, gx, gy, gz;
-	int err = aster_plat_imu_read(&ax, &ay, &az, &gx, &gy, &gz);
-	imu_cache.at_ms = now;
-	if (err) {
-		imu_cache.ok = 0;
-		return -1;
+	aster_imu_sample_t next = {
+		.size = sizeof(next), .version = 1,
+		.flags = ASTER_IMU_ACCEL_VALID | ASTER_IMU_GYRO_VALID,
+		.sequence = imu_cache.sample.sequence + 1u,
+	};
+	int err = aster_plat_imu_read(&next.accel[0], &next.accel[1], &next.accel[2],
+				    &next.gyro[0], &next.gyro[1], &next.gyro[2]);
+
+	imu_cache.at_ms = k_uptime_get();
+	imu_cache.result = err == -ENODEV ? ASTER_ENODEV : err ? ASTER_EIO : ASTER_OK;
+	if (!err) {
+		next.timestamp_ms = (uint64_t)imu_cache.at_ms;
+		imu_cache.sample = next;
 	}
-	imu_cache.a[0] = ax; imu_cache.a[1] = ay; imu_cache.a[2] = az;
-	imu_cache.g[0] = gx; imu_cache.g[1] = gy; imu_cache.g[2] = gz;
-	imu_cache.ok = 1;
-	return 1;
+	return imu_cache.result;
+}
+
+static int32_t n_imu_get_info(wasm_exec_env_t env, uint32_t off, uint32_t size)
+{
+	aster_imu_info_t *dst;
+
+	if (size < sizeof(*dst) || !(dst = (aster_imu_info_t *)buf(env, off, sizeof(*dst)))) {
+		return ASTER_EINVAL;
+	}
+	if (!aster_sysinfo_has_feature(ASTER_FEATURE_ACCELEROMETER) ||
+	    !aster_sysinfo_has_feature(ASTER_FEATURE_GYROSCOPE)) {
+		return ASTER_ENODEV;
+	}
+	int32_t result = imu_cached();
+
+	if (result != ASTER_OK) {
+		return result;
+	}
+	aster_imu_info_t info = {
+		.size = sizeof(info), .version = 1,
+		.flags = ASTER_IMU_ACCEL_VALID | ASTER_IMU_GYRO_VALID,
+		.min_interval_ms = IMU_CACHE_MS,
+	};
+	memcpy(dst, &info, sizeof(info));
+	return ASTER_OK;
+}
+
+static int32_t n_imu_sample_read(wasm_exec_env_t env, uint32_t off, uint32_t size)
+{
+	aster_imu_sample_t *dst;
+
+	if (size < sizeof(*dst) || !(dst = (aster_imu_sample_t *)buf(env, off, sizeof(*dst)))) {
+		return ASTER_EINVAL;
+	}
+	if (!aster_sysinfo_has_feature(ASTER_FEATURE_ACCELEROMETER) ||
+	    !aster_sysinfo_has_feature(ASTER_FEATURE_GYROSCOPE)) {
+		return ASTER_ENODEV;
+	}
+	int32_t result = imu_cached();
+
+	if (result == ASTER_OK) {
+		memcpy(dst, &imu_cache.sample, sizeof(*dst));
+	}
+	return result;
 }
 
 static int32_t n_imu_read(wasm_exec_env_t env, uint32_t off, uint32_t size, int gyro)
@@ -1063,10 +1113,11 @@ static int32_t n_imu_read(wasm_exec_env_t env, uint32_t off, uint32_t size, int 
 	if (!dst) {
 		return ASTER_EINVAL;
 	}
-	if (imu_cached() < 1) {
-		return ASTER_ENODEV;
+	int32_t result = imu_cached();
+	if (result != ASTER_OK) {
+		return result;
 	}
-	memcpy(dst, gyro ? imu_cache.g : imu_cache.a, 3 * sizeof(float));
+	memcpy(dst, gyro ? imu_cache.sample.gyro : imu_cache.sample.accel, 3 * sizeof(float));
 	return ASTER_OK;
 }
 
@@ -2481,6 +2532,8 @@ static NativeSymbol syms[] = {
 	{ "aster_img_render", (void *)n_img_render, "(iiii)i", NULL },
 	{ "aster_input_get_info", (void *)n_input_get_info, "(ii)i", NULL },
 	{ "aster_input_keys_state", (void *)n_input_keys_state, "(ii)i", NULL },
+	{ "aster_imu_get_info", (void *)n_imu_get_info, "(ii)i", NULL },
+	{ "aster_imu_read", (void *)n_imu_sample_read, "(ii)i", NULL },
 	{ "aster_accel_read", (void *)n_accel_read, "(ii)i", NULL },
 	{ "aster_gyro_read", (void *)n_gyro_read, "(ii)i", NULL },
 	{ "aster_cam_info", (void *)n_cam_info, "(ii)i", NULL },

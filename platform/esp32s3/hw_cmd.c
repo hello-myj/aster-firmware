@@ -473,10 +473,10 @@ static int cmd_imu(const struct shell *sh, size_t argc, char **argv)
 		shell_error(sh, "imu read failed (%d)", err);
 		return 0;
 	}
-	shell_print(sh, "accel  %d %d %d mg", (int)(ax * 1000), (int)(ay * 1000),
-		    (int)(az * 1000));
-	shell_print(sh, "gyro   %d %d %d mdps", (int)(gx * 1000), (int)(gy * 1000),
-		    (int)(gz * 1000));
+	shell_print(sh, "accel  %d %d %d mg", (int)(ax * (1000.0f / 9.80665f)), (int)(ay * (1000.0f / 9.80665f)),
+		    (int)(az * (1000.0f / 9.80665f)));
+	shell_print(sh, "gyro   %d %d %d mdps", (int)(gx * 57295.7795f), (int)(gy * 57295.7795f),
+		    (int)(gz * 57295.7795f));
 	return 0;
 }
 

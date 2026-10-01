@@ -24,6 +24,7 @@
 #include "kv.h"
 #include "appmgr.h"
 #include "sensor.h"
+#include "imu.h"
 #include "camera.h"
 #include "audio.h"
 #include "time.h"

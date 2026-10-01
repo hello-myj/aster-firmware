@@ -5,7 +5,8 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 3
-#define ASTER_ABI_MINOR 6  /* 3.6 (additive): read-only wall-clock time,
+#define ASTER_ABI_MINOR 7  /* 3.7 (additive): coherent six-axis IMU info/read.
+                          * 3.6 (additive): read-only wall-clock time,
                           * UTC epoch milliseconds plus local calendar fields.
                           * 3.5 (additive): station Wi-Fi scan/connect/status,
                           * saved profile, forget and reconnect imports.
