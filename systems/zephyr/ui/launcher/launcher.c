@@ -3,8 +3,7 @@
  * Built-in native launcher (LVGL). Replaces the retired
  * "aster.launcher.desktop" guest app: same home + drawer, five themes and
  * kv-persisted state, drawn with LVGL directly on the firmware worker
- * thread. Feature-equivalent port; a real status bar / long-press
- * uninstall / animations are follow-up work.
+ * thread. App tiles support short-tap launch and long-press uninstall.
  */
 #include "launcher.h"
 #include "gesture.h"
@@ -259,6 +258,13 @@ static launcher_geom_t s_geom;
 static int s_geom_w, s_geom_h;
 
 static lv_obj_t *s_home, *s_drawer, *s_list;
+/* Copy the identity: registry slots can move while the dialog is open.
+ * Object changes and filesystem work are deferred out of LVGL callbacks. */
+static lv_obj_t *s_uninstall_modal, *s_uninstall_message, *s_uninstall_confirm;
+static char s_uninstall_id[64], s_uninstall_name[40];
+static bool s_uninstall_show;
+enum { UNINSTALL_NONE, UNINSTALL_CANCEL, UNINSTALL_CONFIRM };
+static int s_uninstall_action;
 /* Home is an information page, so everything here is a status readout; the
  * drawer keeps only its app counter. s_lb_wifi_d is the second WiFi line
  * (SSID and address) and is hidden rather than blanked when there is no
@@ -515,7 +521,8 @@ static void on_click(lv_event_t *e)
 		s_dirty = true;
 		break;
 	default: /* 100 + idx -> enqueue app startup after this worker callback */
-		if (act >= 100 && (act - 100) < s_app_n) {
+		if (!s_uninstall_show && !s_uninstall_modal &&
+		    act >= 100 && (act - 100) < s_app_n) {
 			const char *id = s_apps[act - 100];
 			persist();
 			int err = aster_runtime_launch_async(id);
@@ -524,6 +531,133 @@ static void on_click(lv_event_t *e)
 			}
 		}
 		break;
+	}
+}
+
+static void uninstall_close(void)
+{
+	if (s_uninstall_modal) {
+		lv_obj_delete(s_uninstall_modal);
+	}
+	s_uninstall_modal = s_uninstall_message = s_uninstall_confirm = NULL;
+	s_uninstall_id[0] = s_uninstall_name[0] = '\0';
+	s_uninstall_show = false;
+	s_uninstall_action = UNINSTALL_NONE;
+	aster_gesture_reset();
+}
+
+static void on_uninstall_action(lv_event_t *e)
+{
+	s_uninstall_action = (int)(intptr_t)lv_event_get_user_data(e);
+}
+
+static void on_app_tile(lv_event_t *e)
+{
+	int idx = (int)(intptr_t)lv_event_get_user_data(e) - 100;
+	lv_event_code_t code = lv_event_get_code(e);
+
+	if (s_uninstall_show || s_uninstall_modal || idx < 0 || idx >= s_app_n) {
+		return;
+	}
+	if (code == LV_EVENT_SHORT_CLICKED) {
+		on_click(e);
+	} else if (code == LV_EVENT_LONG_PRESSED) {
+		const aster_app_rec_t *r = aster_app_mgr_find(s_apps[idx]);
+
+		if (!r) {
+			return;
+		}
+		snprintf(s_uninstall_id, sizeof(s_uninstall_id), "%s", r->id);
+		snprintf(s_uninstall_name, sizeof(s_uninstall_name), "%s", r->name);
+		s_uninstall_show = true;
+		/* The release of this hold must not click a newly created button. */
+		lv_indev_wait_release(aster_ui_lvgl_indev());
+		aster_gesture_reset();
+	}
+}
+
+static lv_obj_t *uninstall_button(lv_obj_t *card, int x, int y, int width,
+				 const char *text, uint32_t bg, uint32_t fg, int action)
+{
+	lv_obj_t *button = lv_button_create(card);
+
+	flat(button, bg);
+	lv_obj_set_pos(button, x, y);
+	lv_obj_set_size(button, width, 44);
+	lv_obj_set_style_radius(button, 10, 0);
+	lv_obj_set_style_bg_opa(button, LV_OPA_70, LV_STATE_PRESSED);
+	lv_obj_add_event_cb(button, on_uninstall_action, LV_EVENT_CLICKED,
+			    (void *)(intptr_t)action);
+	lv_obj_t *label = mk_label(button, text, fg, 16, 1);
+
+	lv_obj_center(label);
+	return button;
+}
+
+static void uninstall_open(void)
+{
+	const launcher_theme_t *th = &s_themes[s_theme];
+	int width = MIN(s_geom_w - 24, 300);
+	int height = 230;
+	lv_obj_t *card, *label;
+
+	s_uninstall_show = false;
+	s_uninstall_modal = lv_obj_create(aster_ui_lvgl_screen());
+	flat(s_uninstall_modal, 0x000000);
+	lv_obj_set_size(s_uninstall_modal, s_geom_w, s_geom_h);
+	lv_obj_set_style_bg_opa(s_uninstall_modal, LV_OPA_60, 0);
+	lv_obj_add_flag(s_uninstall_modal, LV_OBJ_FLAG_CLICKABLE);
+	card = lv_obj_create(s_uninstall_modal);
+	flat(card, th->card_bg);
+	lv_obj_set_size(card, width, height);
+	lv_obj_set_style_radius(card, 16, 0);
+	lv_obj_center(card);
+	label = mk_label(card, "卸载应用", th->card_fg, 20, 0);
+	lv_obj_set_pos(label, 16, 16);
+	label = mk_label(card, s_uninstall_name[0] ? s_uninstall_name : s_uninstall_id,
+			 th->card_fg, 20, 0);
+	lv_obj_set_pos(label, 16, 52);
+	lv_obj_set_width(label, width - 32);
+	lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+	s_uninstall_message = mk_label(card, "应用及目录数据将删除。\n此操作无法撤销。",
+				       th->tert, 16, 0);
+	lv_obj_set_pos(s_uninstall_message, 16, 92);
+	lv_obj_set_width(s_uninstall_message, width - 32);
+	int button_w = (width - 44) / 2;
+
+	uninstall_button(card, 16, height - 60, button_w, "取消", th->pill_bg,
+			 th->pill_fg, UNINSTALL_CANCEL);
+	s_uninstall_confirm = uninstall_button(card, 28 + button_w, height - 60,
+					       button_w, "卸载", 0xDC3545,
+					       0xFFFFFF, UNINSTALL_CONFIRM);
+	LOG_INF("launcher: uninstall prompt %s", s_uninstall_id);
+}
+
+static void uninstall_pump(void)
+{
+	int action = s_uninstall_action;
+
+	s_uninstall_action = UNINSTALL_NONE;
+	if (action == UNINSTALL_CANCEL) {
+		uninstall_close();
+	} else if (action == UNINSTALL_CONFIRM && s_uninstall_modal) {
+		int err = aster_app_mgr_uninstall(s_uninstall_id);
+
+		LOG_INF("launcher: uninstall %s: %d", s_uninstall_id, err);
+		if (err == ASTER_OK) {
+			uninstall_close();
+		} else {
+			const char *message = err == ASTER_EBUSY ? "应用正在运行，无法卸载。" :
+				err == ASTER_ENOENT ? "应用已不存在。" :
+				"卸载失败，请检查 SD 卡。";
+
+			lv_label_set_text(s_uninstall_message, message);
+			aster_ui_font_warm(16, message);
+			lv_obj_add_flag(s_uninstall_confirm, LV_OBJ_FLAG_HIDDEN);
+		}
+	}
+	if (s_uninstall_show && s_visible) {
+		uninstall_open();
 	}
 }
 
@@ -581,7 +715,9 @@ static void build_drawer(void)
 		/* A name wider than the tile would otherwise make the tile itself
 		 * scrollable and pan its own contents on a drag. */
 		no_scroll(tile);
-		lv_obj_add_event_cb(tile, on_click, LV_EVENT_CLICKED,
+		lv_obj_add_event_cb(tile, on_app_tile, LV_EVENT_SHORT_CLICKED,
+				    (void *)(intptr_t)(100 + idx));
+		lv_obj_add_event_cb(tile, on_app_tile, LV_EVENT_LONG_PRESSED,
 				    (void *)(intptr_t)(100 + idx));
 
 		/* Test the return value, not "does the well have children":
@@ -1214,6 +1350,7 @@ void aster_launcher_hide(void)
 	 * sheet left hanging over the app would be operating on a tree that no
 	 * longer exists (its widget pointers are into that tree). */
 	aster_qpanel_force_close();
+	uninstall_close();
 	aster_gesture_reset();
 	persist();
 	if (aster_ui_lvgl_screen()) {
@@ -1239,6 +1376,7 @@ void aster_launcher_request_show(void)
 void aster_launcher_pump_idle(void)
 {
     if (!aster_plat_display_count()) return;
+	uninstall_pump();
 	aster_touch_evt_t tev[ASTER_TOUCH_MAX];
 	int n = aster_plat_input_poll(tev, ASTER_TOUCH_MAX);
 
@@ -1254,7 +1392,8 @@ void aster_launcher_pump_idle(void)
 		 * this reason). The pull-up band is measured from the bottom edge,
 		 * so a stale height puts it 80 px inside the glass on a 240x320
 		 * window. */
-		aster_gest_t g = aster_gesture_feed(tev[i].x, tev[i].y, pressed,
+		aster_gest_t g = s_uninstall_modal || s_uninstall_show ? ASTER_GEST_NONE :
+			aster_gesture_feed(tev[i].x, tev[i].y, pressed,
 						aster_qpanel_allow(true),
 						(int32_t)aster_ui_lvgl_height());
 
@@ -1359,7 +1498,9 @@ void aster_launcher_pump_idle(void)
 			(int)aster_ui_lvgl_height());
 		s_dirty = true;
 	}
-	if (s_dirty) {
+	if (s_dirty && (!s_uninstall_modal ||
+		       s_geom_w != (int)aster_ui_lvgl_width() ||
+		       s_geom_h != (int)aster_ui_lvgl_height())) {
 		/* install/uninstall / theme cycle: names + subset may change */
 		if (s_visible) {
 			aster_launcher_hide();
