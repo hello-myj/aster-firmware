@@ -400,6 +400,14 @@ config ASTER_SYSTEM_UI_ENABLE
 	  default). The ABI never learns about UI form factors -- the launcher
 	  queries display/input facts and picks its own layout.
 
+config ASTER_LAUNCHER_FLUX
+	bool "FLUX Rev.04 ribbon launcher"
+	depends on ASTER_LAUNCHER_NATIVE
+	default y if ASTER_HW_WAVESHARE_35B
+	default n
+	help
+	  Native 320x480 ribbon launcher based on the FLUX Rev.04 reference.
+
 config ASTER_LAUNCHER_NATIVE
 	bool "Built-in native launcher (LVGL, no guest app)"
 	depends on ASTER_LVGL
@@ -680,6 +688,11 @@ config ASTER_APP_SPACE_MAX
 	default 320
 	range 16 8192
 
+config ASTER_LVGL_MEM_KB
+	int "LVGL pool size in KiB (including full-screen screenshot reserve)"
+	default 224
+	range 64 2048
+
 endmenu
 
 menu "Package security"
@@ -776,3 +789,4 @@ source "Kconfig.zephyr"
 config ASTER_TARGET_ID
 	string
 	default "lckfb-s3" if ASTER_HW_LCKFB_S3
+	default "waveshare-35b" if ASTER_HW_WAVESHARE_35B

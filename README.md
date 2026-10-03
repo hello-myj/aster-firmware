@@ -1,6 +1,6 @@
 # Aster Firmware
 
-独立固件仓库，不需要 SDK 或原 MJX 源码。当前硬件只有 **立创开发板 ESP32-S3 实战派（N16R8）**，launcher 固定竖屏；同一固件保留 APP 横屏、竖屏和无屏操作能力。
+独立固件仓库，不需要 SDK 或原 MJX 源码。当前支持 **立创开发板 ESP32-S3 实战派（N16R8）**，并新增实验性 **微雪 ESP32-S3-Touch-LCD-3.5B** 板级方案，launcher 固定竖屏；同一固件保留 APP 横屏、竖屏和无屏操作能力。
 
 ## 配置、构建、烧录
 
@@ -15,11 +15,20 @@ python tools/firmware.py flash
 
 **固件没有 `--target` 参数。** menuconfig 在 Zephyr 生成设备树之前运行，选择值保存在 `config/aster.conf`：
 
-- System and hardware：系统和真实硬件型号；当前为 Zephyr / 立创 ESP32-S3 实战派。
+- System and hardware：系统和真实硬件型号；可选 Zephyr / 立创 ESP32-S3 实战派或微雪 3.5B。
 - Startup display：默认竖屏，可选无屏；APP 的横竖屏由应用声明决定。
 - Firmware services：相机、音频、Wi-Fi、原生桌面等功能。
 
 构建工具从上述配置推导底层 Zephyr board、设备树和功能选项。产物统一在 `build/firmware/`。`config/aster.conf` 不纳入 Git，首次使用加载 `config/default.conf`；清理构建目录不会删除配置。高级 Zephyr 选项可在已配置的构建目录使用 `west build -d build/firmware -t menuconfig` 查看；系统/硬件选择以项目入口保存的配置为准。
+
+微雪板使用项目内独立 Zephyr board；接线、外设范围和验证说明见 [boards/waveshare_35b/README.md](boards/waveshare_35b/README.md)。可保留原配置并独立构建：
+
+```bash
+python tools/firmware.py build --config boards/waveshare_35b/selection.conf --build-dir build/waveshare-35b
+```
+
+`--config` 与 `--build-dir` 同样适用于配置查看和烧录；烧录前工具检查目标是否与镜像一致。
+微雪板仅连接 Type-C 时，使用 `boards/waveshare_35b/usb-debug.conf` 和独立 `build/waveshare-35b-usb` 构建目录可开启 USB shell；该模式暂停 USB 文件服务，详见板级说明。
 
 新的 Zephyr 工作区可通过 `west init -l /path/to/aster-firmware`、`west update` 初始化，再安装该版本环境依赖。参考板需要 [patches/README.md](patches/README.md) 中的驱动补丁。当前工作区已存在相应补丁，本次没有修改共享 Zephyr 源码。
 

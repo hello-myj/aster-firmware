@@ -2,6 +2,8 @@
 cmake_minimum_required(VERSION 3.20.0)
 
 set(ASTER_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
+list(APPEND BOARD_ROOT ${ASTER_ROOT})
+list(APPEND DTS_ROOT ${ASTER_ROOT})
 include(cmake/hardware.cmake)
 
 set(EXTRA_ZEPHYR_MODULES ${EXTRA_ZEPHYR_MODULES}

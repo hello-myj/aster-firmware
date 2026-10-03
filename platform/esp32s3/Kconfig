@@ -44,6 +44,14 @@ config ASTER_PANEL_ST7789V
 	select ASTER_HAS_DISPLAY
 	select ASTER_HAS_FRAMEBUFFER
 
+config ASTER_PANEL_AXS15231B
+	bool "AXS15231B - 320x480 - RGB565 (QSPI)"
+	select DISPLAY
+	select SPI
+	select SPI_EXTENDED_MODES
+	select ASTER_HAS_DISPLAY
+	select ASTER_HAS_FRAMEBUFFER
+
 endchoice
 
 # Board conf assigns these. A patched st7789v honours them; vanilla Zephyr
@@ -61,6 +69,18 @@ config ASTER_ESP32S3_TOUCH
 	select INPUT
 	select INPUT_FT5336
 	select ASTER_HAS_TOUCH
+
+config ASTER_AXS15231B_TOUCH
+	bool "AXS15231B capacitive touch (I2C)"
+	select INPUT
+	select I2C
+	select ASTER_HAS_TOUCH
+
+config ASTER_AUDIO_ADC_ES8311
+	bool "Use ES8311 internal ADC instead of ES7210"
+	depends on ASTER_AUDIO
+	help
+	  Waveshare 3.5B uses one ES8311 for playback and recording.
 
 config ASTER_CAMERA
 	bool "Camera (GC0308 DVP) debug support"

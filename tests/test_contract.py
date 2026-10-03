@@ -38,14 +38,23 @@ class Contract(unittest.TestCase):
         for face in json.loads((ROOT / "resources/fonts/faces.json").read_text())["faces"]:
             self.assertEqual((ROOT / "resources/fonts" / face["file"]).stat().st_size, face["bytes"])
 
-    def test_one_hardware_all_screen_modes(self):
+    def test_hardware_exports_and_separate_selection(self):
         records = list((ROOT / "hardware").glob("*.json"))
-        self.assertEqual(len(records), 1)
-        public = json.loads(records[0].read_text())["public"]
-        self.assertEqual(public["id"], "lckfb-s3")
-        self.assertEqual(set(public["display"]["modes"]), {"landscape", "portrait", "headless"})
+        self.assertEqual({p.stem for p in records}, {"lckfb-s3", "waveshare-35b"})
+        for record in records:
+            public = json.loads(record.read_text())["public"]
+            self.assertEqual(public["id"], record.stem)
+            self.assertEqual(set(public["display"]["modes"]), {"landscape", "portrait", "headless"})
         bundle = bundle_files()
-        self.assertEqual([name for name in bundle if name.startswith("targets/")], ["targets/lckfb-s3.json"])
+        self.assertEqual({name for name in bundle if name.startswith("targets/")},
+                         {"targets/lckfb-s3.json", "targets/waveshare-35b.json"})
+        import firmware
+        selected = ROOT / "boards/waveshare_35b/selection.conf"
+        config = firmware.load_kconfig(selected)
+        self.assertEqual(config.named_choices["ASTER_HARDWARE_SELECT"].selection.name,
+                         "ASTER_HW_WAVESHARE_35B")
+        self.assertEqual(firmware.hardware(selected)["public"]["display"]["height"], 480)
+        self.assertEqual(firmware.hardware(ROOT / "config/default.conf")["public"]["id"], "lckfb-s3")
 
     def test_menuconfig_modes_preserve_hardware(self):
         import firmware

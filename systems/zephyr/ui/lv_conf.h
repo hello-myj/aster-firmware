@@ -16,7 +16,7 @@
 #define LV_USE_STDLIB_MALLOC  LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_STRING  LV_STDLIB_CLIB
 #define LV_USE_STDLIB_SPRINTF LV_STDLIB_CLIB
-/* 224 KB, sized against a MEASURED high-water mark rather than a guess.
+/* The default 224 KB pool is sized against a MEASURED high-water mark rather than a guess.
  *
  * `aster sys lvgl` reports lv_mem_monitor()'s max_used, which is cumulative
  * from lv_init(), so it cannot forget an earlier peak. Across a boot that
@@ -41,8 +41,9 @@
  * Sizing the pool down to the 22 KB peak would quietly delete the safety net
  * at the moment it is needed, so 224 KB keeps 153,600 + the full observed
  * peak + ~53 KB spare. ui_screenshot.c asserts this so a later shrink fails
- * the build instead of silently disabling the last resort. */
-#define LV_MEM_SIZE (224 * 1024)
+ * the build instead of silently disabling the last resort. Larger boards set
+ * ASTER_LVGL_MEM_KB to retain the screenshot reserve and transformed UI layers. */
+#define LV_MEM_SIZE (CONFIG_ASTER_LVGL_MEM_KB * 1024)
 #define LV_MEM_POOL_INCLUDE "aster_mem.h"
 #define LV_MEM_POOL_ALLOC(size) aster_psram_alloc(size)
 
@@ -51,6 +52,10 @@
 #define LV_DRAW_BUF_STRIDE_ALIGN 1
 #define LV_DRAW_BUF_ALIGN 4
 #define LV_USE_DRAW_SW 1
+#ifdef CONFIG_ASTER_LAUNCHER_FLUX
+#include "flux_draw.h"
+#define LV_DRAW_SW_IMAGE aster_flux_draw_image
+#endif
 #define LV_DRAW_SW_ASM LV_DRAW_SW_ASM_NONE
 #define LV_USE_DRAW_SW_COMPLEX_GRADIENTS 0
 #define LV_USE_SHADOW 1
@@ -134,9 +139,8 @@
 #define LV_USE_TILEVIEW 0
 #define LV_USE_WIN 0
 #define LV_USE_OBJ_PROPERTY 0
-/* Screen grab for the `aster ui screenshot` debug CLI (host-side PNG view).
- * Costs ~4 KB of LVGL code; keep off in shipping images. */
-#ifdef CONFIG_ASTER_SCREENSHOT
+/* Debug screen grabs and FLUX's baked ribbon textures use snapshots. */
+#if defined(CONFIG_ASTER_SCREENSHOT) || defined(CONFIG_ASTER_LAUNCHER_FLUX)
 #define LV_USE_SNAPSHOT 1
 #else
 #define LV_USE_SNAPSHOT 0

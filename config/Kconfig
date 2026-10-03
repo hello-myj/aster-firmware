@@ -11,6 +11,8 @@ choice ASTER_HARDWARE_SELECT
     default ASTER_HW_LCKFB_S3
 config ASTER_HW_LCKFB_S3
     bool "LCKFB ESP32-S3 ShiZhanPai (N16R8)"
+config ASTER_HW_WAVESHARE_35B
+    bool "Waveshare ESP32-S3-Touch-LCD-3.5B (N16R8)"
 endchoice
 endmenu
 menu "Startup display (launcher is portrait; APPs select their orientation)"
@@ -26,6 +28,7 @@ endmenu
 menu "Firmware services"
 config ASTER_CFG_CAMERA
     bool "Camera"
+    depends on !ASTER_HW_WAVESHARE_35B
     default y
 config ASTER_CFG_AUDIO
     bool "Audio input and output"
@@ -36,4 +39,8 @@ config ASTER_CFG_WIFI
 config ASTER_CFG_LAUNCHER
     bool "Built-in system desktop"
     default y
+config ASTER_CFG_USB_CONSOLE
+    bool "USB-only debugging (shell uses Serial/JTAG; file service paused)"
+    depends on ASTER_HW_WAVESHARE_35B
+    default n
 endmenu

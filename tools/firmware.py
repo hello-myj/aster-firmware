@@ -14,15 +14,15 @@ CONFIG = ROOT / "config/aster.conf"
 BUILD = ROOT / "build/firmware"
 
 
-def load_kconfig():
+def load_kconfig(path=None):
     import kconfiglib
     config = kconfiglib.Kconfig(str(ROOT / "config/Kconfig"))
-    config.load_config(str(CONFIG if CONFIG.exists() else ROOT / "config/default.conf"))
+    config.load_config(str(path or (CONFIG if CONFIG.exists() else ROOT / "config/default.conf")))
     return config
 
 
-def hardware():
-    text = (CONFIG if CONFIG.exists() else ROOT / "config/default.conf").read_text()
+def hardware(path=None):
+    text = (path or (CONFIG if CONFIG.exists() else ROOT / "config/default.conf")).read_text()
     matches = []
     for path in (ROOT / "hardware").glob("*.json"):
         item = json.loads(path.read_text())
@@ -36,28 +36,36 @@ def hardware():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["menuconfig", "build", "flash", "config"])
+    parser.add_argument("--config", type=Path, help="Use a separate hardware selection file")
+    parser.add_argument("--build-dir", type=Path, help="Use a separate build directory")
     args = parser.parse_args()
+    selected_config = args.config.resolve() if args.config else CONFIG
+    build_dir = args.build_dir.resolve() if args.build_dir else BUILD
     if args.command == "menuconfig":
         import menuconfig
-        config = load_kconfig()
-        os.environ["KCONFIG_CONFIG"] = str(CONFIG)
+        config = load_kconfig(args.config)
+        os.environ["KCONFIG_CONFIG"] = str(selected_config)
         menuconfig.menuconfig(config)
         return 0
-    selected = hardware()
+    selected = hardware(args.config)
     if args.command == "config":
         print(selected["public"]["name"])
-        print((CONFIG if CONFIG.exists() else ROOT / "config/default.conf").read_text())
+        print((args.config or (CONFIG if CONFIG.exists() else ROOT / "config/default.conf")).read_text())
         return 0
     if args.command == "flash":
-        return subprocess.call(["west", "flash", "-d", str(BUILD)], cwd=ROOT)
-    config = load_kconfig()
-    config.write_config(str(CONFIG))
-    cmd = ["west", "build", "-d", str(BUILD), "-b", selected["build"]["board"],
-           "-p", "auto", str(ROOT), "--", f"-DPython3_EXECUTABLE={sys.executable}"]
+        from check_target import check
+        check(selected["public"]["id"], build_dir)
+        return subprocess.call(["west", "flash", "-d", str(build_dir)], cwd=ROOT)
+    config = load_kconfig(args.config)
+    if not args.config:
+        config.write_config(str(CONFIG))
+    cmd = ["west", "build", "-d", str(build_dir), "-b", selected["build"]["board"],
+           "-p", "auto", str(ROOT), "--", f"-DPython3_EXECUTABLE={sys.executable}",
+           f"-DASTER_USER_CONFIG={selected_config}"]
     result = subprocess.call(cmd, cwd=ROOT)
     if result == 0:
         from check_target import check
-        check(selected["public"]["id"], BUILD)
+        check(selected["public"]["id"], build_dir)
     return result
 
 

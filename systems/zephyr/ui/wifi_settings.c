@@ -12,6 +12,16 @@
 #include <string.h>
 #include <zephyr/kernel.h>
 
+#if IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX)
+#define BG 0x181b18
+#define PANEL 0x252d22
+#define FG 0xf3f3e8
+#define MUTED 0x879376
+#define ACCENT 0xd8ff8c
+#define GREEN 0x89eac6
+#define RULE 0x394330
+#define RED 0xff9898
+#else
 #define BG 0x11151c
 #define PANEL 0x1c232d
 #define FG 0xf1f4f8
@@ -20,6 +30,7 @@
 #define GREEN 0x79d4a0
 #define RULE 0x2c3542
 #define RED 0xff9898
+#endif
 
 enum page { WIFI_LIST, WIFI_JOIN, WIFI_DETAILS, WIFI_FORGET_CONFIRM, HOTSPOT, HOTSPOT_EDIT };
 static enum page page;

@@ -45,7 +45,8 @@ BUILD_ASSERT(DT_HAS_ALIAS(lcd_bl),
 	     "CONFIG_LED is on, so the port reaches the backlight through "
 	     "`aliases { lcd-bl = &<led child node>; }` -- the board overlay "
 	     "declares no such alias");
-BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PARENT(DT_ALIAS(lcd_bl)), gpio_leds),
+BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PARENT(DT_ALIAS(lcd_bl)), gpio_leds) ||
+             DT_NODE_HAS_COMPAT(DT_PARENT(DT_ALIAS(lcd_bl)), pwm_leds),
 	     "`lcd-bl` must point at a child of a `gpio-leds` node; aimed "
 	     "anywhere else it resolves to a device that is not an LED "
 	     "controller, so every backlight call would report success while "
@@ -89,6 +90,9 @@ BUILD_ASSERT(DT_NODE_HAS_COMPAT(DT_PARENT(DT_ALIAS(lcd_bl)), gpio_leds),
  * correctly; that is how the token was found, and it is the same silent-zero
  * shape this whole block exists to remove. */
 #if DT_HAS_CHOSEN(zephyr_display)
+BUILD_ASSERT(!IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B) ||
+             DT_NODE_HAS_COMPAT(DT_CHOSEN(zephyr_display), waveshare_axs15231b),
+             "AXS15231B panel selection must match chosen zephyr,display");
 BUILD_ASSERT(!IS_ENABLED(CONFIG_ASTER_PANEL_ST7789V) ||
 	     DT_NODE_HAS_COMPAT(DT_CHOSEN(zephyr_display), sitronix_st7789v),
 	     "CONFIG_ASTER_PANEL_ST7789V selects the sitronix,st7789v driver, but "
@@ -109,6 +113,7 @@ BUILD_ASSERT(!IS_ENABLED(CONFIG_ASTER_PANEL_ST7789V) ||
 
 
 #else
+BUILD_ASSERT(!IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B), "AXS15231B needs chosen display");
 BUILD_ASSERT(!IS_ENABLED(CONFIG_ASTER_PANEL_ST7789V),
 	     "CONFIG_ASTER_PANEL_ST7789V is on but the devicetree has no chosen "
 	     "zephyr,display node for it to drive");
@@ -142,10 +147,15 @@ BUILD_ASSERT((ASTER_FORMATS_CONVERTIBLE & ASTER_FMT_BIT(ASTER_DISP_NATIVE_FORMAT
  * ragged pitch) is NOT pipelined: those rects gather into the single
  * swap_buf, which the worker would race with the UI thread, so they drain
  * first and run synchronously. */
+#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
+extern int aster_axs15231b_write_persistent(const struct device *dev,
+ const struct display_buffer_descriptor *desc,const void *buffer);
+#endif
 struct aster_disp_job {
 	const uint8_t *buf;
 	struct display_buffer_descriptor desc;
 	uint32_t px, py;
+ bool persistent_ui;
 };
 
 /* Direct-send core: one CASET/RASET window + the packed BE pixel stream.
@@ -156,7 +166,12 @@ static int disp_direct_send(const struct aster_disp_job *job)
 	uint32_t t_wr0 = k_cycle_get_32();
 #endif
 	k_mutex_lock(&disp_lock, K_FOREVER);
-	int err = display_write(disp_dev, job->px, job->py, &job->desc, job->buf);
+	int err;
+#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
+ if(job->persistent_ui) err=aster_axs15231b_write_persistent(disp_dev,&job->desc,job->buf);
+ else
+#endif
+ err = display_write(disp_dev, job->px, job->py, &job->desc, job->buf);
 	k_mutex_unlock(&disp_lock);
 #if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
 	static uint32_t s_dtim_n, s_dtim_wr, s_dtim_bytes;
@@ -404,10 +419,16 @@ struct touch_map {
  * as the mirrored one). Portrait is the driver's built-in transpose undone:
  * portrait's logical X is the digitizer's short axis, so the pair swaps. */
 static const struct touch_map s_touch_maps[2] = {
+#if IS_ENABLED(CONFIG_ASTER_AXS15231B_TOUCH)
+	/* AXS touch reports native portrait; display rotation follows below. */
+	{ .swap = 0, .inv_x = 0, .inv_y = 0, .w = 320, .h = 480 },
+	{ .swap = 0, .inv_x = 0, .inv_y = 0, .w = 320, .h = 480 },
+#else
 	/* [0] landscape: panel wider than tall */
 	{ .swap = 0, .inv_x = 0, .inv_y = 1, .w = 320, .h = 240 },
 	/* [1] portrait */
 	{ .swap = 1, .inv_x = 0, .inv_y = 0, .w = 240, .h = 320 },
+#endif
 };
 
 /* The window's row, or NULL when there is no display to index by. Degenerate
@@ -623,6 +644,13 @@ int aster_plat_display_orientation_set(int orient)
 			"portrait or landscape to ask for", pw, ph);
 		return ASTER_ENOTSUP;
 	}
+	/* With a software-rotated panel, its reported orientation still names
+	 * the native window. Returning to portrait must clear that rotation
+	 * before the "already showing it" hardware shortcut can return. */
+	if (s_rot != 0) {
+		glass_forget();
+		return aster_plat_display_rotation_set(want_wide == (pw > ph) ? 0 : 90);
+	}
 
 	display_get_capabilities(disp_dev, &cap);
 	req = orientation_request(cap.x_resolution, cap.y_resolution,
@@ -661,6 +689,7 @@ int aster_plat_display_orientation_set(int orient)
 	 * is the panel's own when the aspects already agree, its transpose
 	 * otherwise. rotation_set() refuses 90 when app-space scaling is on,
 	 * which is the one combination that cannot be expressed this way. */
+	glass_forget();
 	return aster_plat_display_rotation_set(want_wide == (pw > ph) ? 0 : 90);
 }
 
@@ -850,6 +879,8 @@ static void glass_blit(const uint8_t *src, uint32_t px, uint32_t py,
 static void glass_track(const uint8_t *src, uint32_t px, uint32_t py,
 			uint32_t w, uint32_t h, uint32_t pitch, bool whole)
 {
+	/* AXS already owns a persistent wire-order shadow; grab it after drain. */
+	if (IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)) return;
 	if (!s_glass) {
 		return;
 	}
@@ -865,6 +896,7 @@ static void glass_track(const uint8_t *src, uint32_t px, uint32_t py,
 static void glass_note_full(const uint8_t *buf, uint32_t w, uint32_t h,
 			    uint32_t pitch, bool alias_ok)
 {
+	if (IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)) return;
 	if (alias_ok) {
 		s_glass = buf;
 		s_glass_pinned = true;
@@ -994,6 +1026,13 @@ void aster_plat_display_glass_rearm(void)
 bool aster_plat_display_glass_frame(const uint8_t **buf, uint32_t *w, uint32_t *h,
 				  uint32_t *pitch)
 {
+	if (IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B) && disp_dev) {
+		aster_plat_display_flush_drain();
+		const uint8_t *frame=display_get_framebuffer(disp_dev);
+		if (frame) {
+			panel_geom(w,h);*pitch=*w;*buf=frame;return true;
+		}
+	}
 	if (!s_glass) {
 		return false;
 	}
@@ -1344,7 +1383,7 @@ int aster_plat_display_canvas_present(void)
  * CS-on-I2C is disarmed after the first DISPON
  * (CONFIG_ST7789V_HOLD_CS_AFTER_INIT); DTS mipi-hold-cs is not used because
  * this panel's init sequence needs CS edges. */
-#define ASTER_DISP_MAX_ROW_PX 320u
+#define ASTER_DISP_MAX_ROW_PX CONFIG_ASTER_APP_SPACE_MAX
 #if IS_ENABLED(CONFIG_ASTER_DISP_PSRAM_STAGE)
 static uint8_t *swap_buf;
 static size_t swap_buf_bytes;
@@ -1730,6 +1769,21 @@ int aster_plat_display_write_at(const uint8_t *buf, uint32_t x, uint32_t y,
 	return aster_plat_display_write_at_ex(buf, x, y, w, h, pitch, false);
 }
 
+#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
+int aster_plat_display_write_persistent_ui(const uint8_t *buf,uint32_t w,uint32_t h,uint32_t pitch)
+{
+ uint32_t pw,ph;panel_geom(&pw,&ph);
+ if(!disp_dev || !buf || s_rot || w!=pw || h!=ph || pitch!=w) return ASTER_EINVAL;
+ struct aster_disp_job job={.buf=buf,.persistent_ui=true,
+  .desc={.width=w,.height=h,.pitch=pitch,.buf_size=(size_t)w*h*2u}};
+#if IS_ENABLED(CONFIG_ASTER_DISP_ASYNC)
+ disp_slot_post(ASTER_DISP_SHARED_SLOT,&job);return ASTER_OK;
+#else
+ return disp_direct_send(&job)?ASTER_EIO:ASTER_OK;
+#endif
+}
+#endif
+
 int aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 				 uint32_t w, uint32_t h, uint32_t pitch,
 				 bool be_pixels_swapped)
@@ -2045,7 +2099,9 @@ int aster_plat_backlight_set(bool on, uint8_t level)
 	if (!bl_dev) {
 		return ASTER_ENODEV;
 	}
-	ARG_UNUSED(level); /* LED GPIO driver: on/off only (no PWM wired) */
+	if (IS_ENABLED(CONFIG_LED_PWM)) {
+		return led_set_brightness(bl_dev, bl_last, on ? ((uint32_t)level * 100u / 255u) : 0);
+	}
 	return on ? led_on(bl_dev, bl_last) : led_off(bl_dev, bl_last);
 }
 
@@ -2121,7 +2177,7 @@ int aster_platform_init(void)
 		(unsigned)CONFIG_ASTER_DISP_BOUNCE_KB);
 #endif
 
-#if IS_ENABLED(CONFIG_ASTER_SCREENSHOT)
+#if IS_ENABLED(CONFIG_ASTER_SCREENSHOT) && !IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
 	/* Screen-grab shadow: the panel-sized buffer partial writes composite
 	 * onto (see the glass record above write_at_ex). Panel-sized and in
 	 * PSRAM for the same reason the staging bounce is -- 150 KB has no

@@ -1,0 +1,11 @@
+--- a/drivers/spi/spi_esp32_spim.c
++++ b/drivers/spi/spi_esp32_spim.c
+@@ -604,7 +604,7 @@
+ 	return 0;
+ }
+ 
+-static inline uint8_t spi_esp32_get_line_mode(uint16_t operation)
++static inline uint8_t spi_esp32_get_line_mode(spi_operation_t operation)
+ {
+ 	if (IS_ENABLED(CONFIG_SPI_EXTENDED_MODES)) {
+ 		switch (operation & SPI_LINES_MASK) {

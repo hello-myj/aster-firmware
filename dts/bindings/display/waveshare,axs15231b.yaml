@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+description: AXS15231B QSPI RGB565 display
+compatible: "waveshare,axs15231b"
+include: [spi-device.yaml, display-controller.yaml]

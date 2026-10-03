@@ -426,6 +426,13 @@ static void fsvc_fn(void *p1, void *p2, void *p3)
 int aster_file_svc_start(void)
 {
 #if HAVE_CDC
+	/* A USB-only bring-up profile gives this UART to the shell. Two
+	 * consumers cannot independently read one RX stream. */
+	if (cdc == DEVICE_DT_GET_OR_NULL(DT_CHOSEN(zephyr_shell_uart)) ||
+	    cdc == DEVICE_DT_GET_OR_NULL(DT_CHOSEN(zephyr_console))) {
+		LOG_INF("USB used by console; file svc paused");
+		return 0;
+	}
 	if (!device_is_ready(cdc)) {
 		LOG_WRN("usb_serial CDC device not ready; file svc off");
 		return -ENODEV;

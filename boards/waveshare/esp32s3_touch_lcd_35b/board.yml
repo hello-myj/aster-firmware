@@ -1,0 +1,6 @@
+board:
+  name: waveshare_esp32s3_touch_lcd_35b
+  full_name: Waveshare ESP32-S3-Touch-LCD-3.5B
+  vendor: waveshare
+  socs:
+  - name: esp32s3

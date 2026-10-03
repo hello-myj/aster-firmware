@@ -9,6 +9,7 @@
 #define ASTER_LAUNCHER_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /* Bind the baked rodata fonts (idempotent, once). */
 int  aster_launcher_init(void);
@@ -36,9 +37,14 @@ void aster_launcher_hide(void);
 /* Pump one LVGL tick + inject a touch edge while idle (no app running).
  * Called from the runtime worker's idle branch. */
 void aster_launcher_pump_idle(void);
+uint32_t aster_launcher_idle_wait_ms(void);
 
 /* The app registry changed (install/uninstall/scan): flag the drawer and
  * the resident name-subset for a rebuild on the next pump. Thread-safe. */
 void aster_launcher_on_registry_change(void);
+
+/* FLUX app return gesture: rightmost 22 pixels, left drag >65 pixels.
+ * Called by the runtime in app logical coordinates, UI thread only. */
+bool aster_launcher_app_touch(int32_t x, int32_t y, bool pressed);
 
 #endif /* ASTER_LAUNCHER_H */

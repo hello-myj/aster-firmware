@@ -50,7 +50,11 @@ if(CONFIG_ASTER_WIFI)
 endif()
 
 if(CONFIG_ASTER_LAUNCHER_NATIVE)
-	target_sources(app PRIVATE launcher/launcher.c)
+	if(CONFIG_ASTER_LAUNCHER_FLUX)
+		target_sources(app PRIVATE launcher/flux.c launcher/flux_font.c flux_draw.c)
+	else()
+		target_sources(app PRIVATE launcher/launcher.c)
+	endif()
 	target_include_directories(app PRIVATE launcher)
 endif()
 

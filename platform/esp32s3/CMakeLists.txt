@@ -1,4 +1,10 @@
-target_sources(app PRIVATE memory.c)
+	target_sources(app PRIVATE memory.c)
+	if(CONFIG_ASTER_PANEL_AXS15231B)
+		target_sources(app PRIVATE display_axs15231b.c)
+	endif()
+	if(CONFIG_ASTER_AXS15231B_TOUCH)
+		target_sources(app PRIVATE input_axs15231b.c)
+	endif()
 
 	target_sources(app PRIVATE
 		display.c

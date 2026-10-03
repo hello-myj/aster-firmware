@@ -1,0 +1,69 @@
+--- a/drivers/spi/Kconfig.esp32
++++ b/drivers/spi/Kconfig.esp32
+@@ -30,6 +30,13 @@
+ 	  threads (e.g. LVGL rendering while a display flush streams),
+ 	  which polling can never do: the poller holds the core.
+ 
++config SPI_ESP32_TX_PSRAM_DIRECT
++	bool "ESP32-S3 aligned PSRAM transmit without bounce copies"
++	depends on SOC_SERIES_ESP32S3 && ESP_SPIRAM && DMA
++	help
++	  Send 64-byte aligned/multiple PSRAM TX buffers through GDMA directly.
++	  Flush CPU cache before DMA; other buffers retain the bounce path.
++
+ config SPI_ESP32_DMA_CHUNK_SIZE
+ 	int "Max bytes clocked per DMA user command"
+ 	range 256 16384
+--- a/drivers/spi/spi_esp32_spim.c
++++ b/drivers/spi/spi_esp32_spim.c
+@@ -256,7 +256,17 @@
+ 	if (cfg->dma_enabled) {
+ 		/* bit_len needs to be at least one byte long when using DMA */
+ 		bit_len = !bit_len ? 8 : bit_len;
+-		if (ctx->tx_buf && !esp_ptr_dma_capable((uint32_t *)&ctx->tx_buf[0])) {
++		bool direct_psram = false;
++#if defined(CONFIG_SPI_ESP32_TX_PSRAM_DIRECT)
++		direct_psram = ctx->tx_buf && esp_ptr_dma_ext_capable(ctx->tx_buf) &&
++			((uintptr_t)ctx->tx_buf % 64 == 0) && (dma_len_tx % 64 == 0);
++		if (direct_psram) {
++			err = esp_cache_msync((void *)ctx->tx_buf, dma_len_tx,
++					      ESP_CACHE_MSYNC_FLAG_DIR_C2M);
++			if (err) return -EIO;
++		}
++#endif
++		if (ctx->tx_buf && !direct_psram && !esp_ptr_dma_capable((uint32_t *)&ctx->tx_buf[0])) {
+ 			LOG_DBG("Tx buffer not DMA capable");
+ 			tx_temp = k_malloc(dma_len_tx);
+ 			if (!tx_temp) {
+--- a/drivers/dma/dma_esp32_gdma.c
++++ b/drivers/dma/dma_esp32_gdma.c
+@@ -218,8 +218,14 @@
+ 
+ 		uint32_t buffer_size;
+ 
+-		if (block_size > DMA_DESCRIPTOR_BUFFER_MAX_SIZE_4B_ALIGNED) {
+-			buffer_size = DMA_DESCRIPTOR_BUFFER_MAX_SIZE_4B_ALIGNED;
++		uint32_t max_size = DMA_DESCRIPTOR_BUFFER_MAX_SIZE_4B_ALIGNED;
++#if defined(CONFIG_SPI_ESP32_TX_PSRAM_DIRECT)
++		/* Each external TX descriptor starts on a 64-byte boundary. */
++		if (dma_channel->dir == DMA_TX && esp_ptr_dma_ext_capable((void *)target_address))
++			max_size &= ~63u;
++#endif
++		if (block_size > max_size) {
++			buffer_size = max_size;
+ 		} else {
+ 			buffer_size = block_size;
+ 		}
+@@ -319,6 +325,12 @@
+ 	dma_channel->dir = DMA_TX;
+ 
+ 	gdma_ll_tx_reset_channel(data->hal.dev, dma_channel->channel_id);
++#if defined(CONFIG_SPI_ESP32_TX_PSRAM_DIRECT)
++	bool aligned_psram = esp_ptr_dma_ext_capable((void *)config_dma->head_block->source_address) &&
++		(config_dma->head_block->source_address % 64 == 0) &&
++		(config_dma->head_block->block_size % 64 == 0);
++	gdma_ll_tx_set_burst_size(data->hal.dev, dma_channel->channel_id, aligned_psram ? 64 : 16);
++#endif
+ 
+ 	if (dma_channel->periph_id == SOC_GDMA_TRIG_PERIPH_M2M0) {
+ 		gdma_ll_tx_connect_to_mem(data->hal.dev, dma_channel->channel_id,

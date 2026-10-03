@@ -1,0 +1,122 @@
+/* SPDX-License-Identifier: MIT
+ * Pinout: Waveshare official 01_factory esp_bsp (V1/V2 software compatible).
+ */
+/dts-v1/;
+#include <espressif/esp32s3/esp32s3_wroom_n8.dtsi>
+#include <espressif/partitions_0x0_amp.dtsi>
+#include <zephyr/dt-bindings/pinctrl/esp-pinctrl-common.h>
+#include <zephyr/dt-bindings/pinctrl/esp32s3-pinctrl.h>
+#include <zephyr/dt-bindings/pinctrl/esp32s3-gpio-sigmap.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+/ {
+ model = "Waveshare ESP32-S3-Touch-LCD-3.5B";
+ compatible = "waveshare,esp32s3-touch-lcd-3-5b";
+ chosen {
+  zephyr,sram = &sram1;
+  zephyr,flash = &flash0;
+  zephyr,code-partition = &slot0_partition;
+  zephyr,console = &uart0;
+  zephyr,shell-uart = &uart0;
+  zephyr,bt-hci = &esp32_bt_hci;
+  zephyr,display = &axs_display;
+  zephyr,touch = &axs_touch;
+  zephyr,sdhc = &sdhc0;
+  aster,imu = &qmi8658;
+  aster,audio-i2c = &i2c0;
+  aster,audio-i2s = &i2s0;
+ };
+ aliases {
+  sw0 = &boot_button;
+  i2c-0 = &i2c0;
+  watchdog0 = &wdt0;
+  lcd-bl = &lcd_backlight;
+  rtc = &pcf85063;
+ };
+ buttons {
+  compatible = "gpio-keys";
+  boot_button: boot { gpios = <&gpio0 0 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+   label = "BOOT"; zephyr,code = <INPUT_KEY_0>; };
+ };
+ backlight {
+  compatible = "pwm-leds";
+  lcd_backlight: lcd { pwms = <&ledc0 0 PWM_USEC(200) PWM_POLARITY_NORMAL>; label = "LCD"; };
+ };
+ lvgl_pointer { compatible = "zephyr,lvgl-pointer-input"; input = <&axs_touch>; };
+ wifi_ap: wifi_ap { compatible = "espressif,esp32-wifi"; status = "okay"; };
+};
+&flash0 { reg = <0x0 DT_SIZE_M(16)>; };
+&psram0 { size = <DT_SIZE_M(8)>; };
+&gpio0 { status = "okay"; };
+&gpio1 { status = "okay"; };
+&pinctrl {
+ uart0_default: uart0_default { group1 { pinmux = <UART0_TX_GPIO43>; output-high; };
+  group2 { pinmux = <UART0_RX_GPIO44>; bias-pull-up; }; };
+ i2c0_default: i2c0_default { group1 { pinmux = <I2C0_SDA_GPIO8>, <I2C0_SCL_GPIO7>;
+  bias-pull-up; drive-open-drain; output-high; }; };
+ lcd_qspi_default: lcd_qspi_default { group1 { pinmux = <SPIM2_SCLK_GPIO5>,
+  <SPIM2_MOSI_GPIO1>, <ESP32_PINMUX(2, ESP_NOSIG, ESP_FSPIQ_OUT)>,
+  <ESP32_PINMUX(3, ESP_NOSIG, ESP_FSPIWP_OUT)>, <ESP32_PINMUX(4, ESP_NOSIG, ESP_FSPIHD_OUT)>; }; };
+ ledc_default: ledc_default { group1 { pinmux = <LEDC_CH0_GPIO6>; output-enable; }; };
+ sdhc0_default: sdhc0_default { group1 { pinmux = <SDHC0_CLKOUT_GPIO11>,
+  <SDHC0_CMD_GPIO10>, <SDHC0_DATA0_GPIO9>; bias-pull-up; output-high; }; };
+ i2s0_default: i2s0_default { group1 { pinmux = <I2S0_MCLK_GPIO44>,
+  <I2S0_O_BCK_GPIO13>, <I2S0_O_WS_GPIO15>, <I2S0_O_SD_GPIO16>; output-enable; };
+  group2 { pinmux = <I2S0_I_SD_GPIO14>; input-enable; }; };
+};
+/* UART RX on GPIO44 overlaps codec MCLK. Move RX to the expansion GPIO17. */
+&uart0_default { group2 { pinmux = <UART0_RX_GPIO17>; }; };
+&uart0 { status = "okay"; current-speed = <115200>;
+ pinctrl-0 = <&uart0_default>; pinctrl-names = "default"; };
+&i2c0 {
+ status = "okay"; clock-frequency = <I2C_BITRATE_FAST>;
+ pinctrl-0 = <&i2c0_default>; pinctrl-names = "default";
+ axs_touch: touch@3b { compatible = "waveshare,axs15231b-touch"; reg = <0x3b>;
+  screen-width = <320>; screen-height = <480>; status = "okay"; };
+ qmi8658: imu@6b { compatible = "qst,qmi8658a"; reg = <0x6b>;
+  accel-fs = <4>; gyro-fs = <512>; status = "okay"; };
+ pcf85063: rtc@51 { compatible = "nxp,pcf85063a"; reg = <0x51>; status = "okay"; };
+ axp2101: pmic@34 { compatible = "x-powers,axp2101"; reg = <0x34>;
+  regulators {
+   compatible = "x-powers,axp2101-regulator";
+   DCDC1 { regulator-init-microvolt = <3300000>; regulator-always-on; };
+   DCDC3 { regulator-init-microvolt = <3300000>; regulator-always-on; };
+   DCDC5 { regulator-init-microvolt = <3300000>; regulator-always-on; };
+   ALDO1 { regulator-init-microvolt = <3300000>; regulator-always-on; };
+   ALDO2 { regulator-init-microvolt = <3300000>; regulator-always-on; };
+   ALDO3 { regulator-init-microvolt = <3300000>; regulator-always-on; };
+   ALDO4 { regulator-init-microvolt = <3300000>; regulator-always-on; };
+  };
+ };
+};
+&spi2 {
+ status = "okay"; pinctrl-0 = <&lcd_qspi_default>; pinctrl-names = "default";
+ #address-cells = <1>; #size-cells = <0>;
+ cs-gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
+ half-duplex; dma-enabled; dmas = <&dma 0>, <&dma 1>; dma-names = "rx", "tx";
+ axs_display: display@0 { compatible = "waveshare,axs15231b"; reg = <0>;
+  spi-max-frequency = <40000000>; width = <320>; height = <480>; };
+};
+&spi3 { status = "disabled"; };
+&i2c1 { status = "disabled"; };
+&i2s0 { status = "okay"; pinctrl-0 = <&i2s0_default>; pinctrl-names = "default"; };
+&i2s1 { status = "disabled"; };
+&ledc0 { status = "okay"; pinctrl-0 = <&ledc_default>; pinctrl-names = "default";
+ #address-cells = <1>; #size-cells = <0>;
+ channel@0 { reg = <0>; timer = <0>; };
+};
+&sdhc { status = "okay";
+ sdhc0: sdhc@0 { status = "okay"; pinctrl-0 = <&sdhc0_default>; pinctrl-names = "default";
+  max-bus-freq = <10000000>; bus-width = <1>;
+  mmc { compatible = "zephyr,sdmmc-disk"; disk-name = "SD"; status = "okay"; };
+ };
+};
+&dma { status = "okay"; };
+&wifi { status = "okay"; };
+&esp32_bt_hci { status = "okay"; };
+&usb_serial { status = "okay"; };
+&usb_otg { status = "disabled"; };
+&wdt0 { status = "okay"; };
+&trng0 { status = "okay"; };

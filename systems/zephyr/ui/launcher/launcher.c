@@ -130,14 +130,16 @@ BUILD_ASSERT(LAUNCHER_TILE_W >= LAUNCHER_WELL_PX,
  * that does not come out even leaves a strip of dead space (or pushes the
  * last tile onto its own line, which is the silent failure this whole block
  * exists for), and neither shows up as anything but "slightly wrong" on a
- * screen. Exact fill or no build. */
+ * screen. Width must fill exactly; row rounding may leave fewer than one
+ * pixel per row at the bottom on taller panels (e.g. 320x480). */
 BUILD_ASSERT(LAUNCHER_TILE_W * LAUNCHER_GRID_COLS + LAUNCHER_GRID_GUT
 	     == LAUNCHER_GRID_W,
 	     "drawer tiles no longer span the panel width");
-BUILD_ASSERT(LAUNCHER_TILE_H * LAUNCHER_GRID_ROWS
-	     + (LAUNCHER_GRID_ROWS - 1) * LAUNCHER_TILE_GAP
-	     == LAUNCHER_GRID_BOX_H,
-	     "drawer rows no longer fill the grid container");
+BUILD_ASSERT(LAUNCHER_GRID_BOX_H - (LAUNCHER_TILE_H * LAUNCHER_GRID_ROWS
+	     + (LAUNCHER_GRID_ROWS - 1) * LAUNCHER_TILE_GAP) >= 0 &&
+	     LAUNCHER_GRID_BOX_H - (LAUNCHER_TILE_H * LAUNCHER_GRID_ROWS
+	     + (LAUNCHER_GRID_ROWS - 1) * LAUNCHER_TILE_GAP) < LAUNCHER_GRID_ROWS,
+	     "drawer row rounding exceeds one pixel per row");
 
 /* ---------- the same derivation, at the window on the glass now ----------
  *
@@ -189,7 +191,8 @@ static launcher_geom_t launcher_geom(int w, int h)
 		LOG_WRN("launcher: %d-column tiles span %d of %d px", g.cols,
 			g.tile_w * g.cols + LAUNCHER_GRID_GUT, g.grid_w);
 	}
-	if (g.tile_h * g.rows + (g.rows - 1) * LAUNCHER_TILE_GAP != g.box_h) {
+	int remainder = g.box_h - (g.tile_h * g.rows + (g.rows - 1) * LAUNCHER_TILE_GAP);
+	if (remainder < 0 || remainder >= g.rows) {
 		LOG_WRN("launcher: %d rows fill %d of %d px", g.rows,
 			g.tile_h * g.rows + (g.rows - 1) * LAUNCHER_TILE_GAP,
 			g.box_h);

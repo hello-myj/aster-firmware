@@ -1,13 +1,13 @@
 # West-tree patches
 
-The single patch ASTER's board build depends on, applied to `zephyr/`
+The base patch, Waveshare QSPI correction and opt-in PSRAM TX DMA patch, applied to `zephyr/`
 (the west tree). It must be (re-)applied after any `west update` or
 checkout of a different Zephyr revision.
 
 Baseline: the Zephyr tree is kept at a stable tag (**v4.4.2**) with
-**zero local commits** — every deviation lives in this folder as one
-patch. Nothing is committed in the tree, so `git status` there shows
-the patch as working-tree modifications and nothing else.
+**zero local commits** — every deviation lives in this folder as
+patch files. Nothing is committed in the tree, so `git status` there shows
+the patches as working-tree modifications and nothing else.
 Never baseline on `main`: the SPI driver's busy-wait loop and
 the HAL API it calls are exactly what upstream churns, so a moving
 baseline means re-validating the display pipeline on every pull.
@@ -302,3 +302,37 @@ top of the tag; it was folded into this patch and the local commit
 dropped, so the tree is once again exactly `v4.4.2` plus these files.
 That branch — `backup/v4.4.2-aster-i2s-20260921` — is still there if the
 commit is ever wanted back.
+
+## aster_zephyr_v4.4.2_qspi.patch
+
+Apply after the base patch for Waveshare AXS15231B. `SPI_LINES_QUAD` lives
+in operation bits 16..17, but `spi_esp32_get_line_mode(uint16_t operation)`
+truncated these bits and selected single-lane transfers even with
+CONFIG_SPI_EXTENDED_MODES. Use `spi_operation_t`, which is 32 bits when
+extended modes are enabled and remains 16 bits otherwise. This does not
+change the single-lane LCKFB configuration. Apply with:
+
+```bash
+git -C /path/to/zephyr apply /path/to/aster-firmware/patches/aster_zephyr_v4.4.2_qspi.patch
+```
+
+## aster_zephyr_v4.4.2_psram_dma.patch
+
+Apply after the base and QSPI patches. `CONFIG_SPI_ESP32_TX_PSRAM_DIRECT`
+(default n, ESP32-S3 + PSRAM + DMA only) avoids internal-RAM bounce buffers
+for TX buffers whose address and length are multiples of 64 bytes.
+CPU cache is written back before GDMA; a failed writeback aborts the send.
+Unaligned buffers and RX retain the original paths.
+
+External TX descriptor payloads are at most 4032 bytes (4092 rounded down
+to a 64-byte boundary), so every next descriptor remains aligned. Aligned
+PSRAM transfers select a 64-byte external memory block; other TX selects 16.
+Waveshare currently DISABLES this option: physical scrolling tests showed
+horizontal/rectangular artifacts with direct PSRAM TX, which disappeared
+with internal-RAM bounce + GDMA. Completion fencing alone did not fix it.
+The experimental patch is retained for diagnosis, not as the board default;
+alignment/cache-writeback checks alone do not establish physical stability.
+
+```bash
+git -C /path/to/zephyr apply /path/to/aster-firmware/patches/aster_zephyr_v4.4.2_psram_dma.patch
+```

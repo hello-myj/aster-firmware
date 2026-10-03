@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: MIT
+description: AXS15231B I2C capacitive touch controller
+compatible: "waveshare,axs15231b-touch"
+include: [i2c-device.yaml, touchscreen-common.yaml]

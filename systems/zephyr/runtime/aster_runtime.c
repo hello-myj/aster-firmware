@@ -486,6 +486,16 @@ static void ui_service(aster_app_ctx_t *ctx)
 
 	for (int i = 0; i < n && !ctx->quit; i++) {
 		bool pressed = tev[i].action != ASTER_TOUCH_UP;
+#if IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX)
+		if (!aster_qpanel_is_open() &&
+		    aster_launcher_app_touch(tev[i].x, tev[i].y, pressed)) {
+			lv_indev_wait_release(aster_ui_lvgl_indev());
+			ctx->exit_clean = true;
+			ctx->quit = true;
+			LOG_INF("runtime: right-edge return -> %s", ctx->id);
+			continue;
+		}
+#endif
 		/* Asked per sample, not once per batch: a pull-down earlier in
 		 * this same batch can have just opened or closed the sheet, and
 		 * that changes what the next sample is allowed to mean. */
@@ -846,7 +856,12 @@ static void worker_fn(void *p1, void *p2, void *p3)
 
 	for (;;) {
         apply_display_mode();
-        if (k_sem_take(&worker_go, K_MSEC(10))) {
+#if IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX)
+        uint32_t idle_wait=aster_launcher_idle_wait_ms();
+#else
+        uint32_t idle_wait=10;
+#endif
+        if (k_sem_take(&worker_go, K_MSEC(idle_wait))) {
 #if IS_ENABLED(CONFIG_ASTER_LAUNCHER_NATIVE)
             aster_launcher_pump_idle();
 #endif

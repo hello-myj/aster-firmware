@@ -186,7 +186,7 @@ static int es8311_dac_on(void)
 		{0x12, 0x00}, /* DAC analog on */
 		{0x14, 0x1A},
 		{0x15, 0x40},
-		{0x17, 0xBF},
+		{0x17, IS_ENABLED(CONFIG_ASTER_AUDIO_ADC_ES8311) ? 0xC8 : 0xBF},
 		{0x37, 0x08},
 		{0x45, 0x00},
 	};
@@ -389,7 +389,7 @@ static int codecs_init(void)
 	if (err) {
 		return err;
 	}
-	err = es7210_init();
+	err = IS_ENABLED(CONFIG_ASTER_AUDIO_ADC_ES8311) ? 0 : es7210_init();
 	if (err) {
 		LOG_WRN("es7210 init %d (playback still available)", err);
 	}
@@ -1543,7 +1543,8 @@ int aster_plat_audio_probe(uint8_t *dac_id, uint8_t *adc_id_out)
 	if (adc_id_out) {
 		*adc_id_out = 0;
 		if (i2c_dev && device_is_ready(i2c_dev)) {
-			(void)codec_rd(adc_addr, 0x3D, adc_id_out);
+			(void)codec_rd(IS_ENABLED(CONFIG_ASTER_AUDIO_ADC_ES8311) ? DAC_ADDR : adc_addr,
+			               IS_ENABLED(CONFIG_ASTER_AUDIO_ADC_ES8311) ? 0xFD : 0x3D, adc_id_out);
 		}
 	}
 	k_mutex_unlock(&audio_lock);

@@ -52,6 +52,10 @@ int  aster_plat_display_write_at(const uint8_t *buf, uint32_t x, uint32_t y,
 int  aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 				  uint32_t w, uint32_t h, uint32_t pitch,
 				  bool be_pixels_swapped);
+/* Internal native-UI frame: persistent BE full-panel double buffers only.
+ * Serialize screenshots with drawing and wait for flush before buffer reuse.
+ * Not available to APPs; short-lived buffers must use write_at_ex. */
+int aster_plat_display_write_persistent_ui(const uint8_t *buf,uint32_t w,uint32_t h,uint32_t pitch);
 /* Full-screen flip (CONFIG_ASTER_DISP_FLIP_DBUF): byte-swap the LE RGB565
  * source into one of two PSRAM front buffers and hand it to the display
  * worker, returning before the wire finished. The caller's buffer is NOT
