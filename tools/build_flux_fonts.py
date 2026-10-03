@@ -43,6 +43,10 @@ def main():
             face.load_glyph(index,freetype.FT_LOAD_RENDER | freetype.FT_LOAD_TARGET_NORMAL)
             g=face.glyph
             pixels,w,h=unpack_rows(g.bitmap)
+            # Retain grayscale antialiasing. Trim only the faintest
+            # fringe and gently increase coverage contrast, not a binary
+            # threshold which would expose stair steps on curved strokes.
+            pixels=bytes(max(0,min(255,round((v-16)*255/223))) for v in pixels)
             offset=len(bitmap);bitmap.extend(pixels)
             adv=(g.advance.x+32)//64
             records.append(f"{{{cp},{offset},{adv},{w},{h},{g.bitmap_left},{g.bitmap_top-h+1}}}")

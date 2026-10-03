@@ -103,6 +103,15 @@ static void *aster_psram_alloc(unsigned n) {return malloc(n);}
 static void aster_psram_free(void *p) {free(p);}
 ''' +table+trig+implementation+r'''
 int main(void) {
+ /* Rounded interpolation preserves constant colors and is symmetric
+  * across each edge: half white/black must not acquire a dark bias. */
+ const uint16_t constant[4]={0x39e7,0x39e7,0x39e7,0x39e7};
+ const uint16_t edge[4]={0,0xffff,0,0xffff},reverse[4]={0xffff,0,0xffff,0};
+ assert(sample565(edge,128,56)==0x8410);
+ for(unsigned x=0;x<256;x++) for(unsigned y=0;y<256;y++) {
+  assert(sample565(constant,x,y)==0x39e7);
+  assert(sample565(edge,x,y)==sample565(reverse,256-x,y));
+ }
  static uint16_t src[360*140],dst[322*482];
  for(int i=0;i<360*140;i++) src[i]=0xf800;
  for(int i=0;i<322*482;i++) dst[i]=0xa55a;
@@ -144,12 +153,12 @@ int main(void) {
  memset(dst,0,sizeof(dst));for(int i=0;i<360*140;i++) src[i]=0xf800;
  assert(aster_flux_draw_image(1,1,src,&coords,720,&clip,&task,&d)==0);
  assert(dst[323+20*322+18]==0);
- assert(dst[323+20*322+19]==swap16(0x7800));
+ assert(dst[323+20*322+19]==swap16(0x8000));
  assert(dst[323+20*322+20]==swap16(0xf800));
  aster_flux_draw_prepare(src,720);
  memset(dst,0,sizeof(dst));
  assert(aster_flux_draw_image(1,1,src,&coords,720,&clip,&task,&d)==0);
- assert(dst[323+20*322+19]==swap16(0x7800));
+ assert(dst[323+20*322+19]==swap16(0x8000));
  assert(dst[323+20*322+20]==swap16(0xf800));
  aster_flux_draw_forget(src);
  assert(prepared[0].source==NULL && prepared[0].detail==NULL);
@@ -169,6 +178,13 @@ int main(void) {
   assert(aster_flux_draw_image(1,1,src,&coords,720,&clip,&task,&d)==0);
   assert(!memcmp(reference,dst,sizeof(dst)));aster_flux_draw_forget(src);
  }
+ /* Fractional text and artwork both retain smooth, unbiased coverage. */
+ for(int i=0;i<360*140;i++) src[i]=(i%360)&1?0xffff:0;
+ d.rotation=0;d.scale_x=d.scale_y=512;d.pivot=(point){0,0};d.opa=255;
+ coords=(lv_area_t){20,10,379,149};memset(dst,0,sizeof(dst));
+ assert(aster_flux_draw_image(1,1,src,&coords,720,&clip,&task,&d)==0);
+ assert(dst[323+150*322+261]==swap16(0x8410));
+ assert(dst[323+150*322+51]==swap16(0x8410));
  d.colorkey=src;
  assert(aster_flux_draw_image(1,1,src,&coords,720,&clip,&task,&d)==1);
  d.colorkey=NULL;
@@ -221,13 +237,15 @@ int main(void) {
  uint8_t pixels[4096];lv_draw_buf_t out={.data=pixels};
  assert(f->get_glyph_bitmap(&g,&out)==&out && !memcmp(pixels,raw,g.box_w*g.box_h));
  assert(!f->get_glyph_dsc(f,&g,0x1f642,0));
- /* Native small glyphs retain true A8 coverage rather than a 4bpp
-  * quantization round trip (which restricts every byte to multiples of 17). */
- f=aster_flux_font(12,"aster");assert(f->get_glyph_dsc(f,&g,'e',0));
+ /* Native small glyphs retain intermediate A8 coverage, not binary
+  * or coarse 4bpp edges, and also keep fully opaque stroke pixels. */
+ f=aster_flux_font(14,"aster");assert(f->get_glyph_dsc(f,&g,'e',0));
  g.resolved_font=f;g.req_raw_bitmap=true;
- const uint8_t *small=f->get_glyph_bitmap(&g,NULL);bool full_a8=false;
- for(unsigned i=0;i<g.box_w*g.box_h;i++) if(small[i]%17) full_a8=true;
- assert(full_a8);
+ const uint8_t *small=f->get_glyph_bitmap(&g,NULL);bool ink=false,gray=false,full_a8=false;
+ for(unsigned i=0;i<g.box_w*g.box_h;i++) {
+  ink|=small[i]==255;gray|=small[i]>0 && small[i]<255;full_a8|=small[i]%17!=0;
+ }
+ assert(ink && gray && full_a8);
  return 0;
 }
 ''')

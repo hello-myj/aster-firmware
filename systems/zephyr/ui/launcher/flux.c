@@ -49,27 +49,28 @@ enum { ICON_SETTINGS, ICON_LEFT, ICON_RIGHT, ICON_CLOCK, ICON_FILES,
 
 typedef struct {
  char id[64], name[40];
- const char *code, *description;
+ const char *code;
+ char description[ASTER_APP_DESCRIPTION_MAX];
  uint32_t color;
  uint8_t group, builtin, icon;
 } entry_t;
 typedef struct {
- const char *id, *name, *code, *description;
+ const char *id, *name, *code;
  uint32_t color;
  uint8_t group;
 } known_t;
 static const known_t known[] = {
- {"aster.player","音乐","MUSIC","让音乐，填满这段时间。",0xb6a4ff,1},
- {"aster.reader","阅读","READING","翻开一页，停留片刻。",0x8debc1,1},
- {"aster.gallery","图库","GALLERY","从光里，找回一段记忆。",0xf3a8ef,1},
- {"aster.starcatch","摘星星","PLAY","伸手，接住下一颗星。",0xffce8e,2},
- {"aster.game.2048","2048","PLAY","数字相遇，就有新的可能。",0xff9e6d,2},
- {"aster.snake","贪吃蛇","PLAY","下一次转弯，交给你。",0xc6e986,2},
- {"aster.imucube","姿态立方体","SENSOR","让方向，跟着手掌变化。",0x76dbde,3},
- {"aster.chess","国际象棋","PLAY","下一步，会走向哪里？",0xffb3b7,2},
- {"aster.neon-duel","霓虹对决","PLAY","一场光与速度的对决。",0xbc99ff,2},
- {"aster.gfxshow","图形演示","GRAPHICS","让像素，跳出想象。",0xefafd4,3},
- {"aster.apitest","设备信息","DEVICE","认识这台掌中的设备。",0x9ddde9,3},
+ {"aster.player","音乐","MUSIC",0xb6a4ff,1},
+ {"aster.reader","阅读","READING",0x8debc1,1},
+ {"aster.gallery","图库","GALLERY",0xf3a8ef,1},
+ {"aster.starcatch","摘星星","PLAY",0xffce8e,2},
+ {"aster.game.2048","2048","PLAY",0xff9e6d,2},
+ {"aster.snake","贪吃蛇","PLAY",0xc6e986,2},
+ {"aster.imucube","姿态立方体","SENSOR",0x76dbde,3},
+ {"aster.chess","国际象棋","PLAY",0xffb3b7,2},
+ {"aster.neon-duel","霓虹对决","PLAY",0xbc99ff,2},
+ {"aster.gfxshow","图形演示","GRAPHICS",0xefafd4,3},
+ {"aster.apitest","设备信息","DEVICE",0x9ddde9,3},
 };
 static const char *const group_names[]={"全部","媒体","玩乐","探索"};
 static const char *const group_codes[]={"FULL SPECTRUM","SOUND & LIGHT","PLAY FREQUENCY","NEW POSSIBILITIES"};
@@ -90,7 +91,7 @@ static char remove_id[64], remove_name[40];
 static lv_obj_t *root,*body,*stage,*bar_time,*description,*position,*pull_label,*handle;
 static lv_obj_t *filter_label,*modal,*toast,*clock_value,*clock_date,*wifi_state;
 static uint64_t toast_until;
-static lv_image_dsc_t chrome[ARRAY_SIZE(flux_icon_data)],chrome_40[ARRAY_SIZE(flux_icon_data_40)];
+static lv_image_dsc_t chrome[ARRAY_SIZE(flux_icon_sizes)][ARRAY_SIZE(flux_icon_data[0])];
 static struct {
  lv_obj_t *obj;
  lv_image_dsc_t icon;
@@ -152,8 +153,10 @@ static void set_text(lv_obj_t *o,const char *value)
 static lv_obj_t *icon(lv_obj_t *parent,int number,int x,int y,int size,uint32_t color)
 {
  lv_obj_t *o=lv_image_create(parent);
- lv_image_set_src(o,size==40?&chrome_40[number]:&chrome[number]);lv_obj_set_pos(o,x,y);
- lv_image_set_scale(o,size==40?256:size*256/24);lv_image_set_pivot(o,0,0);
+ unsigned face=0;
+ for(unsigned i=0;i<ARRAY_SIZE(flux_icon_sizes);i++) if(flux_icon_sizes[i]==size) {face=i;break;}
+ lv_image_set_src(o,&chrome[face][number]);lv_obj_set_pos(o,x,y);
+ lv_image_set_scale(o,size*256/flux_icon_sizes[face]);lv_image_set_pivot(o,0,0);
  lv_obj_set_style_image_recolor(o,lv_color_hex(color),0);
  lv_obj_set_style_image_recolor_opa(o,LV_OPA_COVER,0);
  return o;
@@ -211,7 +214,7 @@ static void read_entries(void)
   if(!r) continue;
   entry_t *e=&entries[entry_n++];memset(e,0,sizeof(*e));
   snprintf(e->id,sizeof(e->id),"%s",r->id);snprintf(e->name,sizeof(e->name),"%s",known[k].name);
-  e->code=known[k].code;e->description=known[k].description;e->color=known[k].color;e->group=known[k].group;e->icon=ICON_BOX;
+  e->code=known[k].code;snprintf(e->description,sizeof(e->description),"%s",r->description);e->color=known[k].color;e->group=known[k].group;e->icon=ICON_BOX;
  }
  for(int i=0;i<aster_app_mgr_count() && entry_n<MAX_ENTRIES-4;i++) {
   const aster_app_rec_t *r=aster_app_mgr_get(i);if(!r) continue;
@@ -220,7 +223,7 @@ static void read_entries(void)
   entry_t *e=&entries[entry_n++];memset(e,0,sizeof(*e));
   snprintf(e->id,sizeof(e->id),"%s",r->id);snprintf(e->name,sizeof(e->name),"%s",r->name);
   e->group=!strcmp(r->category,"game")?2:3;e->code=e->group==2?"PLAY":"LOCAL APP";
-  e->description="从这里，打开新的可能。";e->color=0xd8c0ff;e->icon=ICON_BOX;
+  snprintf(e->description,sizeof(e->description),"%s",r->description);e->color=0xd8c0ff;e->icon=ICON_BOX;
  }
  const entry_t builtin[]={
   {.id="files",.name="文件",.code="STORAGE",.description="每一份收藏，都有它的位置。",.color=0x8fbfff,.group=3,.builtin=FILES,.icon=ICON_FILES},
@@ -632,8 +635,10 @@ int aster_launcher_init(void)
 {
  if(initialized) return 0;
  initialized=true;
- for(size_t i=0;i<ARRAY_SIZE(chrome);i++) chrome[i]=(lv_image_dsc_t){.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.w=24,.h=24,.stride=24},.data_size=576,.data=flux_icon_data[i]};
- for(size_t i=0;i<ARRAY_SIZE(chrome_40);i++) chrome_40[i]=(lv_image_dsc_t){.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.w=40,.h=40,.stride=40},.data_size=1600,.data=flux_icon_data_40[i]};
+ for(size_t face=0;face<ARRAY_SIZE(flux_icon_sizes);face++) for(size_t i=0;i<ARRAY_SIZE(chrome[face]);i++) {
+  unsigned px=flux_icon_sizes[face];
+  chrome[face][i]=(lv_image_dsc_t){.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.w=px,.h=px,.stride=px},.data_size=px*px,.data=flux_icon_data[face][i]};
+ }
  for(int i=0;i<RIBBONS;i++) ribbons[i].entry=-1;
  aster_app_mgr_set_change_cb(aster_launcher_on_registry_change);aster_qpanel_bind_theme(&theme);
  uint8_t s[8];size_t n=0;

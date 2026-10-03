@@ -21,7 +21,9 @@
  * turns overflow from an error into a disappearance -- a short scan buffer
  * drops the app from the launcher, a short read_manifest buffer reports an app
  * that IS listed as ASTER_ENOENT. Fix overflow here, never at a call site. */
-#define ASTER_MANIFEST_MAX 832
+#define ASTER_MANIFEST_MAX 1152
+/* Optional launcher introduction, at most 127 UTF-8 bytes plus NUL. */
+#define ASTER_APP_DESCRIPTION_MAX 128
 
 #define ASTER_PKG_FLAG_SIGNED  1u
 /* bit1 reserved: was ASTER_PKG_FLAG_HAS_UI (UIB1 ui.bin), dropped in ABI 3.0 */
@@ -54,6 +56,7 @@
 typedef struct {
 	char     id[64];
 	char     name[40];
+	char     description[ASTER_APP_DESCRIPTION_MAX];
 	char     version[24];
 	char     abi_min[8];
 	char     abi_target[8];
@@ -89,6 +92,7 @@ int aster_pkg_install_file(const char *src_path);
 
 /* Minimal JSON helpers (objects are flat-ish; nested one level allowed) */
 int aster_json_str(const char *json, const char *key, char *out, size_t n);
+void aster_pkg_read_description(const char *json, char *out);
 int aster_json_u32(const char *json, const char *key, uint32_t *out);
 int aster_json_str_array(const char *json, const char *key, char arr[][24], int max);
 /* extract a nested object body into out (caller-owned buf) */

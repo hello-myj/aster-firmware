@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Rasterize the licensed FLUX SVG chrome at its base and ribbon sizes.
+"""Rasterize the licensed FLUX SVG chrome directly at each displayed size.
 Requires cairosvg and Pillow. SVG license: launcher/flux-assets/LICENSE.
 """
 from pathlib import Path
@@ -12,14 +12,19 @@ NAMES=['settings-2','chevron-left','chevron-right','clock','folder-open','termin
 
 def main():
     result=['/* Lucide icons from FLUX Rev.04. ISC license: see flux-assets/LICENSE. */']
-    for size in [24,40]:
+    sizes=[11,12,13,14,15,17,18,19,21,24,40]
+    for size in sizes:
         for i,name in enumerate(NAMES):
             svg=(ROOT/'flux-assets/icons'/f'{name}.svg').read_bytes()
-            bitmap=Image.open(BytesIO(cairosvg.svg2png(bytestring=svg,output_width=size*4,output_height=size*4))).convert('RGBA').getchannel('A').resize((size,size),Image.Resampling.LANCZOS).tobytes()
+            bitmap=Image.open(BytesIO(cairosvg.svg2png(bytestring=svg,output_width=size,output_height=size))).convert('RGBA').getchannel('A').tobytes()
             result.append(f'static const uint8_t flux_icon_{size}_{i}[] = {{')
             result.extend(','.join(map(str,bitmap[p:p+size]))+',' for p in range(0,len(bitmap),size))
             result.append('};')
-        result.append('static const uint8_t *const flux_icon_data'+('' if size==24 else '_40')+'[] = {'+','.join(f'flux_icon_{size}_{i}' for i in range(len(NAMES)))+'};')
+    result.append('static const uint8_t flux_icon_sizes[] = {'+','.join(map(str,sizes))+'};')
+    result.append('static const uint8_t *const flux_icon_data[][14] = {')
+    for size in sizes:
+        result.append('{'+','.join(f'flux_icon_{size}_{i}' for i in range(len(NAMES)))+'},')
+    result.append('};')
     (ROOT/'flux_icons.inc').write_text('\n'.join(result)+'\n')
 
 if __name__=='__main__': main()

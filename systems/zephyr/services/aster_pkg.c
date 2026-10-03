@@ -120,6 +120,7 @@ int aster_pkg_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 	int err = 0;
 	err |= aster_json_str(jbuf, "id", m->id, sizeof(m->id)) ? 0 : ASTER_ECORRUPT;
 	err |= aster_json_str(jbuf, "name", m->name, sizeof(m->name)) ? 0 : ASTER_ECORRUPT;
+	aster_pkg_read_description(jbuf, m->description);
 	aster_json_str(jbuf, "version", m->version, sizeof(m->version));
 
 	char abi[64];
@@ -328,6 +329,23 @@ int aster_json_str(const char *json, const char *key, char *out, size_t n)
 	return (int)i;
 }
 
+/* Old packages have no introduction. Own the text and never leave a
+ * partial UTF-8 character when a third-party package exceeds the limit. */
+void aster_pkg_read_description(const char *json, char *out)
+{
+	out[0] = 0;
+	if (aster_json_str(json, "description", out, ASTER_APP_DESCRIPTION_MAX) < 0) {
+		return;
+	}
+	size_t len = strlen(out);
+	if (!len) return;
+	size_t start = len - 1;
+	while (start && ((unsigned char)out[start] & 0xc0) == 0x80) start--;
+	unsigned char c = (unsigned char)out[start];
+	size_t width = c < 0x80 ? 1 : c < 0xe0 ? 2 : c < 0xf0 ? 3 : 4;
+	if (len - start < width) out[start] = 0;
+}
+
 int aster_json_u32(const char *json, const char *key, uint32_t *out)
 {
 	const char *v = find_key(json, key);
@@ -453,6 +471,28 @@ static int load_file(const char *path, uint8_t **buf, size_t *len)
  * `permissions` and run with perm_mask 0. Nothing was logged. snprintf's
  * truncation is what keeps `out` in bounds here; a negative return is the
  * caller's signal to reject the whole package. */
+/* Append a JSON string field without letting quotes/backslashes in app
+ * metadata corrupt the normalized manifest read by the registry. */
+static int json_string_field(char *out, size_t n, const char *key, const char *value)
+{
+	int w = snprintf(out, n, ",\"%s\":\"", key);
+	if (w < 0 || (size_t)w >= n) return -1;
+	size_t used = (size_t)w;
+	for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
+		if (*p < 0x20) return -1; /* descriptions are single-line text */
+		if (*p == '"' || *p == '\\') {
+			if (used + 1 >= n) return -1;
+			out[used++] = '\\';
+		}
+		if (used + 1 >= n) return -1;
+		out[used++] = (char)*p;
+	}
+	if (used + 2 > n) return -1;
+	out[used++] = '"';
+	out[used] = 0;
+	return (int)used;
+}
+
 static int json_arr(char *out, size_t n, const char *key, const char arr[][24], uint32_t cnt)
 {
 	size_t used;
@@ -826,7 +866,8 @@ int aster_pkg_install_file(const char *src_path)
 	 * cost 117 B per array, all four permissions cost 40 B, and the fixed
 	 * prefix is 324 B even with id/name/version at the lengths their
 	 * structs can hold -- 646 B for an app that fills every slot it can,
-	 * against 832. The last real packages sit near 300 B.
+	 * plus up to 254 B of escaped description against 1152.
+	 * The last real packages sit near 300 B.
 	 *
 	 * So the bound is not tight today, and that is exactly why the check
 	 * below must stay: the ceiling is a property of the vocabularies, not
@@ -843,6 +884,11 @@ int aster_pkg_install_file(const char *src_path)
 		m.mem_initial, m.mem_max, m.mem_stack ? m.mem_stack : 65536,
 		m.mem_heap ? m.mem_heap : 262144, aot_ok ? 1u : 0u);
 	int r = (w > 0 && w < (int)sizeof(line)) ? 0 : -1;
+
+	if (r >= 0 && m.description[0]) {
+		r = json_string_field(line + w, sizeof(line) - w, "description", m.description);
+		if (r >= 0) { w += r; r = 0; }
+	}
 
 	/* Record a dropped AOT so the reason outlives the install log. Written
 	 * only when there is something to skip, so every package that matched

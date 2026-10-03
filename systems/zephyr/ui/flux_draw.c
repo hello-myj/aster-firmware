@@ -66,6 +66,19 @@ static inline uint16_t mix565(uint16_t fg, uint16_t bg, unsigned mix)
  uint32_t r=((((f-b)*mix)>>5)+b) & 0x07e0f81f;
  return (uint16_t)(r | (r>>16));
 }
+/* Interpolate once in each native RGB565 channel. Two successive mixes
+ * truncate twice and bias fine edges toward the first sample. Use eight
+ * fractional bits per axis and round once, preserving subpixel positions. */
+static inline uint16_t sample565(const uint16_t p[4],unsigned wx,unsigned wy)
+{
+ unsigned weights[4]={(256-wx)*(256-wy),wx*(256-wy),(256-wx)*wy,wx*wy};
+ unsigned r=0,g=0,b=0;
+ for(unsigned i=0;i<4;i++) {
+  r+=(p[i]>>11)*weights[i];g+=((p[i]>>5)&63)*weights[i];b+=(p[i]&31)*weights[i];
+ }
+ return (((r+32768)>>16)<<11)|(((g+32768)>>16)<<5)|((b+32768)>>16);
+}
+
 int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *source,
                          const void *coordinates,uint32_t stride,
                          const void *clipped,void *task,const void *descriptor)
@@ -93,8 +106,10 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
  int angle=-d->rotation,low=angle/10,rem=angle-low*10;
  int sn=(lv_trigo_sin(low)*(10-rem)+lv_trigo_sin(low+1)*rem)/10;
  int cs=(lv_trigo_sin(low+90)*(10-rem)+lv_trigo_sin(low+91)*rem)/10;
- sn>>=LV_TRIGO_SHIFT-10;cs>>=LV_TRIGO_SHIFT-10;
- int32_t dxs=cs*16384/d->scale_x,dys=sn*16384/d->scale_y;
+ /* Retain LVGL's full trigonometric precision. Reducing it to ten
+  * bits introduces position errors before glyph-edge interpolation. */
+ const int factor=1<<(24-LV_TRIGO_SHIFT);
+ int32_t dxs=cs*factor/d->scale_x,dys=sn*factor/d->scale_y;
  unsigned mix=((unsigned)d->opa+4)>>3;
  const uint8_t *detail=NULL,*first=NULL,*last=NULL;uint16_t solid=0;
  for(unsigned i=0;i<5;i++) if(prepared[i].source==source) {detail=prepared[i].detail;solid=prepared[i].color;first=prepared[i].first;last=prepared[i].last;break;}
@@ -102,8 +117,8 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
   int x0=area.x1-coords->x1-d->pivot.x;
   int y0=y-coords->y1-d->pivot.y;
   int offset=d->antialias?0:32768;
-  int32_t sx=(int64_t)(cs*x0-sn*y0)*16384/d->scale_x+d->pivot.x*65536+offset;
-  int32_t sy=(int64_t)(sn*x0+cs*y0)*16384/d->scale_y+d->pivot.y*65536+offset;
+  int32_t sx=(int64_t)(cs*x0-sn*y0)*factor/d->scale_x+d->pivot.x*65536+offset;
+  int32_t sy=(int64_t)(sn*x0+cs*y0)*factor/d->scale_y+d->pivot.y*65536+offset;
   uint16_t *out=(uint16_t *)(layer->draw_buf->data+
     (y-layer->buf_area.y1)*layer->draw_buf->header.stride)+area.x1-layer->buf_area.x1;
   uint16_t *dst=out;
@@ -142,7 +157,7 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
     bool inside=(unsigned)ix<359 && (unsigned)iy<139;
     if(inside && detail && !(detail[iy*45+ix/8]&(1u<<(ix&7)))) fg=solid;
     else {
-     unsigned wx=(sx>>11)&31,wy=(sy>>11)&31;uint16_t pixels[4];
+     unsigned wx=(sx>>8)&255,wy=(sy>>8)&255;uint16_t pixels[4];
      if(inside) {
       const uint16_t *a=(const uint16_t *)((const uint8_t *)source+iy*stride);
       const uint16_t *b=(const uint16_t *)((const uint8_t *)source+(iy+1)*stride);
@@ -156,7 +171,7 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
       }
      }
      if(pixels[0]==pixels[1] && pixels[0]==pixels[2] && pixels[0]==pixels[3]) fg=pixels[0];
-     else fg=mix565(mix565(pixels[0],pixels[1],32-wx),mix565(pixels[2],pixels[3],32-wx),32-wy);
+     else fg=sample565(pixels,wx,wy);
     }
    } else {
     if((unsigned)ix>=360 || (unsigned)iy>=140) continue;

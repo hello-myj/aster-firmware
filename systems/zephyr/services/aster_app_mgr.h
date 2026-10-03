@@ -19,6 +19,7 @@ typedef enum {
 typedef struct {
 	char            id[64];
 	char            name[40];
+	char            description[ASTER_APP_DESCRIPTION_MAX];
 	char            version[24];
 	char            entry[48];   /* "app.wasm" or "app.aot" */
 	uint32_t        abi_major;

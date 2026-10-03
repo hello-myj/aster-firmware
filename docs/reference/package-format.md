@@ -87,6 +87,13 @@ the only payload (design doc sec.38).
 
 ## Manifest JSON (schema v1)
 
+Optional `description` is the app-owned launcher introduction: a single-line
+UTF-8 string of at most 127 bytes. The installer preserves it in the normalized
+manifest and FLUX reads it for every installed app, including dynamically added
+IDs. Missing or empty descriptions leave the introduction blank. Quote and
+backslash characters are escaped when writing the normalized JSON. This metadata
+addition does not change the WASM ABI or package format version.
+
 Real, as-packed manifest for the in-tree `sdk/apps/gfxshow` (keys appear in this
 order because `build.py` inserts the conditional ones only when set):
 

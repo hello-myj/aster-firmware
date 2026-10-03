@@ -187,6 +187,7 @@ int aster_app_mgr_scan(void)
 		}
 		memcpy(r->id, ent.name, strlen(ent.name) + 1);
 		aster_json_str(jbuf, "name", r->name, sizeof(r->name));
+		aster_pkg_read_description(jbuf, r->description);
 		aster_json_str(jbuf, "version", r->version, sizeof(r->version));
 		aster_json_str(jbuf, "entry", r->entry, sizeof(r->entry));
 		aster_json_str(jbuf, "abi_min", r->abi_min, sizeof(r->abi_min));
@@ -399,6 +400,7 @@ int aster_app_mgr_read_manifest(const char *id, aster_manifest_t *m)
 	m->orientation = ASTER_ORIENT_ANY;
 	strncpy(m->id, id, sizeof(m->id) - 1);
 	aster_json_str(jbuf, "name", m->name, sizeof(m->name));
+	aster_pkg_read_description(jbuf, m->description);
 	aster_json_str(jbuf, "version", m->version, sizeof(m->version));
 	/* normalized on-disk manifest has flattened abi_min/abi_target */
 	aster_json_str(jbuf, "abi_min", m->abi_min, sizeof(m->abi_min));
