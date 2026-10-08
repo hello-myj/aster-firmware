@@ -438,8 +438,8 @@ static int ctx_load(aster_app_ctx_t *ctx, const aster_app_rec_t *rec)
 	if (stack_size > 512 * 1024) {
 		stack_size = 512 * 1024;
 	}
-	if (heap_size > 4 * 1024 * 1024) {
-		heap_size = 4 * 1024 * 1024;
+	if (heap_size > CONFIG_ASTER_WAMR_HEAP_SIZE) {
+		heap_size = CONFIG_ASTER_WAMR_HEAP_SIZE;
 	}
 	/* Host heap lives inside the linear memory this cap bounds. Leave one
 	 * page for the module's own initial memory when the hole is tight. */

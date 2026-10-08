@@ -231,7 +231,8 @@ static int cmd_sys_mem(const struct shell *sh, size_t argc, char **argv)
 		 * camera / decoder / a second full-screen buffer will come up
 		 * or fail with -ENOMEM. */
 		static const size_t probe[] = {
-			4194304u, 2097152u, 1048576u, 524288u, 393216u,
+			7864320u, 7340032u, 6291456u, 5242880u, 4194304u,
+			2097152u, 1048576u, 524288u, 393216u,
 			307200u, 262144u, 204800u, 153600u, 131072u, 65536u,
 		};
 		size_t best = 0;
