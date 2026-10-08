@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/fs/fs.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/multi_heap/shared_multi_heap.h>
@@ -38,9 +39,19 @@ LOG_MODULE_REGISTER(aster_rt, LOG_LEVEL_INF);
 
 /* Upper bound on one guest's linear memory, not a block reserved at boot.
  * The live ceiling is the smaller of this and the largest free external
- * block minus ASTER_WAMR_RESERVE, so a running app still leaves room for
- * the panel fronts and a screenshot. */
-#define ASTER_WAMR_RESERVE (1024u * 1024u)
+ * block minus ASTER_WAMR_RESERVE. That remainder is the two panel fronts
+ * a canvas allocates later (one frame each) plus a little heap-header
+ * slack. A screenshot does not add to it: the grab compresses into a
+ * temporary block, and if that allocation fails it streams the frame
+ * already on the glass. */
+#if DT_HAS_CHOSEN(zephyr_display)
+#define ASTER_WAMR_FRAME_BYTES \
+	(DT_PROP(DT_CHOSEN(zephyr_display), width) * \
+	 DT_PROP(DT_CHOSEN(zephyr_display), height) * 2u)
+#else
+#define ASTER_WAMR_FRAME_BYTES (240u * 320u * 2u)
+#endif
+#define ASTER_WAMR_RESERVE (2u * ASTER_WAMR_FRAME_BYTES + 4096u)
 
 /* Prefix kept in front of every WAMR allocation so realloc can copy the
  * old size. 16 bytes so the payload stays aligned with aster_psram_alloc. */
