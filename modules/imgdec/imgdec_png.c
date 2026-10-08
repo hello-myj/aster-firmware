@@ -15,7 +15,7 @@
  *
  * Peak extra memory: 32 KB in + 32 KB dict + 2 raw rows + 2 RGB565 rows
  * in PSRAM (independent of image/file size), plus an ~8 KB tinfl state
- * machine pinned to internal DRAM (see aster_png_render for why).
+ * machine taken from internal DRAM for the decode and released after.
  */
 #include <errno.h>
 #include <math.h>
@@ -332,9 +332,8 @@ aster_error_t aster_png_render(const char *path, uint8_t *out,
 	 * at bit granularity while the SD path shuttles bytes through an
 	 * internal-RAM bounce buffer. On the ESP32-S3, PSRAM and SPI flash share
 	 * the octal SPI bus, and keeping this hot state in PSRAM intermittently
-	 * corrupts it (observed as a wrong inflate byte + heap-canary trip).
-	 * Pin it to internal DRAM; only ~8 KB, and it is not reentrant. */
-	static uint8_t dram_tin[sizeof(tinfl_decompressor)] __aligned(16);
+	 * corrupts it. Take it from internal DRAM only for this decode. */
+	void *dram_tin = NULL;
 
 	/* signature */
 	uint8_t sig[8];
@@ -375,7 +374,8 @@ aster_error_t aster_png_render(const char *path, uint8_t *out,
 	/* PSRAM working set */
 	inb   = aster_psram_alloc(32768);
 	dict  = aster_psram_alloc(TINFL_LZ_DICT_SIZE);
-	tin   = (tinfl_decompressor *)dram_tin;   /* MUST stay in internal DRAM */
+	dram_tin = aster_dram_alloc(sizeof(tinfl_decompressor));
+	tin   = (tinfl_decompressor *)dram_tin;
 	c.rowA  = aster_psram_alloc(c.row_total);
 	c.rowB  = aster_psram_alloc(c.row_total);
 	c.cur565  = aster_psram_alloc((size_t)c.w * 2);
@@ -459,6 +459,7 @@ aster_error_t aster_png_render(const char *path, uint8_t *out,
 
 free_all:
 	aster_psram_free(inb); aster_psram_free(dict);
+	aster_dram_free(dram_tin);
 	aster_psram_free(c.rowA); aster_psram_free(c.rowB);
 	aster_psram_free(c.cur565); aster_psram_free(c.prev565);
 	aster_psram_free(c.pal); aster_psram_free(c.trns);

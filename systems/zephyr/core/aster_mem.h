@@ -10,6 +10,11 @@
 
 void *aster_psram_alloc(size_t size);
 void  aster_psram_free(void *ptr);
+/* Leftover internal DRAM (the libc heap after .bss), not k_malloc and not
+ * PSRAM. Use for objects that must stay reachable while the flash cache is
+ * off, and that should disappear again when the caller is finished. */
+void *aster_dram_alloc(size_t size);
+void  aster_dram_free(void *ptr);
 void  aster_core_init(void);
 
 /* Where the external (PSRAM) memory actually is, as the linker laid it out.

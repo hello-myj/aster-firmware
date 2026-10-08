@@ -192,7 +192,7 @@ static int cmd_sys_mem(const struct shell *sh, size_t argc, char **argv)
 			    (unsigned)st.max_allocated_bytes,
 			    (unsigned)st.allocated_bytes,
 			    (unsigned)st.free_bytes);
-		shell_print(sh, "            (AOT exec text comes from here)");
+		shell_print(sh, "            (AOT text is a PSRAM alloc; this heap is DMA/stacks)");
 	} else {
 		shell_print(sh, "dram heap:  size=%u (no runtime stats)",
 			    (unsigned)CONFIG_HEAP_MEM_POOL_SIZE);
@@ -200,7 +200,7 @@ static int cmd_sys_mem(const struct shell *sh, size_t argc, char **argv)
 	aster_system_info_t i;
 
 	aster_sysinfo_get(&i);
-	shell_print(sh, "ext ram:    %u total, wamr_pool=%u", i.ram_external,
+	shell_print(sh, "ext ram:    %u total, wamr_cap=%u", i.ram_external,
 		    (unsigned)CONFIG_ASTER_WAMR_HEAP_SIZE);
 	{
 		/* The declared size above is a Kconfig number; this is what the
@@ -941,7 +941,7 @@ static int cmd_ui_screenshot(const struct shell *sh, size_t argc, char **argv)
 }
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_ui,
-	SHELL_CMD_ARG(screenshot, NULL, "grab screen -> base64 (host: shell_shot.py)",
+	SHELL_CMD_ARG(screenshot, NULL, "grab screen -> zlib base64 (host: screenshot.py)",
 		      cmd_ui_screenshot, 1, 1),
 	SHELL_SUBCMD_SET_END
 );

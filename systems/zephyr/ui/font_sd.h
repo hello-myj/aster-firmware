@@ -84,9 +84,20 @@ uint32_t aster_font_sd_generation(void);
  * false while the slot is not ready.) */
 bool aster_font_sd_has_cp(uint8_t px, uint32_t cp);
 
-/* Boot-time hook: registers the baked sizes; call before the lv_fs 'S:'
- * driver is used. Stats/re-probes happen inside poll. */
+/* Boot-time hook: registers the baked sizes and loads only the interval
+ * tables. Metric tables and bitmap rings stay unloaded until a reading
+ * session asks for them. */
 void aster_font_sd_init(void);
+
+/* Reader, lyrics and chat call this on the UI thread as they start. The
+ * first call allocates the metric tables and rings; the matching end
+ * releases them. Nested calls are counted. */
+void aster_font_sd_session_begin(void);
+void aster_font_sd_session_end(void);
+
+/* Drop the small on-demand glyph cache. Pages that draw SSIDs or file
+ * names call this as they close. */
+void aster_font_sd_cache_drop(void);
 
 /* Profiling (CONFIG_ASTER_LVGL_PROFILER builds the printer; counters always
  * maintained): table/metadata reads, warm bursts, misses, white-box draws. */

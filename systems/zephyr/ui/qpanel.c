@@ -126,6 +126,7 @@ static uint8_t *s_snap;
  * "a sheet is up over an app and s_snap is the truth", so it is armed with
  * the sheet and cleared with it -- never left behind for the next app. */
 static bool s_frozen;
+static bool s_exit_mode, s_exit_confirmed;
 
 /* ---------- small helpers ---------- */
 static lv_color_t hexc(uint32_t c)
@@ -288,6 +289,7 @@ static bool forget(void)
 	bool had = s_sheet != NULL;
 
 	s_scrim = s_sheet = NULL;
+ s_exit_mode = false;
 #if IS_ENABLED(CONFIG_ASTER_AUDIO)
 	s_vol_slider = s_vol_val = NULL;
 #endif
@@ -769,6 +771,64 @@ static void build(void)
 	sd_refresh();
 }
 
+/* Return confirmation shares the APP snapshot/present hold with the panel. */
+static void on_exit_cancel(lv_event_t *e)
+{
+ ARG_UNUSED(e);
+ LOG_INF("return: cancelled");
+ aster_qpanel_dismiss();
+}
+static void on_exit_confirm(lv_event_t *e)
+{
+ ARG_UNUSED(e);
+ /* Runtime consumes this immediately after the LVGL tick. Keep the glass
+  * held until normal app teardown; no guest frame can overwrite the modal. */
+ s_exit_confirmed=true;
+ LOG_INF("return: confirmed");
+}
+bool aster_qpanel_request_exit(const char *name)
+{
+ if(s_sheet || !aster_ui_lvgl_screen() || !snapshot_take()) return false;
+ load_palette();s_exit_mode=true;s_exit_confirmed=false;s_frozen=true;
+ int w=(int)aster_ui_lvgl_width(),h=(int)aster_ui_lvgl_height();
+ int cw=MIN(w-32,288),ch=194;
+ s_scrim=lv_obj_create(aster_ui_lvgl_screen());
+ lv_obj_remove_style_all(s_scrim);lv_obj_set_size(s_scrim,w,h);
+ lv_obj_set_style_bg_color(s_scrim,hexc(0),0);
+ lv_obj_set_style_bg_opa(s_scrim,LV_OPA_70,0);no_scroll(s_scrim);
+ lv_obj_add_flag(s_scrim,LV_OBJ_FLAG_CLICKABLE);
+ lv_obj_add_event_cb(s_scrim,on_exit_cancel,LV_EVENT_CLICKED,NULL);
+ lv_obj_add_event_cb(s_scrim,on_delete,LV_EVENT_DELETE,NULL);
+ s_sheet=lv_obj_create(aster_ui_lvgl_screen());
+ lv_obj_remove_style_all(s_sheet);lv_obj_set_size(s_sheet,cw,ch);
+ lv_obj_set_pos(s_sheet,(w-cw)/2,(h-ch)/2);
+ lv_obj_set_style_bg_color(s_sheet,hexc(s_pal.bg),0);
+ lv_obj_set_style_bg_opa(s_sheet,LV_OPA_COVER,0);
+ lv_obj_set_style_radius(s_sheet,16,0);no_scroll(s_sheet);
+ lv_obj_add_flag(s_sheet,LV_OBJ_FLAG_CLICKABLE);
+ lv_obj_add_event_cb(s_sheet,on_delete,LV_EVENT_DELETE,NULL);
+ lv_obj_t *title=mk_label(s_sheet,"返回主页？",s_pal.accent,0);
+ lv_obj_set_style_text_font(title,aster_ui_font(20),0);
+ aster_ui_font_warm(20,"返回主页？");lv_obj_set_pos(title,18,18);
+ lv_obj_t *app=mk_label(s_sheet,name?name:"当前应用",s_pal.fg,0);
+ lv_obj_set_pos(app,18,51);lv_obj_set_width(app,cw-36);
+ lv_label_set_long_mode(app,LV_LABEL_LONG_MODE_DOTS);
+ lv_obj_t *info=mk_label(s_sheet,"结束当前应用并返回主页。\n取消可继续使用。",s_pal.dim,0);
+ lv_obj_set_pos(info,18,81);lv_obj_set_width(info,cw-36);
+ int bw=(cw-44)/2;
+ lv_obj_t *cancel=mk_button(s_sheet,18,138,bw,42,"取消",on_exit_cancel,NULL);
+ lv_obj_set_style_bg_color(cancel,hexc(s_pal.surface),0);
+ lv_obj_t *yes=mk_button(s_sheet,26+bw,138,bw,42,"返回主页",on_exit_confirm,NULL);
+ lv_obj_set_style_bg_color(yes,hexc(s_pal.accent),0);
+ lv_obj_set_style_text_color(lv_obj_get_child(yes,0),hexc(0x211d28),0);
+ LOG_INF("return: confirmation opened");return true;
+}
+bool aster_qpanel_exit_is_open(void) {return s_exit_mode && s_sheet;}
+bool aster_qpanel_take_exit_confirmed(void)
+{
+ bool confirmed=s_exit_confirmed;s_exit_confirmed=false;return confirmed;
+}
+
 /* ---------- public API ---------- */
 void aster_qpanel_bind_theme(const aster_qpanel_theme_ops_t *ops)
 {
@@ -783,6 +843,7 @@ uint32_t aster_qpanel_allow(bool launcher)
 	 * page swipes at home, pull-up-exit inside an app -- and neither is
 	 * live while the sheet owns the glass. */
 	uint32_t m = ASTER_GEST_ALLOW_PANEL;
+ if(s_exit_mode) return 0;
 
 	if (s_sheet) {
 		return m;
@@ -879,6 +940,7 @@ void aster_qpanel_dismiss(void)
 
 void aster_qpanel_force_close(void)
 {
+ s_exit_confirmed=false;
 	aster_qpanel_close(false);
 }
 
@@ -893,7 +955,7 @@ void aster_qpanel_tick(void)
 	static uint32_t last_ms;
 	uint32_t now = (uint32_t)k_uptime_get();
 
-	if (!s_sheet || (now - last_ms) < 1000u) {
+	if (!s_sheet || s_exit_mode || (now - last_ms) < 1000u) {
 		return;
 	}
 	last_ms = now;

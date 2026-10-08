@@ -79,6 +79,11 @@ int  aster_plat_display_flip_rgb565(const uint8_t *src_le, uint32_t w, uint32_t 
 bool     aster_plat_display_canvas_ready(void);
 uint8_t *aster_plat_display_canvas_back(void);
 int      aster_plat_display_canvas_present(void);
+/* The two panel fronts are not reserved at boot. A canvas surface acquires
+ * them and the matching destroy releases them; a failed acquire leaves the
+ * surface on the ordinary guest-memory path. */
+int      aster_plat_display_flip_acquire(void);
+void     aster_plat_display_flip_release(void);
 
 /* App coordinate space: the panel turned portrait, i.e. (short edge, long
  * edge) -- 240x320 on this glass, the same in both orientations. App
@@ -132,6 +137,8 @@ bool aster_plat_display_glass_frame(const uint8_t **buf, uint32_t *w, uint32_t *
  * describes the current window is left untouched, so a caller that repaints
  * the same window twice loses nothing. */
 void aster_plat_display_glass_rearm(void);
+/* Release a shadow that glass_frame() allocated for the grab in progress. */
+void aster_plat_display_glass_drop(void);
 /* With CONFIG_ASTER_DISP_ASYNC, direct-send rects are queued to a worker
  * thread and this call returns before the wire finished. Block until the
  * queued rect is fully on the panel. LVGL wires this to flush_wait_cb;
@@ -237,6 +244,11 @@ int  aster_plat_audio_record(uint8_t *pcm, size_t size);
 int  aster_plat_audio_beep(uint32_t duration_ms, uint32_t hz);
 int  aster_plat_audio_set_volume(int percent); /* 0..100 */
 int  aster_plat_audio_get_volume(void);        /* 0..100 */
+/* Nonblocking firmware UI mono PCM at native rate; static lifetime required.
+ * Gain is 0..1000. Higher priority replaces lower priority, APP slots untouched. */
+int aster_plat_audio_ui_play(const int16_t *pcm, size_t frames, unsigned gain, unsigned priority);
+void aster_plat_audio_ui_stop(void);
+void aster_plat_audio_ui_release(void);
 int  aster_plat_audio_effect_load(const char *path);
 int  aster_plat_audio_effect_play(uint32_t handle);
 int  aster_plat_audio_effect_unload(uint32_t handle);

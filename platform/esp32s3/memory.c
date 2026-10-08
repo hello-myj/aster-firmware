@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: MIT */
 #include "aster_mem.h"
 
+#include <stdint.h>
+#include <stdlib.h>
+
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/multi_heap/shared_multi_heap.h>
@@ -21,6 +24,32 @@ void aster_psram_free(void *ptr)
 {
 	if (ptr) {
 		shared_multi_heap_free(ptr);
+	}
+}
+
+void *aster_dram_alloc(size_t size)
+{
+	void *raw;
+	uintptr_t aligned;
+
+	if (size == 0) {
+		return NULL;
+	}
+	/* 16-byte alignment, with the malloc pointer stored just in front so
+	 * aster_dram_free() can hand the original block back. */
+	raw = malloc(size + sizeof(void *) + 16u);
+	if (!raw) {
+		return NULL;
+	}
+	aligned = ((uintptr_t)raw + sizeof(void *) + 15u) & ~(uintptr_t)15u;
+	((void **)aligned)[-1] = raw;
+	return (void *)aligned;
+}
+
+void aster_dram_free(void *ptr)
+{
+	if (ptr) {
+		free(((void **)ptr)[-1]);
 	}
 }
 

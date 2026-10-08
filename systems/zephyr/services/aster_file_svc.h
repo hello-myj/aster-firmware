@@ -1,11 +1,18 @@
 /* SPDX-License-Identifier: MIT
- * ASTER file-transfer service on the native USB-CDC (Serial-JTAG) port.
+ * ASTER file-transfer service: shell UART and legacy native USB-CDC.
  *
- * V1 has no other bulk transport for .ast packages when the SD card is not
- * reachable from the PC (no card reader / WSL). A tiny line protocol on
- * /dev/ttyACMx complements the CH340 shell:
+ * The shell UART supports ASTERPING and ASTERPUT alongside logs and commands.
+ * PONG includes serial=shared; SDK deployment then installs via the same port.
+ * Use a single LF to terminate the PUT header on the shared shell: CRLF would
+ * leave its LF in the binary stream after shell bypass is enabled. Bodies may
+ * contain arbitrary bytes. Binary reception ends on verdict or a 30 s stall.
+ * Legacy dedicated native USB-CDC remains compatible with LF or CRLF headers.
+ * Only one transfer is active across the two entry points; logs are line framed.
+ * Close an independent monitor before an uploader opens this same host port.
  *
- *   host -> device:  "ASTERPUT <abs-path> <len> <crc32-hex> [resume-off]\r\n"
+ * Protocol:
+ *
+ *   host -> device:  "ASTERPUT <abs-path> <len> <crc32-hex> [resume-off]\n"
  *                    (header alone; NO body yet)
  *   device -> host:  "ACK <off>\r\n"                   go-token: device is
  *                      ready; stream <len - off> raw bytes starting at byte

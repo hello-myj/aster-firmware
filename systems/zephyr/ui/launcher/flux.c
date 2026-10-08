@@ -31,6 +31,8 @@
 #include "aster_time.h"
 LOG_MODULE_REGISTER(aster_flux, LOG_LEVEL_INF);
 #include "flux_icons.inc"
+#include "flux_motion.h"
+#include "flux_sounds.inc"
 
 #define BG 0x131317
 #define FG 0xf3f3e8
@@ -75,10 +77,14 @@ static const known_t known[] = {
 static const char *const group_names[]={"全部","媒体","玩乐","探索"};
 static const char *const group_codes[]={"FULL SPECTRUM","SOUND & LIGHT","PLAY FREQUENCY","NEW POSSIBILITIES"};
 static const uint32_t group_colors[]={ACCENT,0xaaadff,0xffa891,0x89eac6};
-static entry_t entries[MAX_ENTRIES];
+/* Launcher state, not a DMA buffer. PSRAM so it does not sit in internal DRAM
+ * for the whole time the desktop is up. */
+static entry_t entries[MAX_ENTRIES] __attribute__((section(".ext_ram.bss")));
 static int entry_n, ids[MAX_ENTRIES], count, group, selected[4];
 /* phase is in thousandths of an index, preserving sub-pixel drag motion. */
 static int phase, from_phase, target_phase, pull, from_pull;
+static unsigned scroll_duration=FLUX_SNAP_MS;
+static bool coasting, draw_pending;
 static uint64_t animation_ms, last_draw, hold_ms, clock_sec=UINT64_MAX;
 static bool animating, launching, visible, initialized, want_show=true, motion=true, quiet;
 static volatile bool dirty;
@@ -91,7 +97,8 @@ static char remove_id[64], remove_name[40];
 static lv_obj_t *root,*body,*stage,*bar_time,*description,*position,*pull_label,*handle;
 static lv_obj_t *filter_label,*modal,*toast,*clock_value,*clock_date,*wifi_state;
 static uint64_t toast_until;
-static lv_image_dsc_t chrome[ARRAY_SIZE(flux_icon_sizes)][ARRAY_SIZE(flux_icon_data[0])];
+static lv_image_dsc_t chrome[ARRAY_SIZE(flux_icon_sizes)][ARRAY_SIZE(flux_icon_data[0])]
+	__attribute__((section(".ext_ram.bss")));
 static struct {
  lv_obj_t *obj;
  lv_image_dsc_t icon;
@@ -101,13 +108,42 @@ static struct {
  bool dirty_art;
 } ribbons[RIBBONS];
 static struct {
- bool down, handle, moved, blocked;
- int x,y,last_y,axis,base,velocity,hit;
- uint64_t started,last_ms;
+ bool down, handle, moved, blocked, stopped;
+ int x,y,axis,base,hit;
+ uint64_t started;
+ struct flux_velocity track;
 } drag;
 static void show_page(int next);
 static void redraw(void);
 static void settle(int target);
+
+enum { S_TICK, S_TAP, S_OPEN, S_CLOSE, S_TUNE };
+static int sound_entry=-1, sound_group=-1, sound_phase;
+static uint64_t sound_tick_ms, sound_sample_ms;
+static bool sound_return, sound_launch_started;
+static int sound_pending=-1;
+static void sound_play(int which, int speed)
+{
+ if(quiet || volume_pending==0 || !aster_plat_audio_get_volume()) {
+  aster_plat_audio_ui_stop();return;
+ }
+ const int16_t *pcm;size_t frames;unsigned gain=1000;
+ uint64_t now=k_uptime_get();
+ if(which==S_TICK) {
+  unsigned velocity=abs(speed);
+  if(sound_tick_ms && now-sound_tick_ms<(velocity>650?160:95)) return;
+  gain=MAX(350,1000-(int)velocity*4/10);
+ }
+ switch(which) {
+#define SOUND_CASE(id,name) case id:pcm=sound_##name;frames=ARRAY_SIZE(sound_##name);break
+ SOUND_CASE(S_TICK,tick);SOUND_CASE(S_TAP,tap);SOUND_CASE(S_OPEN,open);
+ SOUND_CASE(S_CLOSE,close);SOUND_CASE(S_TUNE,tune);
+#undef SOUND_CASE
+ default:return;
+ }
+ int err=aster_plat_audio_ui_play(pcm,frames,gain,which==S_TICK?0:1);
+ if(!err && which==S_TICK) sound_tick_ms=now;
+}
 
 static lv_obj_t *box(lv_obj_t *parent,int x,int y,int w,int h,uint32_t color,int radius)
 {
@@ -239,9 +275,46 @@ static void filter_entries(void)
  selected[group]=wrap(selected[group],count);phase=selected[group]*1000;
  animating=false;pull=0;
 }
+/* The baked ribbon is a 360x140 RGB565 image. It used to come out of the
+ * LVGL pool via lv_snapshot_take(); five of them do not fit in the widget
+ * pool, so the pixels live in the shared PSRAM heap and only the small
+ * descriptor stays in the pool. */
+static void ribbon_art_drop(lv_draw_buf_t *art)
+{
+ if(!art) return;
+ aster_flux_draw_forget(art->data);
+ aster_psram_free(art->unaligned_data);
+ lv_free(art);
+}
+static lv_draw_buf_t *ribbon_bake(lv_obj_t *obj)
+{
+ int32_t w,h;
+ uint32_t stride;
+ size_t bytes;
+ void *px;
+ lv_draw_buf_t *db;
+
+ lv_obj_update_layout(obj);
+ w=lv_obj_get_width(obj);
+ h=lv_obj_get_height(obj);
+ if(w<=0 || h<=0) return NULL;
+ stride=lv_draw_buf_width_to_stride((uint32_t)w,LV_COLOR_FORMAT_RGB565);
+ bytes=(size_t)stride*(size_t)h;
+ px=aster_psram_alloc(bytes);
+ db=lv_malloc_zeroed(sizeof(*db));
+ if(!px || !db ||
+    lv_draw_buf_init(db,(uint32_t)w,(uint32_t)h,LV_COLOR_FORMAT_RGB565,stride,px,(uint32_t)bytes)!=LV_RESULT_OK ||
+    lv_snapshot_take_to_draw_buf(obj,LV_COLOR_FORMAT_RGB565,db)!=LV_RESULT_OK) {
+  LOG_WRN("ribbon bake failed (%dx%d)",(int)w,(int)h);
+  aster_psram_free(px);
+  if(db) lv_free(db);
+  return NULL;
+ }
+ return db;
+}
 static void release_icon(int i)
 {
- if(ribbons[i].art) {aster_flux_draw_forget(ribbons[i].art->data);lv_draw_buf_destroy(ribbons[i].art);ribbons[i].art=NULL;}
+ if(ribbons[i].art) {ribbon_art_drop(ribbons[i].art);ribbons[i].art=NULL;}
  if(ribbons[i].data) {
   aster_psram_free(ribbons[i].data);ribbons[i].data=NULL;
  }
@@ -272,7 +345,7 @@ static void bind_ribbon(int slot,int idx)
  if(same && !ribbons[slot].dirty_art) return;
  lv_image_set_src(ribbons[slot].obj,NULL);
  if(same) {
-  if(ribbons[slot].art) {aster_flux_draw_forget(ribbons[slot].art->data);lv_draw_buf_destroy(ribbons[slot].art);}
+  if(ribbons[slot].art) ribbon_art_drop(ribbons[slot].art);
   ribbons[slot].art=NULL;
  } else release_icon(slot);
  ribbons[slot].entry=idx;ribbons[slot].dirty_art=false;
@@ -296,13 +369,15 @@ static void bind_ribbon(int slot,int idx)
  unsigned characters=0;
  for(const unsigned char *p=(const unsigned char *)e->name;*p;p++) if((*p&0xc0)!=0x80) characters++;
  int zoom=characters>6?256:384;
+ /* Same face as the caption underneath. The packed name.a8 was drawn with a
+  * host font that has no CJK, so every character came out as a hollow box. */
  text(o,e->name,112,zoom==384?43:51,190,INK,20,zoom);
  icon(o,ICON_ARROW,306,56,21,INK);
  snprintf(code,sizeof(code),"ASTER / %s",e->id);
  for(char *p=code;*p;p++) if(*p>='a' && *p<='z') *p-=32;
  text(o,code,43,113,274,INK,16,128);
  box(o,310,0,1,140,0x504354,0);box(o,323,0,1,140,0x504354,0);
- ribbons[slot].art=lv_snapshot_take(o,LV_COLOR_FORMAT_RGB565);
+ ribbons[slot].art=ribbon_bake(o);
  lv_obj_delete(o);
  if(ribbons[slot].art) {
   aster_flux_draw_prepare(ribbons[slot].art->data,ribbons[slot].art->header.stride);
@@ -331,6 +406,7 @@ static int cache_slot(const int resident[RIBBONS],const int *wanted,int n,int en
 }
 static void redraw(void)
 {
+ draw_pending=false;
  if(!stage || page!=HOME) return;
  int center=nearest(phase),wanted[RIBBONS],n=0;
  for(int rel=-2;rel<=2 && count;rel++) {
@@ -352,7 +428,7 @@ static void redraw(void)
   if(idx<0 || a>=2400 || !ribbons[k].art) {lv_obj_add_flag(o,LV_OBJ_FLAG_HIDDEN);continue;}
   lv_obj_clear_flag(o,LV_OBJ_FLAG_HIDDEN);
   int shift=idx==selected[group]?pull:0;
-  lv_obj_set_pos(o,-20+a*9/1000+shift,126+d*106/1000-70);
+  lv_obj_set_pos(o,-20+a*9/1000+shift,126+d*FLUX_RIBBON_PITCH/1000-70);
   lv_image_set_pivot(o,180,70);
   lv_image_set_rotation(o,wrap(-90+CLAMP(d*60/1000,-120,120),3600));
   int zoom=MAX(174,256-a*41/1000);
@@ -368,8 +444,18 @@ static void settle(int target)
 {
  selected[group]=wrap(nearest(target),count);
  from_phase=phase;target_phase=phase+distance(selected[group],phase,count);
- from_pull=pull;animation_ms=k_uptime_get();animating=motion;caption();save();
- if(!motion) {phase=target_phase;pull=0;redraw();}
+ from_pull=pull;scroll_duration=FLUX_SNAP_MS;coasting=false;
+ animation_ms=k_uptime_get();animating=motion && (target_phase!=phase || pull!=0);caption();save();
+ if(!motion) {phase=target_phase;pull=0;draw_pending=true;}
+}
+static void release_scroll(uint64_t now)
+{
+ struct flux_scroll_plan p=flux_scroll_plan(phase,flux_velocity_release(&drag.track,now),count);
+ if(!motion || !p.coast) {settle(phase);return;}
+ from_phase=phase;target_phase=p.target;from_pull=pull;
+ scroll_duration=p.duration;animation_ms=now;coasting=true;animating=true;
+ selected[group]=wrap(nearest(phase),count);caption();save();
+ LOG_INF("flux coast: speed=%d px/s travel=%d duration=%u ms",drag.track.speed,target_phase-from_phase,scroll_duration);
 }
 static void slider_changed(lv_event_t *e)
 {
@@ -499,6 +585,8 @@ static void build_system(void)
 }
 static void show_page(int next)
 {
+ aster_font_sd_cache_drop();
+ if(next!=HOME) {animating=false;coasting=false;phase=selected[group]*1000;pull=0;}
  for(int i=0;i<RIBBONS;i++) {ribbons[i].obj=NULL;ribbons[i].entry=-1;}
  if(body) lv_obj_delete(body);
  for(int i=0;i<RIBBONS;i++) release_icon(i);
@@ -566,35 +654,39 @@ static void touch(const aster_touch_evt_t *e)
   memset(&drag,0,sizeof(drag));
   if(owned && ((e->y>=93 && e->y<373) || (e->y>=404 && e->y<=447))) {
    aster_ui_lvgl_pointer(e->x,e->y,false);
-   drag.down=true;drag.handle=e->y>=404;drag.x=e->x;drag.y=drag.last_y=e->y;
+   drag.down=true;drag.handle=e->y>=404;drag.x=e->x;drag.y=e->y;
    drag.hit=drag.handle?-1:ribbon_hit(e->x,e->y);
-   drag.base=phase;drag.started=drag.last_ms=k_uptime_get();animating=false;
+   drag.stopped=animating && !drag.handle;
+   drag.base=phase;drag.started=k_uptime_get();animating=false;coasting=false;
+   selected[group]=wrap(nearest(phase),count);caption();
+   flux_velocity_reset(&drag.track,e->y,drag.started);
   }
  }
  if(!drag.down) {aster_ui_lvgl_pointer(e->x,e->y,pressed);return;}
  int dx=(int)e->x-drag.x,dy=(int)e->y-drag.y;
- if(!drag.axis && (abs(dx)>8 || abs(dy)>8)) {
-  drag.axis=drag.handle || abs(dx)>abs(dy)?1:2;drag.moved=true;
+ if(!drag.axis && dx*dx+dy*dy>36) {
+  drag.axis=drag.handle?1:abs(dy)>=6?2:3;drag.moved=true;
  }
- if(pressed && !drag.blocked) {
+ /* Horizontal jitter on a card cannot claim the launch gesture. */
+ if(!drag.handle && drag.axis==3 && abs(dy)>=6) drag.axis=2;
+ if(!drag.blocked) {
   if(drag.axis==2) {
-   uint64_t now=k_uptime_get();int dt=MAX(1,(int)(now-drag.last_ms));
-   drag.velocity=((int)e->y-drag.last_y)*1000/dt;drag.last_y=e->y;drag.last_ms=now;
-   phase=drag.base-dy*1000/106;redraw();
-  } else if(drag.axis==1) {pull=CLAMP(dx,0,240);redraw();}
+   flux_velocity_sample(&drag.track,e->y,k_uptime_get());
+   phase=drag.base-dy*1000/FLUX_RIBBON_PITCH;
+   selected[group]=wrap(nearest(phase),count);caption();draw_pending=true;
+  } else if(drag.axis==1 && pressed) {pull=CLAMP(dx,0,240);draw_pending=true;}
  }
  if(!pressed) {
   if(!drag.blocked) {
    if(drag.axis==2) {
-    int momentum=CLAMP(-drag.velocity*120/106,-1800,1800);
-    if(k_uptime_get()-drag.last_ms>100) momentum=0;
-    settle(phase+momentum);
-   } else if(drag.axis==1 && dx>95) {
+    release_scroll(k_uptime_get());
+   } else if(drag.handle && drag.axis==1 && dx>95 && abs(dy)<24) {
     launching=true;animation_ms=k_uptime_get();from_pull=pull;
-   } else if(drag.moved) settle(selected[group]*1000);
+   } else if(drag.moved || drag.stopped) settle(nearest(phase)*1000);
+   else if(k_uptime_get()-drag.started>300) settle(nearest(phase)*1000);
    else if(drag.handle) action=ACT_OPEN;
    else {
-    if(drag.hit>=0) {
+    if(drag.hit>=0 && ribbon_hit(e->x,e->y)==drag.hit) {
      if(drag.hit==selected[group]) action=ACT_OPEN;else settle(drag.hit*1000);
     }
    }
@@ -670,14 +762,19 @@ void aster_launcher_show(void)
  aster_qpanel_restore_volume();brightness_pending=brightness;
  saved_volume=aster_plat_audio_get_volume();
  if(quiet) volume_pending=0;
+ sound_entry=current()?(int)(current()-entries):-1;sound_group=group;
+ sound_phase=phase;sound_sample_ms=k_uptime_get();sound_launch_started=false;
+ if(sound_return) {sound_pending=S_CLOSE;sound_return=false;}
  LOG_INF("FLUX Rev.04: 320x480, %d entries (%d installed)",entry_n,aster_app_mgr_count());
 }
 void aster_launcher_hide(void)
 {
  if(!visible) return;
  aster_qpanel_force_close();save_now();aster_gesture_reset();
+ aster_plat_audio_ui_release();
  lv_obj_clean(aster_ui_lvgl_screen());
  for(int i=0;i<RIBBONS;i++) {release_icon(i);ribbons[i].obj=NULL;}
+ sound_return=true;
  root=body=stage=bar_time=modal=toast=NULL;visible=false;hold_ms=0;clock_sec=UINT64_MAX;
 }
 void aster_launcher_request_show(void) {want_show=true;}
@@ -704,7 +801,7 @@ void aster_launcher_pump_idle(void)
   aster_splash_off();aster_launcher_show();
  }
  if(!visible) return;
- if(dirty && !modal) {aster_launcher_hide();aster_launcher_show();}
+ if(dirty && !modal) {aster_launcher_hide();sound_return=false;aster_launcher_show();}
  aster_touch_evt_t events[ASTER_TOUCH_MAX];int n=aster_plat_input_poll(events,ASTER_TOUCH_MAX);
  for(int i=0;i<n;i++) touch(&events[i]);
  aster_key_evt_t keys[ASTER_PLAT_MAX_KEYS];while(aster_plat_input_keys_poll(keys,ASTER_PLAT_MAX_KEYS)>0) {}
@@ -713,19 +810,20 @@ void aster_launcher_pump_idle(void)
   drag.blocked=true;removal();
  }
  int a=action;action=ACT_NONE;
- if(a>=ACT_GROUP && a<ACT_GROUP+4) {group=a-ACT_GROUP;filter_entries();show_page(HOME);save();}
- else if(a==ACT_BACK) {if(page==SYSTEM && prior_page==MIXER) {prior_page=HOME;show_page(MIXER);} else show_page(HOME);}
- else if(a==ACT_FILTERS) show_page(FILTERS);
- else if(a==ACT_MIXER) {prior_page=HOME;show_page(page==MIXER?HOME:MIXER);}
+ if(a>=ACT_GROUP && a<ACT_GROUP+4) {group=a-ACT_GROUP;filter_entries();show_page(HOME);save();sound_pending=S_TUNE;}
+ else if(a==ACT_BACK) {if(page==SYSTEM && prior_page==MIXER) {prior_page=HOME;show_page(MIXER);} else show_page(HOME);sound_pending=S_CLOSE;}
+ else if(a==ACT_FILTERS) {show_page(FILTERS);sound_pending=S_TAP;}
+ else if(a==ACT_MIXER) {prior_page=HOME;sound_pending=page==MIXER?S_CLOSE:S_TAP;show_page(page==MIXER?HOME:MIXER);}
  else if(a==ACT_PREV || a==ACT_NEXT) settle((selected[group]+(a==ACT_PREV?-1:1))*1000);
  else if(a==ACT_OPEN) {launching=true;animation_ms=now;from_pull=pull;}
- else if(a==ACT_SYSTEM) {prior_page=MIXER;show_page(SYSTEM);}
- else if(a==ACT_WIFI) aster_wifi_settings_open(root);
+ else if(a==ACT_SYSTEM) {prior_page=MIXER;show_page(SYSTEM);sound_pending=S_TAP;}
+ else if(a==ACT_WIFI) {aster_wifi_settings_open(root);sound_pending=S_TAP;}
  else if(a==ACT_QUIET) {
   quiet=!quiet;
   if(quiet) {saved_volume=aster_plat_audio_get_volume();volume_pending=0;} else volume_pending=saved_volume;
+  if(quiet) aster_plat_audio_ui_stop();else sound_pending=S_TAP;
   show_page(MIXER);save();
- } else if(a==ACT_MOTION) {motion=!motion;save();}
+ } else if(a==ACT_MOTION) {motion=!motion;save();sound_pending=S_TAP;}
  else if(a==ACT_CANCEL && modal) {lv_obj_delete(modal);modal=NULL;}
  else if(a==ACT_UNINSTALL && modal) {
   char id[64];snprintf(id,sizeof(id),"%s",remove_id);lv_obj_delete(modal);modal=NULL;
@@ -734,23 +832,41 @@ void aster_launcher_pump_idle(void)
  }
  if(want_page>=0) {int p=want_page;want_page=-1;show_page(p);}
  if(animating && now-last_draw>=33) {
-  int t=MIN(1000,(int)(now-animation_ms)*1000/440),q=1000-t;
-  int ease=1000-(int)((int64_t)q*q/1000*q/1000*q/1000);
+  int ease=flux_scroll_ease(now-animation_ms,scroll_duration,coasting);
   phase=from_phase+(target_phase-from_phase)*ease/1000;pull=from_pull*(1000-ease)/1000;
-  if(t==1000) {animating=false;phase=selected[group]*1000;pull=0;}
-  redraw();last_draw=now;
+  if(coasting) {
+   int index=wrap(nearest(phase),count);
+   if(index!=selected[group]) {selected[group]=index;caption();}
+  }
+  if(now-animation_ms>=scroll_duration) {
+   animating=false;coasting=false;selected[group]=wrap(nearest(target_phase),count);
+   phase=selected[group]*1000;pull=0;caption();save();
+  }
+  draw_pending=true;
  }
+ if(!launching) sound_launch_started=false;
+ if(launching && !sound_launch_started) {sound_pending=S_OPEN;sound_launch_started=true;}
+ if(sound_pending>=0 && volume_pending<0) {sound_play(sound_pending,0);sound_pending=-1;}
  if(launching && page==HOME) {
   int t=motion?MIN(1000,(int)(now-animation_ms)*1000/350):1000;
   pull=from_pull+(370-from_pull)*t/1000;redraw();
   if(t==1000) {launching=false;pull=0;open_current();}
  }
+ if(draw_pending) {redraw();last_draw=now;}
  if(brightness_pending>=0) {(void)aster_plat_backlight_set(true,brightness_pending*255/100);brightness_pending=-1;}
  if(volume_pending>=0) {(void)aster_plat_audio_set_volume(volume_pending);volume_pending=-1;}
  if(volume_save) {
   uint8_t value=CLAMP(aster_plat_audio_get_volume(),0,100);
   (void)aster_kv_set("aster.qpanel","volume",&value,1);volume_save=false;
  }
+ int sound_now=current()?(int)(current()-entries):-1;
+ if(sound_pending>=0) {sound_play(sound_pending,0);sound_pending=-1;}
+ else if(visible && page==HOME && !launching && sound_group==group && sound_now!=sound_entry) {
+  int speed=drag.down?drag.track.speed:
+   now>sound_sample_ms?(int)((int64_t)(phase-sound_phase)*FLUX_RIBBON_PITCH/(now-sound_sample_ms)):0;
+  sound_play(S_TICK,speed);
+ }
+ sound_entry=sound_now;sound_group=group;sound_phase=phase;sound_sample_ms=now;
  if(toast && now>=toast_until) {lv_obj_delete(toast);toast=NULL;}
  if(save_due && now>=save_due && !drag.down && !animating && !launching) save_now();
  tick_clock();aster_wifi_settings_tick();aster_qpanel_tick();aster_ui_lvgl_pump();

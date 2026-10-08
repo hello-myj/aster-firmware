@@ -1,0 +1,85 @@
+diff --git a/drivers/serial/serial_esp32_usb.c b/drivers/serial/serial_esp32_usb.c
+index 22e1961..e052e04 100644
+--- a/drivers/serial/serial_esp32_usb.c
++++ b/drivers/serial/serial_esp32_usb.c
+@@ -46,6 +46,8 @@ struct serial_esp32_usb_data {
+ 	void *irq_cb_data;
+ #endif
+ 	int64_t last_tx_time;
++	struct k_timer tx_flush_timer;
++	uint32_t tx_flush_retries;
+ };
+ 
+ #ifdef CONFIG_UART_INTERRUPT_DRIVEN
+@@ -63,6 +65,42 @@ static int serial_esp32_usb_poll_in(const struct device *dev, unsigned char *p_c
+ 	return 0;
+ }
+ 
++/* Delay after which bytes that have not ended a line are flushed to the
++ * endpoint. A flush (wr_done) hands the TX FIFO to the USB endpoint, which
++ * then needs a hardware turnaround before the next byte can be accepted;
++ * measured on the ESP32-S3 that turnaround is ~80us per flush, so the
++ * flush-per-character this driver used to do made every byte of console
++ * output cost that much - a formatted log line is ~140 bytes, i.e. ~10ms of
++ * stall for the thread that emitted it (with immediate-mode logging that is
++ * whichever thread logged, including a render loop). Bytes now accumulate
++ * in the 64-byte TX FIFO, which the hardware flushes on its own when full;
++ * this timer only exists so text without a newline (shell prompts,
++ * character echo) still reaches the host promptly. */
++#define USBSERIAL_TAIL_FLUSH_DELAY_US 250
++#define USBSERIAL_FLUSH_RETRY_LIMIT 20
++
++static void serial_esp32_usb_flush_timer_expiry(struct k_timer *timer)
++{
++	struct serial_esp32_usb_data *data =
++		CONTAINER_OF(timer, struct serial_esp32_usb_data, tx_flush_timer);
++
++	if (!usb_serial_jtag_ll_txfifo_writable()) {
++		/* A previously written packet is still in flight (the FIFO
++		 * auto-flushes at its 64-byte boundary). Wait for it, both
++		 * to deliver a pending tail and, when the output ended
++		 * exactly on that boundary, to send the zero-length packet
++		 * that completes the host transaction - see the flush note
++		 * in usb_serial_jtag_ll.h. Bounded: if the host has stopped
++		 * draining entirely there is nothing more to do here. */
++		if (data->tx_flush_retries++ < USBSERIAL_FLUSH_RETRY_LIMIT) {
++			k_timer_start(timer, K_USEC(USBSERIAL_TAIL_FLUSH_DELAY_US), K_NO_WAIT);
++		}
++		return;
++	}
++	data->tx_flush_retries = 0;
++	usb_serial_jtag_ll_txfifo_flush();
++}
++
+ static void serial_esp32_usb_poll_out(const struct device *dev, unsigned char c)
+ {
+ 	struct serial_esp32_usb_data *data = dev->data;
+@@ -75,7 +113,17 @@ static void serial_esp32_usb_poll_out(const struct device *dev, unsigned char c)
+ 	do {
+ 		if (usb_serial_jtag_ll_txfifo_writable()) {
+ 			usb_serial_jtag_ll_write_txfifo(&c, 1);
+-			usb_serial_jtag_ll_txfifo_flush();
++			/* End of line (and ISR context, where a timer would
++			 * only postpone the same work): flush synchronously.
++			 * Anything else leaves the tail to the timer. */
++			if (c == '\n' || k_is_in_isr()) {
++				k_timer_stop(&data->tx_flush_timer);
++				usb_serial_jtag_ll_txfifo_flush();
++			} else {
++				data->tx_flush_retries = 0;
++				k_timer_start(&data->tx_flush_timer,
++					      K_USEC(USBSERIAL_TAIL_FLUSH_DELAY_US), K_NO_WAIT);
++			}
+ 			data->last_tx_time = k_uptime_get();
+ 			return;
+ 		}
+@@ -93,6 +141,9 @@ static int serial_esp32_usb_err_check(const struct device *dev)
+ static int serial_esp32_usb_init(const struct device *dev)
+ {
+ 	const struct serial_esp32_usb_config *config = dev->config;
++	struct serial_esp32_usb_data *data = dev->data;
++
++	k_timer_init(&data->tx_flush_timer, serial_esp32_usb_flush_timer_expiry, NULL);
+ 
+ 	if (!device_is_ready(config->clock_dev)) {
+ 		return -ENODEV;

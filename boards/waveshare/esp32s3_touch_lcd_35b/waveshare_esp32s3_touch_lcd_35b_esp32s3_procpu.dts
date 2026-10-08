@@ -75,8 +75,8 @@
  pinctrl-0 = <&i2c0_default>; pinctrl-names = "default";
  axs_touch: touch@3b { compatible = "waveshare,axs15231b-touch"; reg = <0x3b>;
   screen-width = <320>; screen-height = <480>; status = "okay"; };
- qmi8658: imu@6b { compatible = "qst,qmi8658a"; reg = <0x6b>;
-  accel-fs = <4>; gyro-fs = <512>; status = "okay"; };
+  qmi8658: imu@6b { compatible = "qst,qmi8658a"; reg = <0x6b>;
+  accel-fs = <4>; gyro-fs = <512>; status = "disabled"; };
  pcf85063: rtc@51 { compatible = "nxp,pcf85063a"; reg = <0x51>; status = "okay"; };
  axp2101: pmic@34 { compatible = "x-powers,axp2101"; reg = <0x34>;
   regulators {

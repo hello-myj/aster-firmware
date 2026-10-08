@@ -9,6 +9,26 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/cache.h>
+/*
+ * AOT text in PSRAM does not use CONFIG_SPIRAM_FETCH_INSTRUCTIONS. That
+ * switch copies the whole firmware out of flash and remaps instruction
+ * fetch; this Zephyr image still executes from flash and dies at that
+ * remap. The guest allocation only needs the existing PSRAM heap plus
+ * the instruction-bus alias.
+ *
+ * Flash and octal PSRAM share one MSPI. Display DMA stays on the
+ * internal-RAM bounce (CONFIG_SPI_ESP32_TX_PSRAM_DIRECT=n), so GDMA
+ * does not sit on that bus while the instruction cache fills AOT
+ * lines. Flash programming still disables the cache with interrupts
+ * off, on this single core, and does not turn on the
+ * "cache stays enabled during flash" mode.
+ */
+#if defined(CONFIG_SOC_SERIES_ESP32S3) && defined(CONFIG_ESP_SPIRAM)
+#define XAPP_AOT_PSRAM 1
+#include <zephyr/multi_heap/shared_multi_heap.h>
+#include <soc.h>
+#include <esp_cache.h>
+#endif
 
 /* function pointers for executable memory management */
 static exec_mem_alloc_func_t exec_mem_alloc_func = NULL;
@@ -235,18 +255,39 @@ os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
 			}
 			return addr;
 		}
-#if defined(CONFIG_SOC_SERIES_ESP32S3)
-		/*
-		 * Allocate from internal DRAM (kernel heap), return IRAM
-		 * alias so the CPU can fetch AOT instructions.
-		 */
-		void *dram = k_aligned_alloc(8, size);
+#if defined(XAPP_AOT_PSRAM)
+		{
+			/* Data-bus pointer in, instruction-bus pointer out.
+			 * 0x3Cxxxxxx and 0x420xxxxx are one PSRAM page. */
+			void *dram = shared_multi_heap_aligned_alloc(
+				SMH_REG_ATTR_EXTERNAL, 32, size);
 
-		if (!dram) {
-			return NULL;
+			if (dram) {
+				void *exec;
+
+				memset(dram, 0, size);
+				exec = (void *)((uintptr_t)dram +
+						(SOC_IROM_LOW - SOC_DROM_LOW));
+				printk("aot exec: psram write=%p exec=%p size=%u\n",
+				       dram, exec, (unsigned)size);
+				return exec;
+			}
 		}
-		memset(dram, 0, size);
-		return xapp_dram_to_iram(dram);
+#endif
+#if defined(CONFIG_SOC_SERIES_ESP32S3)
+		{
+			/*
+			 * PSRAM alloc failed. Internal DRAM, IRAM alias, so
+			 * the CPU can still fetch the instructions.
+			 */
+			void *dram = k_aligned_alloc(8, size);
+
+			if (!dram) {
+				return NULL;
+			}
+			memset(dram, 0, size);
+			return xapp_dram_to_iram(dram);
+		}
 #else
 		addr = BH_MALLOC(size);
 		if (addr) {
@@ -278,6 +319,16 @@ os_munmap(void *addr, size_t size)
 		return;
 	}
 
+#if defined(XAPP_AOT_PSRAM)
+	{
+		uintptr_t a = (uintptr_t)addr;
+
+		if (a >= SOC_IROM_LOW && a < SOC_IROM_HIGH) {
+			shared_multi_heap_free((void *)(a - (SOC_IROM_LOW - SOC_DROM_LOW)));
+			return;
+		}
+	}
+#endif
 #if defined(CONFIG_SOC_SERIES_ESP32S3)
 	if (xapp_addr_in_iram(addr)) {
 		k_free(xapp_iram_to_dram(addr));
@@ -304,6 +355,15 @@ os_mprotect(void *addr, size_t size, int prot)
 void *
 os_get_dbus_mirror(void *ibus)
 {
+#if defined(XAPP_AOT_PSRAM)
+	{
+		uintptr_t a = (uintptr_t)ibus;
+
+		if (a >= SOC_IROM_LOW && a < SOC_IROM_HIGH) {
+			return (void *)(a - (SOC_IROM_LOW - SOC_DROM_LOW));
+		}
+	}
+#endif
 #if defined(CONFIG_SOC_SERIES_ESP32S3)
 	if (xapp_addr_in_iram(ibus)) {
 		return xapp_iram_to_dram(ibus);
@@ -338,6 +398,31 @@ os_dcache_flush(void)
 void
 os_icache_flush(void *start, size_t len)
 {
+#if defined(XAPP_AOT_PSRAM)
+	/* M2C rejects ESP_CACHE_MSYNC_FLAG_UNALIGNED, so the instruction
+	 * range is expanded to whole lines. The data writeback may stay
+	 * unaligned. One core is running; the other stays stalled, so
+	 * this does not also freeze a second instruction stream. */
+	const size_t line = CONFIG_ESP32S3_INSTRUCTION_CACHE_LINE_SIZE;
+	uintptr_t ibus = (uintptr_t)start;
+	uintptr_t dbus = ibus;
+	uintptr_t first, last;
+
+	if (line != 0u && len != 0u &&
+	    ibus >= SOC_IROM_LOW && ibus < SOC_IROM_HIGH) {
+		dbus = ibus - (SOC_IROM_LOW - SOC_DROM_LOW);
+		(void)esp_cache_msync((void *)dbus, len,
+				      ESP_CACHE_MSYNC_FLAG_DIR_C2M |
+				      ESP_CACHE_MSYNC_FLAG_TYPE_DATA |
+				      ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+		first = ibus & ~(uintptr_t)(line - 1u);
+		last = (ibus + len + line - 1u) & ~(uintptr_t)(line - 1u);
+		(void)esp_cache_msync((void *)first, last - first,
+				      ESP_CACHE_MSYNC_FLAG_DIR_M2C |
+				      ESP_CACHE_MSYNC_FLAG_TYPE_INST);
+		return;
+	}
+#endif
 #if KERNEL_VERSION_NUMBER >= 0x030300 /* version 3.3.0 */
 #if defined(CONFIG_SOC_SERIES_ESP32S3)
 	ARG_UNUSED(start);

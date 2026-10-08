@@ -188,17 +188,25 @@ int aster_ui_lvgl_init(void)
 	/* AXS15231B QSPI streams rows sequentially. Partial LVGL rectangles
 	 * otherwise force several full-shadow retransmits per refresh. FLUX
 	 * uses full PSRAM buffers and sends exactly one complete frame. */
-	s_band_bytes = IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX) ?
-		s_w * s_h * 2u : band_w * rows * 2u;
+	/* FLUX draws the whole frame, then the flush wait drains DMA before
+	 * the next draw, so one buffer is enough. A second full frame used
+	 * to overlap drawing with the send. */
+	const bool flux_frame = IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX);
+
+	s_band_bytes = flux_frame ? s_w * s_h * 2u : band_w * rows * 2u;
 #if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
  /* GDMA external bursts and all chained descriptors require 64 B alignment. */
  s_band[0]=shared_multi_heap_aligned_alloc(SMH_REG_ATTR_EXTERNAL,64,s_band_bytes);
- s_band[1]=shared_multi_heap_aligned_alloc(SMH_REG_ATTR_EXTERNAL,64,s_band_bytes);
+ if (!flux_frame) {
+	s_band[1]=shared_multi_heap_aligned_alloc(SMH_REG_ATTR_EXTERNAL,64,s_band_bytes);
+ }
 #else
  s_band[0] = aster_psram_alloc(s_band_bytes);
- s_band[1] = aster_psram_alloc(s_band_bytes);
+ if (!flux_frame) {
+	s_band[1] = aster_psram_alloc(s_band_bytes);
+ }
 #endif
-	if (!s_band[0] || !s_band[1]) {
+	if (!s_band[0] || (!flux_frame && !s_band[1])) {
 		aster_psram_free(s_band[0]);
 		aster_psram_free(s_band[1]);
 		s_band[0] = s_band[1] = NULL;
@@ -207,7 +215,9 @@ int aster_ui_lvgl_init(void)
 
 	s_disp = lv_display_create((int32_t)s_w, (int32_t)s_h);
 	lv_display_set_color_format(s_disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
-	lv_display_set_buffers(s_disp, s_band[0], s_band[1], s_band_bytes,
+	lv_display_set_buffers(s_disp, s_band[0],
+			       IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX) ? NULL : s_band[1],
+			       s_band_bytes,
 			       IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX) ?
 			       LV_DISPLAY_RENDER_MODE_DIRECT : LV_DISPLAY_RENDER_MODE_PARTIAL);
 	lv_display_set_flush_cb(s_disp, flush_cb);
@@ -268,7 +278,9 @@ void aster_ui_lvgl_resync_window(void)
 	 * every row after the first would come off the wire sheared. The
 	 * capacity is unchanged (see the long-side allocation in init), so this
 	 * rebuilds the headers in place; nothing is allocated here. */
-	lv_display_set_buffers(s_disp, s_band[0], s_band[1], s_band_bytes,
+	lv_display_set_buffers(s_disp, s_band[0],
+			       IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX) ? NULL : s_band[1],
+			       s_band_bytes,
 			       IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX) ?
 			       LV_DISPLAY_RENDER_MODE_DIRECT : LV_DISPLAY_RENDER_MODE_PARTIAL);
 

@@ -1,0 +1,87 @@
+diff --git a/components/esp_timer/src/esp_timer.c b/components/esp_timer/src/esp_timer.c
+index f028354d19..5cbdf2eb61 100644
+--- a/components/esp_timer/src/esp_timer.c
++++ b/components/esp_timer/src/esp_timer.c
+@@ -4,6 +4,8 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#include <stdlib.h>
++
+ #include <zephyr/kernel.h>
+ #include <zephyr/init.h>
+ #include <zephyr/sys/util.h>
+@@ -89,7 +91,7 @@ static LIST_HEAD(esp_inactive_timer_list, esp_timer) s_inactive_timers[ESP_TIMER
+ };
+ #endif
+ 
+-K_KERNEL_STACK_MEMBER(timer_task_stack, CONFIG_ESP32_TIMER_TASK_STACK_SIZE);
++static k_thread_stack_t *timer_task_stack;
+ // task used to dispatch timer callbacks
+ static struct k_thread s_timer_task;
+ /* counting semaphore used to notify the timer task from ISR */
+@@ -610,6 +612,12 @@ static esp_err_t init_timer_task(void)
+     } else {
+         k_sem_init(&s_timer_semaphore, 0, 1);
+ 
++        timer_task_stack = aligned_alloc(Z_KERNEL_STACK_OBJ_ALIGN,
++                                K_KERNEL_STACK_LEN(CONFIG_ESP32_TIMER_TASK_STACK_SIZE));
++        if (timer_task_stack == NULL) {
++            return ESP_ERR_NO_MEM;
++        }
++
+         k_thread_create(&s_timer_task, timer_task_stack,
+                         CONFIG_ESP32_TIMER_TASK_STACK_SIZE,
+                         timer_task, NULL, NULL, NULL,
+diff --git a/components/esp_wifi/esp32s3/esp_adapter.c b/components/esp_wifi/esp32s3/esp_adapter.c
+index ed59793ba1..5b3e905e83 100644
+--- a/components/esp_wifi/esp32s3/esp_adapter.c
++++ b/components/esp_wifi/esp32s3/esp_adapter.c
+@@ -46,7 +46,16 @@
+ 
+ LOG_MODULE_REGISTER(esp32_wifi_adapter, CONFIG_WIFI_LOG_LEVEL);
+ 
+-K_THREAD_STACK_DEFINE(wifi_stack, 8192);
++static k_thread_stack_t *wifi_stack;
++
++static k_thread_stack_t *wifi_stack_get(uint32_t stack_depth)
++{
++	if (wifi_stack == NULL) {
++		wifi_stack = aligned_alloc(Z_KERNEL_STACK_OBJ_ALIGN,
++					    K_KERNEL_STACK_LEN(stack_depth));
++	}
++	return wifi_stack;
++}
+ static struct k_thread wifi_task_handle;
+ static void *wifi_msgq_buffer;
+ 
+@@ -314,7 +323,13 @@ static uint32_t event_group_wait_bits_wrapper(void *event, uint32_t bits_to_wait
+ 
+ static int32_t task_create_pinned_to_core_wrapper(void *task_func, const char *name, uint32_t stack_depth, void *param, uint32_t prio, void *task_handle, uint32_t core_id)
+ {
+-	k_tid_t tid = k_thread_create(&wifi_task_handle, wifi_stack, stack_depth,
++	k_thread_stack_t *stack = wifi_stack_get(stack_depth);
++
++	if (stack == NULL) {
++		return 0;
++	}
++
++	k_tid_t tid = k_thread_create(&wifi_task_handle, stack, stack_depth,
+ 				      (k_thread_entry_t)task_func, param, NULL, NULL,
+ 				      prio, K_INHERIT_PERMS, K_NO_WAIT);
+ 
+@@ -326,7 +341,13 @@ static int32_t task_create_pinned_to_core_wrapper(void *task_func, const char *n
+ 
+ static int32_t task_create_wrapper(void *task_func, const char *name, uint32_t stack_depth, void *param, uint32_t prio, void *task_handle)
+ {
+-	k_tid_t tid = k_thread_create(&wifi_task_handle, wifi_stack, stack_depth,
++	k_thread_stack_t *stack = wifi_stack_get(stack_depth);
++
++	if (stack == NULL) {
++		return 0;
++	}
++
++	k_tid_t tid = k_thread_create(&wifi_task_handle, stack, stack_depth,
+ 				      (k_thread_entry_t)task_func, param, NULL, NULL,
+ 				      prio, K_INHERIT_PERMS, K_NO_WAIT);
+ 

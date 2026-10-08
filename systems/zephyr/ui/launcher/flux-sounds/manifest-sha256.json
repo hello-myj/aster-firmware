@@ -1,0 +1,47 @@
+[
+  {
+    "file": "close.wav",
+    "bytes": 10848,
+    "sha256": "350dff7a96e35f3eaddad22442eac3fc93208b7e2f3033e3ac92f151ca32ab1b"
+  },
+  {
+    "file": "open.wav",
+    "bytes": 12392,
+    "sha256": "5a07ea029220f1a59d3ecc9714989ea7fd7c00fb55deead963424fe79e4ed612"
+  },
+  {
+    "file": "README.md",
+    "bytes": 604,
+    "sha256": "1e165303851618eed9a56aa7041fd9e4251d04b53acdbbafcfba5172dd384f73"
+  },
+  {
+    "file": "SOUND-TRIGGERS.md",
+    "bytes": 2365,
+    "sha256": "8bea0b33bc8d472424c19f5785d341e47cd7d3dfc7bc9409796a7535339138a2"
+  },
+  {
+    "file": "specs.json",
+    "bytes": 1579,
+    "sha256": "8e00ca8d7b3ff793b0805e243f6924ac86c8d2b3454f00646429bf09049e3ec4"
+  },
+  {
+    "file": "tap.wav",
+    "bytes": 2248,
+    "sha256": "622a0bcb6f4fc3970f73ae3f75eb6cc05e4332d5be98979ef1c52218ce00e763"
+  },
+  {
+    "file": "tick.wav",
+    "bytes": 1720,
+    "sha256": "d02d16213b52d4f02b03047346a5a5f34dad52558c281552742bc56963a66fe5"
+  },
+  {
+    "file": "tune.wav",
+    "bytes": 7542,
+    "sha256": "acaa8bcfbd782a480d6b13cd3f2825f97cddf7ad81139ddb017439e014ad861c"
+  },
+  {
+    "file": "generate_sounds.py",
+    "bytes": 3104,
+    "sha256": "759e51567fd3ac0ad50bc0854c67617930f4192ebbbc1b04a681d065d0da01f3"
+  }
+]

@@ -2,8 +2,8 @@
  * "aster ui screenshot" debug transport (CONFIG_ASTER_SCREENSHOT).
  *
  * The UI thread owns LVGL, so the grab must run there: the shell command
- * flags a request, the lvgl pump services it between frames (snapshot ->
- * RGB565LE raw -> miniz zlib -> numbered base64 lines on the shell), and
+ * flags a request, the lvgl pump services it between frames (glass frame ->
+ * miniz zlib -> numbered base64 lines on the shell), and
  * releases the caller when the last line is out. sdk/tools/shell_shot.py
  * reassembles the stream into a PNG.
  */

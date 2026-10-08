@@ -1,0 +1,222 @@
+diff --git a/include/zephyr/shell/shell.h b/include/zephyr/shell/shell.h
+index 7348fb157cf..bb1e55d9f1f 100644
+--- a/include/zephyr/shell/shell.h
++++ b/include/zephyr/shell/shell.h
+@@ -1106,7 +1106,6 @@ extern void z_shell_print_stream(const void *user_ctx, const char *data,
+ 			       IS_ENABLED(CONFIG_SHELL_PRINTF_AUTOFLUSH), z_shell_print_stream);   \
+ 	LOG_INSTANCE_REGISTER(shell, _name, CONFIG_SHELL_LOG_LEVEL);                               \
+ 	Z_SHELL_STATS_DEFINE(_name);                                                               \
+-	static K_KERNEL_STACK_DEFINE(_name##_stack, CONFIG_SHELL_STACK_SIZE);                      \
+ 	static struct k_thread _name##_thread;                                                     \
+ 	static const STRUCT_SECTION_ITERABLE(shell, _name) = {                                     \
+ 		.default_prompt = _prompt,                                                         \
+@@ -1118,7 +1117,7 @@ extern void z_shell_print_stream(const void *user_ctx, const char *data,
+ 		.stats = Z_SHELL_STATS_PTR(_name),                                                 \
+ 		.log_backend = _log_backend,                                                       \
+ 		LOG_INSTANCE_PTR_INIT(log, shell, _name).name =                                    \
+-			STRINGIFY(_name), .thread = &_name##_thread, .stack = _name##_stack}
++			STRINGIFY(_name), .thread = &_name##_thread, .stack = NULL}
+ 
+ /**
+  * @brief Macro for defining a shell instance.
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index da07ce4b297..ca8b22cb92c 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -25,6 +25,12 @@
+ extern "C" {
+ #endif
+ 
++/* Bytes reserved at the start of the SRAM tail for the system heap.
++ * Zero when that heap stays in .bss. */
++size_t z_sys_heap_sram_tail_reserve(void);
++/* Carve the system heap out of the SRAM tail. No-op when the reserve is 0. */
++void z_sys_heap_init_from_sram_tail(void);
++
+ /* Initialize per-CPU kernel data */
+ void z_init_cpu(int id);
+ 
+diff --git a/kernel/kheap.c b/kernel/kheap.c
+index 4a02f161c07..d2d52008f5f 100644
+--- a/kernel/kheap.c
++++ b/kernel/kheap.c
+@@ -34,6 +34,8 @@ void k_heap_init(struct k_heap *heap, void *mem, size_t bytes)
+ 
+ static int statics_init(void)
+ {
++	z_sys_heap_init_from_sram_tail();
++
+ 	STRUCT_SECTION_FOREACH(k_heap, heap) {
+ #if defined(CONFIG_DEMAND_PAGING) && !defined(CONFIG_LINKER_GENERIC_SECTIONS_PRESENT_AT_BOOT)
+ 		/* Some heaps may not present at boot, so we need to wait for
+diff --git a/kernel/mempool.c b/kernel/mempool.c
+index 0f2375b9d22..fa2d65fb865 100644
+--- a/kernel/mempool.c
++++ b/kernel/mempool.c
+@@ -87,10 +87,60 @@ void k_free_sched_locked(void *ptr)
+ 	}
+ }
+ 
+-#if (K_HEAP_MEM_POOL_SIZE > 0)
++/* ESP32 keeps the libc heap in the SRAM tail after `_end`
++ * (CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE < 0). Put the kernel heap at the
++ * front of that tail so its buffer is not a .bss reservation. Other SoCs
++ * keep K_HEAP_DEFINE, and the reserve stays 0 so their libc heap is unchanged.
++ */
++#if (K_HEAP_MEM_POOL_SIZE > 0) && defined(CONFIG_HAS_ESPRESSIF_HAL) && \
++	(CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE < 0)
++#define Z_SYS_HEAP_FROM_SRAM_TAIL 1
++#endif
++
++size_t z_sys_heap_sram_tail_reserve(void)
++{
++#ifdef Z_SYS_HEAP_FROM_SRAM_TAIL
++	return ROUND_UP((size_t)Z_HEAP_MIN_SIZE_FOR(K_HEAP_MEM_POOL_SIZE), 8);
++#else
++	return 0;
++#endif
++}
++
++#ifdef Z_SYS_HEAP_FROM_SRAM_TAIL
++struct k_heap _system_heap;
++#define _SYSTEM_HEAP (&_system_heap)
++
++void z_sys_heap_init_from_sram_tail(void)
++{
++	extern char _end[];
++	static bool ready;
++	uintptr_t base;
++	size_t bytes;
++
++	if (ready) {
++		return;
++	}
++	base = ROUND_UP((uintptr_t)_end, 8);
++	bytes = z_sys_heap_sram_tail_reserve();
++	k_heap_init(&_system_heap, (void *)base, bytes);
++	ready = true;
++}
++#elif (K_HEAP_MEM_POOL_SIZE > 0)
++void z_sys_heap_init_from_sram_tail(void)
++{
++}
+ 
+ K_HEAP_DEFINE(_system_heap, Z_HEAP_MIN_SIZE_FOR(K_HEAP_MEM_POOL_SIZE));
+ #define _SYSTEM_HEAP (&_system_heap)
++#else
++void z_sys_heap_init_from_sram_tail(void)
++{
++}
++
++#define _SYSTEM_HEAP	NULL
++#endif
++
++#if (K_HEAP_MEM_POOL_SIZE > 0)
+ 
+ void *k_aligned_alloc(size_t align, size_t size)
+ {
+@@ -183,8 +233,6 @@ void k_thread_system_pool_assign(struct k_thread *thread)
+ {
+ 	thread->resource_pool = _SYSTEM_HEAP;
+ }
+-#else
+-#define _SYSTEM_HEAP	NULL
+ #endif /* K_HEAP_MEM_POOL_SIZE */
+ 
+ static void *z_thread_alloc_helper(size_t align, size_t size,
+diff --git a/kernel/system_work_q.c b/kernel/system_work_q.c
+index d0b5d08d580..b3877eb1835 100644
+--- a/kernel/system_work_q.c
++++ b/kernel/system_work_q.c
+@@ -11,12 +11,12 @@
+  * System workqueue.
+  */
+ 
++#include <errno.h>
++#include <stdlib.h>
++
+ #include <zephyr/kernel.h>
+ #include <zephyr/init.h>
+ 
+-static K_KERNEL_STACK_DEFINE(sys_work_q_stack,
+-			     CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE);
+-
+ struct k_work_q k_sys_work_q;
+ 
+ static int k_sys_work_q_init(void)
+@@ -27,10 +27,19 @@ static int k_sys_work_q_init(void)
+ 		.essential = true,
+ 		.work_timeout_ms = CONFIG_SYSTEM_WORKQUEUE_WORK_TIMEOUT_MS,
+ 	};
++	/* malloc_prepare runs at POST_KERNEL priority LIBC (35). This init is
++	 * priority DEFAULT (40), so the stack comes from the SRAM tail. */
++	k_thread_stack_t *stack = aligned_alloc(Z_KERNEL_STACK_OBJ_ALIGN,
++			K_KERNEL_STACK_LEN(CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE));
++
++	if (stack == NULL) {
++		return -ENOMEM;
++	}
+ 
+ 	k_work_queue_start(&k_sys_work_q,
+-			    sys_work_q_stack,
+-			    K_KERNEL_STACK_SIZEOF(sys_work_q_stack),
++			    stack,
++			    K_KERNEL_STACK_LEN(CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE) -
++				    K_KERNEL_STACK_RESERVED,
+ 			    CONFIG_SYSTEM_WORKQUEUE_PRIORITY, &cfg);
+ 	return 0;
+ }
+diff --git a/lib/libc/common/source/stdlib/malloc.c b/lib/libc/common/source/stdlib/malloc.c
+index 74193fbdce4..65e9883d812 100644
+--- a/lib/libc/common/source/stdlib/malloc.c
++++ b/lib/libc/common/source/stdlib/malloc.c
+@@ -233,6 +233,17 @@ static int malloc_prepare(void)
+ 	z_malloc_partition.attr = K_MEM_PARTITION_P_RW_U_RW;
+ #endif
+ 
++	/* ESP32 moves the kernel heap to the front of this same tail.
++	 * Other SoCs report a zero reserve. */
++	extern size_t z_sys_heap_sram_tail_reserve(void);
++	size_t reserve = z_sys_heap_sram_tail_reserve();
++
++	if (reserve != 0) {
++		__ASSERT(heap_size > reserve, "SRAM tail cannot hold the kernel heap");
++		heap_base = (char *)heap_base + reserve;
++		heap_size -= reserve;
++	}
++
+ 	sys_heap_init(&z_malloc_heap, heap_base, heap_size);
+ 
+ 	return 0;
+diff --git a/subsys/shell/shell.c b/subsys/shell/shell.c
+index b86806a18c1..ed4ddd68635 100644
+--- a/subsys/shell/shell.c
++++ b/subsys/shell/shell.c
+@@ -7,6 +7,7 @@
+ #include <ctype.h>
+ #include <stdlib.h>
+ #include <zephyr/sys/atomic.h>
++
+ #include <zephyr/shell/shell.h>
+ #if defined(CONFIG_SHELL_BACKEND_DUMMY)
+ #include <zephyr/shell/shell_dummy.h>
+@@ -1416,8 +1417,18 @@ int shell_init(const struct shell *sh, const void *transport_config,
+ 		return err;
+ 	}
+ 
++	k_thread_stack_t *stack = sh->stack;
++
++	if (stack == NULL) {
++		stack = aligned_alloc(Z_KERNEL_STACK_OBJ_ALIGN,
++				       K_KERNEL_STACK_LEN(CONFIG_SHELL_STACK_SIZE));
++		if (stack == NULL) {
++			return -ENOMEM;
++		}
++	}
++
+ 	k_tid_t tid = k_thread_create(sh->thread,
+-				  sh->stack, CONFIG_SHELL_STACK_SIZE,
++				  stack, CONFIG_SHELL_STACK_SIZE,
+ 				  shell_thread, (void *)sh, (void *)log_backend,
+ 				  UINT_TO_POINTER(init_log_level),
+ 				  SHELL_THREAD_PRIORITY, 0, K_NO_WAIT);

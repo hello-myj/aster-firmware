@@ -71,6 +71,12 @@ typedef struct {
 	void        (*palette)(aster_qpanel_palette_t *out);
 } aster_qpanel_theme_ops_t;
 
+/* UI-thread return modal. Cancelling restores the saved APP frame. Only
+ * take_exit_confirmed can authorize runtime teardown; opening never exits. */
+bool aster_qpanel_request_exit(const char *name);
+bool aster_qpanel_exit_is_open(void);
+bool aster_qpanel_take_exit_confirmed(void);
+
 void aster_qpanel_bind_theme(const aster_qpanel_theme_ops_t *ops);
 
 /* Which screen the sheet is being raised over -- and the reason there are two

@@ -21,6 +21,10 @@
  * RGB565 surface, true for a panel-order canvas (see
  * aster_plat_display_canvas_back) so the swizzle happens on the store and
  * presenting needs no conversion pass. */
+/* Limit the next ordinary-surface raster to this box. w or h of 0 clears
+ * it. A panel canvas ignores the box and keeps repainting the whole frame. */
+void aster_gfx_set_clip(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
 int aster_gfx_exec_into(uint8_t *buf565, uint32_t w, uint32_t h, uint32_t pitch,
 		      const aster_gfx_cmd_t *cmds, uint32_t n,
 		      const uint8_t *arena, uint32_t arena_len,
@@ -52,10 +56,14 @@ bool aster_gfx_last_frame(const uint8_t **buf, uint32_t *w, uint32_t *h,
 			uint32_t *pitch, bool *out_be);
 
 #if IS_ENABLED(CONFIG_ASTER_GFX_TIMING)
-/* Per-op raster time since the last call, indexed by ASTER_GFX_* op code.
- * Dumps and clears the accumulator; consumed by aster_native.c's "gfx tim:"
- * cadence — the app cannot measure this itself. */
-void aster_gfx_op_timing_emit(void);
+/* Hand over the 64-frame timing numbers (aggregate raster/flush plus the
+ * per-op histogram accumulated since the last call) for printing from a
+ * worker thread — a log line written on the render thread costs it
+ * milliseconds. Consumed by aster_native.c's "gfx tim:" cadence; the app
+ * cannot measure this itself. Called from the render thread. */
+void aster_gfx_timing_report(uint32_t raster_us, uint32_t flush_us,
+			     uint32_t raster_max_us, uint32_t flush_max_us,
+			     uint32_t cmds, uint32_t px);
 #endif
 
 #endif /* ASTER_UI_GFX_H */

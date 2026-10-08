@@ -16,9 +16,8 @@ endif()
 
 if(CONFIG_ASTER_IMGDEC_PNG)
 	target_sources(app PRIVATE imgdec_png.c vendor/miniz.c)
-	# inflate-only slice of miniz: drop deflate/zip/stdio/time code.
-	# MINIZ_NO_ARCHIVE_WRITING_APIS comes from the header itself once
-	# MINIZ_NO_DEFLATE_APIS is set, so passing it too is a redefinition.
+	# Deflate stays: the screenshot path compresses an existing frame with it.
+	# Zip and stdio stay out.
 	set_property(SOURCE vendor/miniz.c TARGET_DIRECTORY app PROPERTY
-		COMPILE_OPTIONS "-DMINIZ_NO_DEFLATE_APIS;-DMINIZ_NO_ARCHIVE_APIS;-DMINIZ_NO_STDIO;-DMINIZ_NO_TIME;-Wno-shadow;-Wno-unused-variable")
+		COMPILE_OPTIONS "-DMINIZ_NO_ARCHIVE_APIS;-DMINIZ_NO_STDIO;-DMINIZ_NO_TIME;-Wno-shadow;-Wno-unused-variable")
 endif()

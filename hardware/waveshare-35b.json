@@ -13,10 +13,8 @@
       "keyboard",
       "audio-in",
       "audio-out",
-      "wifi",
-      "accelerometer",
-      "gyroscope",
-      "filesystem",
+    "wifi",
+    "filesystem",
       "storage.app",
       "rtc",
       "psram",
@@ -34,7 +32,7 @@
       "runtime_switch": true
     },
     "memory": {
-      "max_linear": 2097152
+      "max_linear": 4194304
     },
     "deployment": {
       "transport": "serial",

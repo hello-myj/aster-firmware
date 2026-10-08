@@ -1,5 +1,6 @@
 #include <zephyr/sys/util.h>
 /* SPDX-License-Identifier: MIT */
+#include "aster_mem.h"
 #include "aster_platform.h"
 #include "aster_util.h"
 
@@ -12,6 +13,7 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/cache.h>
 #include <zephyr/multi_heap/shared_multi_heap.h>
+#include <errno.h>
 #include <string.h>
 
 LOG_MODULE_REGISTER(aster_plat, LOG_LEVEL_INF);
@@ -150,6 +152,10 @@ BUILD_ASSERT((ASTER_FORMATS_CONVERTIBLE & ASTER_FMT_BIT(ASTER_DISP_NATIVE_FORMAT
 #if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
 extern int aster_axs15231b_write_persistent(const struct device *dev,
  const struct display_buffer_descriptor *desc,const void *buffer);
+/* shadow_begin holds the driver lock until shadow_present. */
+extern uint8_t *aster_axs15231b_shadow_begin(const struct device *dev, bool replacing_all);
+extern int aster_axs15231b_shadow_present(const struct device *dev,
+	uint16_t x, uint16_t y, uint16_t w, uint16_t h);
 #endif
 struct aster_disp_job {
 	const uint8_t *buf;
@@ -238,8 +244,26 @@ static void disp_worker_fn(void *p1, void *p2, void *p3)
 		k_sem_give(&s_slots[slot].free);
 	}
 }
-K_THREAD_DEFINE(disp_worker, 2048, disp_worker_fn, NULL, NULL, NULL,
-		CONFIG_ASTER_DISP_WORKER_PRIO, 0, 0);
+static struct k_thread disp_worker_thread;
+
+static int disp_worker_start(void)
+{
+	k_thread_stack_t *stack = aster_dram_alloc(K_KERNEL_STACK_LEN(2048));
+
+	if (stack == NULL) {
+		LOG_ERR("display worker stack alloc failed");
+		return -ENOMEM;
+	}
+	k_thread_create(&disp_worker_thread, stack,
+			K_KERNEL_STACK_LEN(2048) - K_KERNEL_STACK_RESERVED,
+			disp_worker_fn, NULL, NULL, NULL,
+			CONFIG_ASTER_DISP_WORKER_PRIO, 0, K_NO_WAIT);
+	k_thread_name_set(&disp_worker_thread, "disp_worker");
+	return 0;
+}
+/* After malloc_prepare (POST_KERNEL, LIBC priority 35), before the panel
+ * device (POST_KERNEL, application priority). */
+SYS_INIT(disp_worker_start, POST_KERNEL, 41);
 
 static void disp_slots_init(void)
 {
@@ -764,6 +788,7 @@ static uint8_t *s_front[ASTER_DISP_FRONT_N];
  * inside the #if this block just got lifted out of. */
 static size_t front_bytes __maybe_unused;
 static bool s_front_ok;
+static int s_front_refs;
 static uint8_t s_flip; /* alternates 0/1 */
 
 /* ---------------- what the glass is showing ----------------
@@ -810,6 +835,7 @@ static void glass_forget(void)
 static uint8_t *s_glass_buf; /* owned full-panel shadow, PSRAM */
 static size_t s_glass_buf_bytes;
 static bool s_glass_pinned; /* s_glass aliases a buffer we do not own */
+static bool s_glass_ephemeral; /* shadow exists only for the current grab */
 
 /* The record is about to be invalidated by a partial write, or a buffer is
  * being handed back out: copy the aliased frame into the shadow so it
@@ -1023,6 +1049,55 @@ void aster_plat_display_glass_rearm(void)
 	glass_rearm_window();
 }
 
+/* Copy an aliased frame into a shadow that lives only until
+ * aster_plat_display_glass_drop(). A grab can then read the pixels after
+ * the caller's buffer is free to be reused. */
+static bool glass_shadow_hold(void)
+{
+#if !IS_ENABLED(CONFIG_ASTER_SCREENSHOT)
+	return s_glass != NULL;
+#else
+	size_t nbytes;
+	uint8_t *buf;
+
+	if (s_glass_buf || !s_glass) {
+		return s_glass != NULL;
+	}
+	nbytes = (size_t)s_glass_h * s_glass_pitch * 2u;
+	if (nbytes == 0) {
+		return false;
+	}
+	buf = shared_multi_heap_aligned_alloc(SMH_REG_ATTR_EXTERNAL, 32, nbytes);
+	if (!buf) {
+		return true; /* still point at the alias for this grab */
+	}
+	memcpy(buf, s_glass, nbytes);
+	s_glass_buf = buf;
+	s_glass_buf_bytes = nbytes;
+	s_glass = buf;
+	s_glass_pinned = false;
+	s_glass_ephemeral = true;
+	return true;
+#endif
+}
+
+void aster_plat_display_glass_drop(void)
+{
+#if IS_ENABLED(CONFIG_ASTER_SCREENSHOT)
+	if (!s_glass_ephemeral) {
+		return;
+	}
+	if (s_glass == s_glass_buf) {
+		glass_forget();
+	}
+	shared_multi_heap_free(s_glass_buf);
+	s_glass_buf = NULL;
+	s_glass_buf_bytes = 0;
+	s_glass_ephemeral = false;
+	s_glass_pinned = false;
+#endif
+}
+
 bool aster_plat_display_glass_frame(const uint8_t **buf, uint32_t *w, uint32_t *h,
 				  uint32_t *pitch)
 {
@@ -1033,7 +1108,7 @@ bool aster_plat_display_glass_frame(const uint8_t **buf, uint32_t *w, uint32_t *
 			panel_geom(w,h);*pitch=*w;*buf=frame;return true;
 		}
 	}
-	if (!s_glass) {
+	if (!glass_shadow_hold() || !s_glass) {
 		return false;
 	}
 	*buf = s_glass;
@@ -1123,6 +1198,81 @@ BUILD_ASSERT(DT_PROP(DT_CHOSEN(zephyr_display), width) <=
 bool aster_plat_display_canvas_ready(void);
 uint8_t *aster_plat_display_canvas_back(void);
 int aster_plat_display_canvas_present(void);
+
+int aster_plat_display_flip_acquire(void)
+{
+	uint32_t pw, ph;
+
+	if (s_front_ok) {
+		s_front_refs++;
+		return 0;
+	}
+	if (!disp_dev) {
+		return -ENODEV;
+	}
+	panel_geom(&pw, &ph);
+	{
+		const uint32_t fw = (s_rot % 180) ? ph : pw;
+		const uint32_t fh = (s_rot % 180) ? pw : ph;
+
+		front_bytes = (size_t)fw * (size_t)fh * 2u;
+	}
+	for (int i = 0; i < ASTER_DISP_FRONT_N; i++) {
+		s_front[i] = shared_multi_heap_aligned_alloc(SMH_REG_ATTR_EXTERNAL, 32,
+							     front_bytes);
+		if (!s_front[i]) {
+			LOG_ERR("flip front buffer %d (%zu B) failed; "
+				"panel canvas falls back to an ordinary surface",
+				i, front_bytes);
+			while (i-- > 0) {
+				shared_multi_heap_free(s_front[i]);
+				s_front[i] = NULL;
+			}
+			front_bytes = 0;
+			return -ENOMEM;
+		}
+	}
+	{
+		const uint16_t probe[2] = { 0x0863u, 0xF800u };
+		const uint32_t v = (uint32_t)probe[0] | ((uint32_t)probe[1] << 16);
+		const uint32_t sw = ((v & 0x00FF00FFu) << 8) |
+				    ((v & 0xFF00FF00u) >> 8);
+		const bool swar_ok =
+			(uint16_t)sw == sys_cpu_to_be16(probe[0]) &&
+			(uint16_t)(sw >> 16) == sys_cpu_to_be16(probe[1]);
+
+		__ASSERT(swar_ok, "flip SWAR 0x%08x != sys_cpu_to_be16", sw);
+		if (!swar_ok) {
+			LOG_ERR("flip byte-swap 0x%08x disagrees with "
+				"sys_cpu_to_be16; full-screen presents "
+				"would ship wrong colours", sw);
+		}
+	}
+	s_front_ok = true;
+	s_front_refs = 1;
+	LOG_INF("display flip: %d front buffers x %zu B in PSRAM",
+		ASTER_DISP_FRONT_N, front_bytes);
+	return 0;
+}
+
+void aster_plat_display_flip_release(void)
+{
+	if (s_front_refs <= 0) {
+		return;
+	}
+	if (--s_front_refs > 0) {
+		return;
+	}
+	for (int i = 0; i < ASTER_DISP_FRONT_N; i++) {
+		if (s_front[i]) {
+			shared_multi_heap_free(s_front[i]);
+			s_front[i] = NULL;
+		}
+	}
+	s_front_ok = false;
+	front_bytes = 0;
+	s_flip = 0;
+}
 
 bool aster_plat_display_canvas_ready(void)
 {
@@ -1354,6 +1504,15 @@ uint8_t *aster_plat_display_canvas_back(void)
 int aster_plat_display_canvas_present(void)
 {
 	return ASTER_ENOTSUP;
+}
+
+int aster_plat_display_flip_acquire(void)
+{
+	return -ENOTSUP;
+}
+
+void aster_plat_display_flip_release(void)
+{
 }
 
 #endif /* CONFIG_ASTER_DISP_FLIP_DBUF */
@@ -1896,6 +2055,90 @@ int aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 	if (prw > ASTER_DISP_MAX_ROW_PX) {
 		return ASTER_EINVAL;
 	}
+#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
+	/* The driver already keeps a wire-order shadow. Swap into that shadow
+	 * instead of a second full-panel buffer that display_write would copy
+	 * again. LVGL's already-swapped packed path returned above and does
+	 * not come through here. */
+	{
+		const bool replacing_all = px == 0 && py == 0 && prw == pw && prh == ph;
+
+#if IS_ENABLED(CONFIG_ASTER_DISP_ASYNC)
+		aster_plat_display_flush_drain();
+#endif
+		k_mutex_lock(&disp_lock, K_FOREVER);
+		uint8_t *shadow = aster_axs15231b_shadow_begin(disp_dev, replacing_all);
+
+		if (!shadow) {
+			k_mutex_unlock(&disp_lock);
+			return ASTER_ENOMEM;
+		}
+		if (IS_ENABLED(CONFIG_ASTER_DISP_SRC_FLUSH)) {
+			sys_cache_data_flush_range((void *)buf, (size_t)row_bytes * h);
+		}
+		const bool swap16 = !be_pixels_swapped;
+
+		for (uint32_t j = 0; j < prh; j++) {
+			uint16_t *dst = (uint16_t *)shadow + (size_t)(py + j) * pw + px;
+
+			switch (s_rot) {
+			case 90: {
+				const uint32_t sc = (w - 1) - j;
+
+				for (uint32_t i = 0; i < prw; i++) {
+					const uint16_t *src = (const uint16_t *)
+						(buf + (size_t)i * row_bytes);
+
+					dst[i] = swap16 ? sys_cpu_to_be16(src[sc]) : src[sc];
+				}
+				break;
+			}
+			case 180: {
+				const uint16_t *src = (const uint16_t *)
+					(buf + (size_t)(h - 1 - j) * row_bytes);
+
+				for (uint32_t i = 0; i < prw; i++) {
+					dst[i] = swap16 ? sys_cpu_to_be16(src[(w - 1) - i])
+							: src[(w - 1) - i];
+				}
+				break;
+			}
+			case 270: {
+				const uint32_t sc = j;
+
+				for (uint32_t i = 0; i < prw; i++) {
+					const uint16_t *src = (const uint16_t *)
+						(buf + (size_t)(h - 1 - i) * row_bytes);
+
+					dst[i] = swap16 ? sys_cpu_to_be16(src[sc]) : src[sc];
+				}
+				break;
+			}
+			default: {
+				const uint16_t *src = (const uint16_t *)
+					(buf + (size_t)j * row_bytes);
+
+				for (uint32_t i = 0; i < prw; i++) {
+					dst[i] = swap16 ? sys_cpu_to_be16(src[i]) : src[i];
+				}
+				break;
+			}
+			}
+		}
+		/* The copy above touched only the dirty rows. AXS cannot open
+		 * the stream at an arbitrary row, so the glass always gets the
+		 * shadow from row 0 as one frame. */
+		sys_cache_data_flush_range(shadow, (size_t)pw * ph * 2u);
+		{
+			int err = aster_axs15231b_shadow_present(disp_dev, 0, 0,
+								 (uint16_t)pw,
+								 (uint16_t)ph);
+
+			k_mutex_unlock(&disp_lock);
+			return err ? ASTER_EIO : ASTER_OK;
+		}
+	}
+#endif
 	if (!swap_buf || !swap_buf_bytes) {
 		return ASTER_ENOMEM;
 	}
@@ -2160,6 +2403,11 @@ int aster_platform_init(void)
 #endif
 
 #if IS_ENABLED(CONFIG_ASTER_DISP_PSRAM_STAGE)
+#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
+	/* AXS already owns a full-panel shadow. Staging writes that shadow
+	 * in wire order, so a second swap buffer would be a pure copy. */
+	LOG_INF("display staging: AXS shadow, no swap buffer");
+#else
 	/* One full-panel BE RGB565 staging buffer in PSRAM. 32-byte align
 	 * matches GDMA / cache-line comfort on S3. */
 	swap_buf_bytes = (size_t)pw * (size_t)ph * 2u;
@@ -2172,103 +2420,17 @@ int aster_platform_init(void)
 	}
 	LOG_INF("display staging: PSRAM %p %zu B (one SPI window/rect)",
 		(void *)swap_buf, swap_buf_bytes);
+#endif
 #else
 	LOG_INF("display staging: DRAM bounce %u KB",
 		(unsigned)CONFIG_ASTER_DISP_BOUNCE_KB);
 #endif
 
 #if IS_ENABLED(CONFIG_ASTER_SCREENSHOT) && !IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
-	/* Screen-grab shadow: the panel-sized buffer partial writes composite
-	 * onto (see the glass record above write_at_ex). Panel-sized and in
-	 * PSRAM for the same reason the staging bounce is -- 150 KB has no
-	 * business in DRAM, and the panel is the only geometry a grab can be
-	 * in. Failure is not fatal: the record then only ever aliases whole
-	 * frames, which is the v1 behaviour. */
-	s_glass_buf_bytes = (size_t)pw * (size_t)ph * 2u;
-	s_glass_buf = shared_multi_heap_aligned_alloc(SMH_REG_ATTR_EXTERNAL, 32,
-						      s_glass_buf_bytes);
-	if (!s_glass_buf) {
-		LOG_WRN("screen-grab shadow %zu B failed; a grab after a "
-			"partial write falls back to the LVGL snapshot",
-			s_glass_buf_bytes);
-		s_glass_buf_bytes = 0;
-	} else {
-		/* Seed the record rather than waiting for the first whole-panel
-		 * write: the band UI (LVGL) never issues one, and without a seed
-		 * the record would stay empty and every grab of it would take
-		 * the lv_snapshot_take() path. The GRAM is blanked to black just
-		 * below, so "all zero" is the truth at this point. */
-		memset(s_glass_buf, 0, s_glass_buf_bytes);
-		s_glass = s_glass_buf;
-		s_glass_w = pw;
-		s_glass_h = ph;
-		s_glass_pitch = pw;
-		s_glass_pinned = false;
-		LOG_INF("screen-grab shadow: PSRAM %p %zu B", (void *)s_glass_buf,
-			s_glass_buf_bytes);
-	}
-#endif
-
-#if IS_ENABLED(CONFIG_ASTER_DISP_FLIP_DBUF)
-	/* Front buffers for the async flip path (see
-	 * aster_plat_display_flip_rgb565). They live in PSRAM, exactly like the
-	 * LVGL band buffers that the direct-send fast path already feeds the
-	 * wire, so the driver's per-chunk bounce behaves identically; and they
-	 * are sized to the PANEL because the flip path is rot0-only. This is
-	 * independent of the staging buffer above -- the flip path never
-	 * touches swap_buf. */
-	{
-		const uint32_t fw = (s_rot % 180) ? ph : pw;
-		const uint32_t fh = (s_rot % 180) ? pw : ph;
-
-		front_bytes = (size_t)fw * (size_t)fh * 2u;
-		for (int i = 0; i < ASTER_DISP_FRONT_N; i++) {
-			s_front[i] = shared_multi_heap_aligned_alloc(
-				SMH_REG_ATTR_EXTERNAL, 32, front_bytes);
-			if (!s_front[i]) {
-				LOG_ERR("flip front buffer %d (%zu B) failed; "
-					"full-screen presents stay synchronous",
-					i, front_bytes);
-				while (i-- > 0) {
-					shared_multi_heap_free(s_front[i]);
-					s_front[i] = NULL;
-				}
-				front_bytes = 0;
-				break;
-			}
-			s_front_ok = true;
-		}
-		if (s_front_ok) {
-			/* One-shot guard on the single pixel-format assumption
-			 * this path rests on: the 32-bit SWAR in
-			 * flip_rgb565() and the scalar sys_cpu_to_be16()
-			 * used by write_at_ex()/the odd tail must yield the
-			 * same panel bytes. They silently disagreed once --
-			 * the SWAR was `(v << 16) | (v >> 16)`, a half-word
-			 * rotate that reorders the two PIXELS and leaves each
-			 * pixel's own bytes alone -- and no screen-grab could
-			 * see it, because aster_gfx_last_frame() reads the
-			 * app-side buffer, whose byte order stayed correct
-			 * while the wire got swapped pixels. Probe with two
-			 * real palette words (snake bg, pure red). */
-			const uint16_t probe[2] = { 0x0863u, 0xF800u };
-			const uint32_t v = (uint32_t)probe[0] | ((uint32_t)probe[1] << 16);
-			const uint32_t sw = ((v & 0x00FF00FFu) << 8) |
-					    ((v & 0xFF00FF00u) >> 8);
-			const bool swar_ok =
-				(uint16_t)sw == sys_cpu_to_be16(probe[0]) &&
-				(uint16_t)(sw >> 16) == sys_cpu_to_be16(probe[1]);
-
-			__ASSERT(swar_ok, "flip SWAR 0x%08x != sys_cpu_to_be16", sw);
-			if (!swar_ok) {
-				LOG_ERR("flip byte-swap 0x%08x disagrees with "
-					"sys_cpu_to_be16; full-screen presents "
-					"would ship wrong colours", sw);
-			}
-			LOG_INF("display flip: %d front buffers x %zu B in PSRAM",
-				ASTER_DISP_FRONT_N, front_bytes);
-		}
-	}
+	/* The panel-sized shadow is taken inside a grab and released when the
+	 * grab finishes. Partial writes with no shadow forget the record, and
+	 * the screenshot path then uses the LVGL snapshot. */
+	LOG_INF("screen-grab shadow: allocated for the grab, then released");
 #endif
 
 

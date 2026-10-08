@@ -10,6 +10,8 @@ Aster/SDK 目标 ID：`waveshare-35b`，ABI 3.7.0。V1/V2 官方说明程序通�
 新增设备树与板级驱动位于本仓库。共享 Zephyr checkout 还需要应用
 `patches/aster_zephyr_v4.4.2_qspi.patch`（在现有基础补丁之后），
 修正 ESP32 SPI 驱动截断四线模式标志的问题。
+USB 调试模式的串口控制台还需要
+`patches/aster_zephyr_v4.4.2_usb_serial_console_batch.patch`（批量化 TX，见下文"控制台日志开销"）。
 PSRAM 直接 DMA 补丁仅供后续诊断，当前板级配置明确关闭直传，使用内部 RAM 中转后 GDMA 发送。详见 `patches/README.md`。
 
 ## 构建与烧录
@@ -38,7 +40,7 @@ SDK 可使用 `aster build APP_DIR --target waveshare-35b`；屏幕必须通过 
   驱动在 PSRAM 保留 307200 B 画面缓存，局部或乱序矩形更新后重传整帧，避免内容反复写到顶部。
   寄存器表是微雪该屏幕的专用配置，不能用于任意 AXS15231B 模组。
 - 背光：GPIO6，LEDC 5 kHz PWM，高有效；亮度 API 的 0..255 映射为 PWM 百分比。
-- I2C0：SDA=8、SCL=7，400 kHz；触摸 0x3b、QMI8658 0x6b、PCF85063 0x51、AXP2101 0x34、ES8311 0x18。
+- I2C0：SDA=8、SCL=7，400 kHz；触摸 0x3b、PCF85063 0x51、AXP2101 0x34、ES8311 0x18。QMI8658 0x6b 仍在总线上，当前固件不启用。
 - SDMMC：1 位，CLK=11、CMD=10、D0=9，初始上限 10 MHz；FAT 卷名 SD，挂载 /SD:。
 - 音频：ES8311 同时提供 DAC/ADC；MCLK=44、BCLK=13、WS=15、SoC TX=16、SoC RX=14。
   沿用 Aster 16 kHz/16 bit/stereo PCM 传输接口，不探测本板不存在的 ES7210。
@@ -61,11 +63,16 @@ python tools/firmware.py build --config boards/waveshare_35b/usb-debug.conf --bu
 python tools/firmware.py flash --config boards/waveshare_35b/usb-debug.conf --build-dir build/waveshare-35b-usb
 ```
 
-USB 调试模式将 console/shell 切到 USB Serial/JTAG；文件服务检测 UART 被占用后暂停。
-它可以读取启动日志、执行 hw/aster 命令及截图，但不能同时运行 ASTERPUT 协议。
-仅有一根 USB 线时，先刷标准 selection.conf 镜像，使用 SDK 的 `aster push ... --target waveshare-35b --port /dev/ttyACM0`
-传输字体与包，再刷 usb-debug.conf 镜像，执行 `aster app install /SD:/包名.ast`。两种模式共用同一 SD 卡内容。
-有外接 USB-TTL 时使用标准模式即可同时获得 shell 与包传输。
+USB 调试模式将 console/shell 切到 USB Serial/JTAG；该串口同时支持日志、shell 命令和文件传输。
+SDK 探测到 `serial=shared` 后自动在同一端口安装和启动 APP，例如：
+
+```sh
+aster deploy dist/waveshare-35b/aster.imucube.ast --target waveshare-35b --port /dev/ttyACM0 --run
+```
+
+无需为传包切换镜像。LCKFB 的 CH340 shell 同样支持该功能（`/dev/ttyUSB0`）。
+旧的独立 USB 文件服务保留兼容；同一时间只允许一个文件传输。
+上传前关闭独立串口监视器，上传完成后可在同一端口恢复监视。
 
 将现有字体资源与 APP 放到 FAT SD 卡中，系统字体按固件 README 的资源部署方式准备。
 请勿把 shell 和文件服务同时指向同一 UART：二者分别消费数据，会破坏协议。
@@ -94,6 +101,14 @@ launcher 使用实际字号下 FreeType hinting 生成的内置 A8 字体，不�
 各通道一次加权、四舍五入，采样位置采用每轴八位小数（256 级），
 减少分两次插值和低精度采样位置的截断偏差。
 旋转/缩放保留双线性过滤和边缘抗锯齿。
+上下快拨使用平滑采样的速度估计，松手后采用按速度决定距离与时间的
+惯性减速（最长 1.8 秒），跨列表首尾保持拨动方向；慢滑就近吸附，
+再次按住可中断惯性，停止滚动的第一次轻点不会误打开 APP。
+卡片轻点启动要求按下/松开命中同一卡片、移动不超过 6 px、时长不超过
+300 ms；卡片横向及斜向滑动不会触发启动，拖动启动仅用于底部拉开控件。
+触摸队列保留按下/松开边缘与移动中的最大偏移，避免短滑和滑出再返回
+在两次 UI 轮询之间被压缩成点击。
+每轮输入合并卡片重绘，结束后再保存最终选择，避免滚动时写 SD。
 仅保留五条可见/相邻光带缓存；跨过一个应用时复用其余四条纹理。
 文字、原色图标和底色先合成为 RGB565 光带，拖动时使用融合旋转采样/透明度混合，
 不反复创建标签图层。LVGL 使用两个完整 PSRAM 帧缓冲和 DIRECT 模式，
@@ -149,3 +164,19 @@ DIRECT、缓存复用和融合绘制版本的分段均值为 73–94 ms，跨条
 4bpp 中间量化。增加辅助字对比度并调整底部标语长度。主页、频段页、调音台
 320×480 截图均通过 CRC，已检查字号放大后的布局；用户已确认实体屏“小字和大字都明显改善”。
 SDK/SD 字体格式及 APP 字体 ABI 未变，继续保持内部 RAM 中转 + GDMA 默认配置。
+
+### FLUX 交互音效
+
+Lightgrain 音效位于 `systems/zephyr/ui/launcher/flux-sounds/`，保留原始 WAV、生成脚本和触发说明。
+`python systems/zephyr/ui/launcher/flux-sounds/bake.py` 解析 WAV 数据块，将 22050Hz 单声道转换为原生 16000Hz 单声道，素材整体增加 18dB（8 倍幅度，原始峰值约 -21～-23dBFS，转换时检查不发生削波），生成 `flux_sounds.inc`；播放时复制到左右声道并叠加到音频 worker，不在 UI 线程访问 SD 或等待声音播放结束。
+
+- 卡片选中变化播放 tick：慢速至少相隔 95ms，超过 650px/s 时至少 160ms，并随速度降低增益；丢弃限流事件。
+- 展开/返回应用播放 open/close；打开分类或调音台播放 tap，关闭播放 close，确认分类播放 tune。
+- 静谧、音量为零立即取消 UI 声音；退出静谧、切换动效播放 tap，音量滑杆不逐次发声。
+- UI 使用独立的一路短音频，不占用 APP 的四个音效句柄。打开/返回声优先于 tick；交给 APP 时释放纯 UI 音频会话，避免 APP 的录音/同步播放被判忙。
+
+### APP 上拉返回确认
+
+沿用已有上拉识别规则：从底部 28px 区域开始，上移至少 24px 且以纵向移动为主；识别后先显示“返回主页？”确认框。
+点击“取消”或遮罩恢复原应用画面，只有点击“返回主页”才结束 APP。确认框显示期间暂停 APP 事件派发并拦截触摸，已暂停的 APP 在取消后仍保持暂停。
+此功能由固件处理，已有 SDK APP 无需改动或重新安装。

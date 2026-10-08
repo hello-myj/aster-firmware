@@ -12,6 +12,8 @@
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/clock.h>
 
+#include "aster_mem.h"
+
 #ifdef CONFIG_SNTP
 #include <zephyr/net/net_event.h>
 #include <zephyr/net/net_if.h>
@@ -29,13 +31,17 @@ static atomic_t s_sync_error = ATOMIC_INIT(-EAGAIN);
 #define TIME_SYNC_RETRY      K_SECONDS(60)
 #define TIME_SYNC_PERIODIC   K_HOURS(6)
 
-/* DNS and a socket timeout must never stall the UI's system work queue. */
-K_THREAD_STACK_DEFINE(s_time_sync_stack, 3072);
-static struct k_work_q s_time_sync_queue;
+/* DNS and a socket timeout must never stall the UI's system work queue.
+ * The worker exists only while one attempt is in flight. */
+#define TIME_SYNC_STACK 3072
+static struct k_thread s_time_thread;
+static void *s_time_stack;
+static atomic_t s_time_busy;
 static struct k_work_delayable s_time_sync_work;
+static struct k_work s_time_reap;
 static struct net_mgmt_event_callback s_time_net_cb;
 
-static void time_sync_handler(struct k_work *work)
+static void time_sync_thread(void *a, void *b, void *c)
 {
 	static const char *const servers[] = {
 		"ntp.aliyun.com",
@@ -44,8 +50,11 @@ static void time_sync_handler(struct k_work *work)
 	struct sntp_time ntp = {0};
 	struct timespec ts;
 	int err = -EHOSTUNREACH;
+	k_timeout_t again;
 
-	ARG_UNUSED(work);
+	ARG_UNUSED(a);
+	ARG_UNUSED(b);
+	ARG_UNUSED(c);
 
 	for (size_t i = 0; i < ARRAY_SIZE(servers); i++) {
 		err = sntp_simple(servers[i], TIME_SYNC_TIMEOUT_MS, &ntp);
@@ -66,13 +75,41 @@ static void time_sync_handler(struct k_work *work)
 		atomic_set(&s_time_synced, 1);
 		LOG_INF("wall clock synchronized (%lld UTC)",
 			(long long)ntp.seconds);
-		k_work_reschedule_for_queue(&s_time_sync_queue, &s_time_sync_work,
-					    TIME_SYNC_PERIODIC);
+		again = TIME_SYNC_PERIODIC;
 	} else {
 		LOG_WRN("wall clock sync failed: %d; retrying", err);
-		k_work_reschedule_for_queue(&s_time_sync_queue, &s_time_sync_work,
-					    TIME_SYNC_RETRY);
+		again = TIME_SYNC_RETRY;
 	}
+	k_work_reschedule(&s_time_sync_work, again);
+	k_work_submit(&s_time_reap);
+}
+
+static void time_sync_reap(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	k_thread_join(&s_time_thread, K_FOREVER);
+	aster_dram_free(s_time_stack);
+	s_time_stack = NULL;
+	atomic_set(&s_time_busy, 0);
+}
+
+static void time_sync_spawn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	if (!atomic_cas(&s_time_busy, 0, 1)) {
+		return;
+	}
+	s_time_stack = aster_dram_alloc(K_KERNEL_STACK_LEN(TIME_SYNC_STACK));
+	if (!s_time_stack) {
+		atomic_set(&s_time_busy, 0);
+		k_work_reschedule(&s_time_sync_work, TIME_SYNC_RETRY);
+		return;
+	}
+	k_thread_create(&s_time_thread, s_time_stack,
+			K_KERNEL_STACK_LEN(TIME_SYNC_STACK) - K_KERNEL_STACK_RESERVED,
+			time_sync_thread, NULL, NULL, NULL,
+			K_PRIO_PREEMPT(8), 0, K_NO_WAIT);
+	k_thread_name_set(&s_time_thread, "aster_time");
 }
 
 static void time_net_event(struct net_mgmt_event_callback *cb,
@@ -83,8 +120,7 @@ static void time_net_event(struct net_mgmt_event_callback *cb,
 
 	if (event == NET_EVENT_IPV4_DHCP_BOUND) {
 		/* Let DHCP finish publishing its DNS server before resolving NTP. */
-		k_work_reschedule_for_queue(&s_time_sync_queue, &s_time_sync_work,
-					    K_SECONDS(2));
+		k_work_reschedule(&s_time_sync_work, K_SECONDS(2));
 	}
 }
 #endif /* CONFIG_SNTP */
@@ -140,16 +176,13 @@ static int aster_time_init(void)
 	}
 
 #ifdef CONFIG_SNTP
-	k_work_queue_start(&s_time_sync_queue, s_time_sync_stack,
-			   K_THREAD_STACK_SIZEOF(s_time_sync_stack),
-			   K_PRIO_PREEMPT(8), NULL);
-	k_work_init_delayable(&s_time_sync_work, time_sync_handler);
+	k_work_init(&s_time_reap, time_sync_reap);
+	k_work_init_delayable(&s_time_sync_work, time_sync_spawn);
 	net_mgmt_init_event_callback(&s_time_net_cb, time_net_event,
 				     NET_EVENT_IPV4_DHCP_BOUND);
 	net_mgmt_add_event_callback(&s_time_net_cb);
 	/* Also cover an already-bound interface and boards without Wi-Fi events. */
-	k_work_schedule_for_queue(&s_time_sync_queue, &s_time_sync_work,
-			  K_SECONDS(5));
+	k_work_schedule(&s_time_sync_work, K_SECONDS(5));
 #endif
 	return 0;
 }

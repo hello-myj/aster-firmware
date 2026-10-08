@@ -1,9 +1,9 @@
 #include <aster/aster.h>
 #include "aster_sysinfo.h"
 /* SPDX-License-Identifier: MIT
- * File-transfer service on the native USB-CDC (Serial-JTAG) port.
- * See aster_file_svc.h for the protocol. Runs on its own polled thread so the
- * CH340 shell stays the interactive control plane.
+ * File-transfer service shared with the shell, plus legacy native USB-CDC.
+ * See aster_file_svc.h. Shell bypass receives binary frames; a worker performs
+ * filesystem operations without blocking shell RX or competing for UART bytes.
  *
  * Safety: only paths under /SD:/ are writable, no ".." components; the file
  * is written to <path>.part and rename-published, so a torn transfer can
@@ -11,6 +11,7 @@
  */
 #include "aster_file_svc.h"
 #include "aster_storage.h"
+#include "aster_mem.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -23,6 +24,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/crc.h>
+#include <zephyr/shell/shell.h>
 
 LOG_MODULE_REGISTER(aster_fsvc, LOG_LEVEL_INF);
 
@@ -41,11 +43,38 @@ LOG_MODULE_REGISTER(aster_fsvc, LOG_LEVEL_INF);
 static const struct device *const cdc =
 	DEVICE_DT_GET_OR_NULL(DT_NODELABEL(usb_serial));
 
-static K_THREAD_STACK_DEFINE(fsvc_stack, 4096);
+/* Stacks come from internal DRAM only while the matching thread exists.
+ * The shell worker is one transfer; the legacy CDC listener stays up. */
+#define FSVC_STACK 4096
 static struct k_thread fsvc_thread;
+static void *fsvc_stack_mem;
+static bool fsvc_started;
+static struct k_work fsvc_reap_work;
+static struct k_thread legacy_thread;
+static void *legacy_stack_mem;
 
 /* .bss -> internal SRAM: fs_write DMA lands fine without a bounce */
 static uint8_t buf[BUF_SZ];
+
+/* Shell owns RX throughout: bypass forwards binary bytes to the file worker.
+ * Stop-and-wait bounds each frame to 512 bytes, independent of filesystem latency. */
+K_SEM_DEFINE(shell_idle, 1, 1);
+K_MSGQ_DEFINE(shell_bytes, 1, 1024, 1);
+static const struct shell *transfer_shell;
+static atomic_t shell_overflow;
+static char shell_path[160];
+static uint32_t shell_len, shell_crc, shell_off;
+
+static void binary_rx(const struct shell *sh, uint8_t *data, size_t len, void *ctx)
+{
+	ARG_UNUSED(sh);
+	ARG_UNUSED(ctx);
+	for (size_t i = 0; i < len; ++i) {
+		if (k_msgq_put(&shell_bytes, &data[i], K_NO_WAIT)) {
+			atomic_set(&shell_overflow, 1);
+		}
+	}
+}
 
 static void cdc_puts(const char *s)
 {
@@ -56,15 +85,24 @@ static void cdc_puts(const char *s)
 
 static void cdc_reply(const char *fmt, ...)
 {
-	char out[64];
+	char out[192];
 	va_list ap;
 
 	va_start(ap, fmt);
 	int w = vsnprintf(out, sizeof(out), fmt, ap);
 	va_end(ap);
 	if (w > 0) {
-		cdc_puts(out);
-		cdc_puts("\r\n");
+		if (transfer_shell) {
+			/* Restore commands before delivering the terminal verdict.
+			 * A leading newline separates tokens from shell log redraws. */
+			if (strncmp(out, "ACK ", 4)) {
+				shell_set_bypass(transfer_shell, NULL, NULL);
+			}
+			shell_print(transfer_shell, "\n%s", out);
+		} else {
+			cdc_puts(out);
+			cdc_puts("\r\n");
+		}
 	}
 }
 
@@ -203,11 +241,18 @@ static int pump_body(const struct device *dev, struct fs_file_t *f, uint32_t wan
 		while (n < chunk) {
 			unsigned char c;
 
-			if (uart_poll_in(dev, &c) == 0) {
+			if (transfer_shell && atomic_get(&shell_overflow)) {
+				return -ENOBUFS;
+			}
+			int rx = transfer_shell ? k_msgq_get(&shell_bytes, &c, K_NO_WAIT)
+					       : uart_poll_in(dev, &c);
+			if (rx == 0) {
 				buf[n++] = c;
 				t0 = k_uptime_get();
 			} else if (k_uptime_get() - t0 > BODY_TMO_MS) {
 				return -ETIMEDOUT;
+			} else {
+				k_msleep(1);
 			}
 		}
 		int w = fs_write(f, buf, n);
@@ -360,6 +405,94 @@ static void do_put(const struct device *dev, const char *path, uint32_t len,
 	publish_part(tmp, path, len);
 }
 
+static void fsvc_reap(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	k_thread_join(&fsvc_thread, K_FOREVER);
+	aster_dram_free(fsvc_stack_mem);
+	fsvc_stack_mem = NULL;
+	fsvc_started = false;
+}
+
+static void shell_fsvc_fn(void *a, void *b, void *c)
+{
+	ARG_UNUSED(a);
+	ARG_UNUSED(b);
+	ARG_UNUSED(c);
+	do_put(cdc, shell_path, shell_len, shell_crc, shell_off);
+	transfer_shell = NULL;
+	k_sem_give(&shell_idle);
+	k_work_submit(&fsvc_reap_work);
+}
+
+static int cmd_ping(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	aster_system_info_t info;
+	aster_sysinfo_get(&info);
+	shell_print(sh, "PONG sd=%d product=aster target=%s abi=%u.%u caps=%llx serial=shared",
+		    aster_storage_mounted() ? 1 : 0, CONFIG_ASTER_TARGET_ID,
+		    ASTER_ABI_MAJOR, ASTER_ABI_MINOR, (unsigned long long)info.feature_flags);
+	return 0;
+}
+
+static int cmd_put(const struct shell *sh, size_t argc, char **argv)
+{
+	uint32_t values[3] = {0};
+	if (path_ok(argv[1])) {
+		shell_print(sh, "ERR %d", -EPERM);
+		return 0;
+	}
+	for (size_t i = 2; i < argc; ++i) {
+		char *end;
+		errno = 0;
+		unsigned long v = strtoul(argv[i], &end, i == 3 ? 16 : 10);
+		if (!argv[i][0] || argv[i][0] == '-' || *end || errno == ERANGE || v > UINT32_MAX) {
+			shell_print(sh, "ERR %d", -EINVAL);
+			return 0;
+		}
+		values[i-2] = (uint32_t)v;
+	}
+	/* Reserve shared filesystem scratch until the worker completes. */
+	if (k_sem_take(&shell_idle, K_NO_WAIT)) {
+		shell_print(sh, "ERR %d", -EBUSY);
+		return 0;
+	}
+	strcpy(shell_path, argv[1]);
+	shell_len = values[0];
+	shell_crc = values[1];
+	shell_off = values[2];
+	k_msgq_purge(&shell_bytes);
+	atomic_clear(&shell_overflow);
+	transfer_shell = sh;
+	shell_set_bypass(sh, binary_rx, NULL);
+	/* The previous worker gives shell_idle and then queues the reap.
+	 * Wait until that reap has joined it and released the stack. */
+	while (fsvc_started) {
+		k_work_flush(&fsvc_reap_work, NULL);
+		if (fsvc_started) {
+			k_yield();
+		}
+	}
+	fsvc_stack_mem = aster_dram_alloc(K_KERNEL_STACK_LEN(FSVC_STACK));
+	if (!fsvc_stack_mem) {
+		shell_set_bypass(sh, NULL, NULL);
+		transfer_shell = NULL;
+		k_sem_give(&shell_idle);
+		shell_print(sh, "ERR %d", -ENOMEM);
+		return 0;
+	}
+	fsvc_started = true;
+	k_thread_create(&fsvc_thread, fsvc_stack_mem,
+			K_KERNEL_STACK_LEN(FSVC_STACK) - K_KERNEL_STACK_RESERVED,
+			shell_fsvc_fn, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
+	k_thread_name_set(&fsvc_thread, "aster_shell_fs");
+	return 0;
+}
+SHELL_CMD_ARG_REGISTER(ASTERPING, NULL, "File service and target identity", cmd_ping, 1, 0);
+SHELL_CMD_ARG_REGISTER(ASTERPUT, NULL, "<SD path> <length> <crc32> [offset]", cmd_put, 4, 1);
+
 static void fsvc_fn(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -373,6 +506,7 @@ static void fsvc_fn(void *p1, void *p2, void *p3)
 			k_msleep(IDLE_MS);
 			continue;
 		}
+		k_sem_take(&shell_idle, K_FOREVER);
 		if (strcmp(line, CMD_PING) == 0) {
 			aster_system_info_t info;
 
@@ -389,11 +523,13 @@ static void fsvc_fn(void *p1, void *p2, void *p3)
 
 			if (!sp1) {
 				cdc_reply("ERR %d", -EINVAL);
+				k_sem_give(&shell_idle);
 				continue;
 			}
 			size_t plen = (size_t)(sp1 - args);
 			if (plen >= sizeof(path)) {
 				cdc_reply("ERR %d", -ENAMETOOLONG);
+				k_sem_give(&shell_idle);
 				continue;
 			}
 			memcpy(path, args, plen);
@@ -401,6 +537,7 @@ static void fsvc_fn(void *p1, void *p2, void *p3)
 			char *sp2 = strchr(sp1 + 1, ' ');
 			if (!sp2) {
 				cdc_reply("ERR %d", -EINVAL);
+				k_sem_give(&shell_idle);
 				continue;
 			}
 			len = (uint32_t)strtoul(sp1 + 1, NULL, 10);
@@ -414,32 +551,41 @@ static void fsvc_fn(void *p1, void *p2, void *p3)
 				/* Host never streams the body until it sees a
 				 * go-"ACK", so nothing to drain: reply alone. */
 				cdc_reply("ERR %d", -EPERM);
+				k_sem_give(&shell_idle);
 				continue;
 			}
 			do_put(cdc, path, len, crc, off);
 		} else if (line[0]) {
 			cdc_reply("ERR %d", -EINVAL);
 		}
+		k_sem_give(&shell_idle);
 	}
 }
 
 int aster_file_svc_start(void)
 {
+	k_work_init(&fsvc_reap_work, fsvc_reap);
 #if HAVE_CDC
 	/* A USB-only bring-up profile gives this UART to the shell. Two
-	 * consumers cannot independently read one RX stream. */
+	 * consumers cannot independently read one RX stream. The shell
+	 * worker is created for the duration of one ASTERPUT. */
 	if (cdc == DEVICE_DT_GET_OR_NULL(DT_CHOSEN(zephyr_shell_uart)) ||
 	    cdc == DEVICE_DT_GET_OR_NULL(DT_CHOSEN(zephyr_console))) {
-		LOG_INF("USB used by console; file svc paused");
+		LOG_INF("file service shares USB shell");
 		return 0;
 	}
 	if (!device_is_ready(cdc)) {
 		LOG_WRN("usb_serial CDC device not ready; file svc off");
 		return -ENODEV;
 	}
-	k_thread_create(&fsvc_thread, fsvc_stack, K_THREAD_STACK_SIZEOF(fsvc_stack),
+	legacy_stack_mem = aster_dram_alloc(K_KERNEL_STACK_LEN(FSVC_STACK));
+	if (!legacy_stack_mem) {
+		return -ENOMEM;
+	}
+	k_thread_create(&legacy_thread, legacy_stack_mem,
+			K_KERNEL_STACK_LEN(FSVC_STACK) - K_KERNEL_STACK_RESERVED,
 			fsvc_fn, NULL, NULL, NULL, 7, 0, K_NO_WAIT);
-	k_thread_name_set(&fsvc_thread, "aster_fsvc");
+	k_thread_name_set(&legacy_thread, "aster_fsvc");
 	LOG_INF("file svc on USB-CDC (ASTERPUT <path> <len> <crc32> [resume-off])");
 	return 0;
 #else

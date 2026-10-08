@@ -1,19 +1,13 @@
 #include <zephyr/sys/util.h>
 /* SPDX-License-Identifier: MIT
- * Screen-grab debug transport: snapshot the active LVGL screen and stream
- * it out as base64 lines on the shell (see ui_screenshot.h).
+ * Screen-grab debug transport. The pixels already on the glass (or the
+ * engine's last frame) are zlib-compressed into a temporary PSRAM block,
+ * streamed as base64, then released. No screenshot buffer stays resident.
  *
- * Flow (PSRAM transient, freed the moment the grab is out):
- *   lv_snapshot_take(RGB565) -> rows repacked (stride stripped) to raw[w*h*2]
- *   "SHOT hdr WxH raw LEN"
- *   ceil(b64/640) x "SHOT b64 <idx> <640 b64 chars>"   (idx zero-padded)
+ *   "SHOT hdr WxH zlib LEN" | "SHOT hdr WxH raw LEN"
+ *   ceil(b64/640) x "SHOT b64 <idx> <640 b64 chars>"
  *   "SHOT end <crc32-hex>" | "SHOT err <why>"
- * Host side: sdk/tools/shell_shot.py reassembles -> PNG.
- *
- * v1 ships raw (no codec): the vendored miniz is compiled inflate-only for
- * PNG decode, and pulling in deflate would collide. A 135x240 RGB565 frame
- * is 65 KB -> ~86 KB base64 -> ~7.5 s at 115200, acceptable for a debug
- * tool. Deflate (RLE crushes flat UI) is a clean follow-up.
+ * CRC covers the bytes on the wire. Host: sdk/tools/screenshot.py
  */
 #include "ui_screenshot.h"
 
@@ -28,32 +22,18 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/crc.h>
-#include <lvgl.h>
 #include "aster_mem.h"
 #include "aster_platform.h"
 #include "ui_gfx.h"
-#include "ui_lvgl.h"
+#include "vendor/miniz.h"
 
 LOG_MODULE_REGISTER(aster_shot, LOG_LEVEL_INF);
 
-/* The last-resort source below allocates a whole RGB565 screen out of the
- * LVGL pool (LV_MEM_SIZE), CONTIGUOUS. It only runs when the glass record
- * and the engine's last frame have both missed, which is exactly the
- * situation where a silent failure is least affordable -- so pin the
- * relationship to LV_MEM_SIZE here, where a shrink of the pool breaks the
- * build instead of quietly removing the safety net. (S6 cut that pool from
- * 512 KB to 224 KB on a measured 22,584 B peak; this is what keeps the next
- * cut from taking the floor with it.) Rotation swaps width and height, so
- * the product is the invariant that matters. */
-#define SHOT_SNAP_BYTES ((size_t)DT_PROP(DT_CHOSEN(zephyr_display), width) *  \
-			 (size_t)DT_PROP(DT_CHOSEN(zephyr_display), height) * 2u)
-#define SHOT_POOL_HEADROOM (48u * 1024u)
-BUILD_ASSERT(SHOT_SNAP_BYTES + SHOT_POOL_HEADROOM <= (size_t)LV_MEM_SIZE,
-	     "LV_MEM_SIZE cannot hold a full-screen RGB565 snapshot plus "
-	     "headroom: ui_screenshot.c's last-resort source would fail at the "
-	     "one moment it exists for");
-
-/* One output chunk per shell line: 480 B raw -> 640 B64 chars. */
+/* One output chunk per shell line: 480 B -> 640 B64 chars. */
+/* Compressed UI frames land well under this. A noisy frame that does not
+ * fit is sent raw from the buffer that already holds it. */
+#define SHOT_ZLIB_CAP (128u * 1024u)
+#define SHOT_ROW_MAX  (480u * 2u)
 #define SHOT_B64_PER_LINE 640
 #define SHOT_CHUNK_BYTES  (SHOT_B64_PER_LINE / 4 * 3) /* 480 */
 
@@ -87,37 +67,82 @@ static void fail(const struct shell *sh, const char *why)
 	shell_fprintf(sh, SHELL_NORMAL, "SHOT err %s\n", why);
 }
 
-/* Copy a captured frame into a fresh ABI-order RGB565 buffer the PNG
- * encoder can read: strip row padding and undo panel byte order when the
- * source is panel-ordered (`panel_order`).
- *
- * Kept in one place on purpose. The PNG decodes whatever bytes it is
- * handed as little-endian RGB565, so a wrong (or missing) swap here shows
- * up as a colour-swapped screen-grab, and an unswapped panel frame is
- * indistinguishable from a genuinely wrong render. */
-static bool repack_abi(const struct shell *sh, const uint8_t *frame, void **raw_out,
-		       uint32_t w, uint32_t h, uint32_t pitch, bool panel_order)
+/* zlib of little-endian RGB565, streamed a row at a time so a panel-order
+ * frame never needs a second full copy. Returns 0 and a PSRAM block the
+ * caller frees, or -ENOSPC when the frame does not shrink into the cap. */
+static int compress_frame(const uint8_t *frame, uint32_t w, uint32_t h,
+			  uint32_t pitch, bool panel_order, uint8_t **out,
+			  size_t *out_len)
 {
-	uint8_t *raw = aster_psram_alloc((size_t)w * h * 2u);
+	const size_t row_bytes = (size_t)w * 2u;
+	tdefl_compressor *comp;
+	uint8_t *zbuf;
+	uint8_t row[SHOT_ROW_MAX];
+	size_t produced = 0;
+	tdefl_status status = TDEFL_STATUS_OKAY;
 
-	if (!raw) {
-		fail(sh, "psram");
-		return false;
+	if (row_bytes == 0 || row_bytes > SHOT_ROW_MAX || h == 0) {
+		return -EINVAL;
 	}
-	for (uint32_t y = 0; y < h; y++) {
-		const uint16_t *s16 = (const uint16_t *)(frame + (size_t)y * pitch * 2u);
-		uint16_t *d16 = (uint16_t *)(raw + (size_t)y * w * 2u);
+	comp = aster_psram_alloc(sizeof(*comp));
+	zbuf = aster_psram_alloc(SHOT_ZLIB_CAP);
+	if (!comp || !zbuf) {
+		aster_psram_free(comp);
+		aster_psram_free(zbuf);
+		return -ENOMEM;
+	}
+	tdefl_init(comp, NULL, NULL,
+		   (int)tdefl_create_comp_flags_from_zip_params(MZ_BEST_SPEED, 15, MZ_RLE));
+	for (uint32_t y = 0; y < h && status == TDEFL_STATUS_OKAY; y++) {
+		const uint8_t *src_row = frame + (size_t)y * pitch * 2u;
+		const uint8_t *in = src_row;
+		size_t left = row_bytes;
+		const bool last = y + 1u == h;
 
-		if (!panel_order) {
-			memcpy(d16, s16, (size_t)w * 2u);
-			continue;
+		if (panel_order) {
+			for (uint32_t x = 0; x < w; x++) {
+				row[x * 2u] = src_row[x * 2u + 1u];
+				row[x * 2u + 1u] = src_row[x * 2u];
+			}
+			in = row;
+		} else if (pitch != w) {
+			memcpy(row, src_row, row_bytes);
+			in = row;
 		}
-		for (uint32_t x = 0; x < w; x++) {
-			d16[x] = (uint16_t)((s16[x] << 8) | (s16[x] >> 8));
+		while (left > 0 || last) {
+			size_t in_n = left;
+			size_t out_n = SHOT_ZLIB_CAP - produced;
+			const tdefl_flush flush = (last && in_n == left) ? TDEFL_FINISH
+									  : TDEFL_NO_FLUSH;
+
+			if (out_n == 0) {
+				status = TDEFL_STATUS_PUT_BUF_FAILED;
+				break;
+			}
+			status = tdefl_compress(comp, in, &in_n, zbuf + produced, &out_n, flush);
+			in += in_n;
+			left -= in_n;
+			produced += out_n;
+			if (status == TDEFL_STATUS_DONE) {
+				break;
+			}
+			if (status != TDEFL_STATUS_OKAY || (in_n == 0 && out_n == 0)) {
+				status = TDEFL_STATUS_PUT_BUF_FAILED;
+				break;
+			}
+			if (!last && left == 0) {
+				break;
+			}
 		}
 	}
-	*raw_out = raw;
-	return true;
+	aster_psram_free(comp);
+	if (status != TDEFL_STATUS_DONE || produced == 0) {
+		aster_psram_free(zbuf);
+		return -ENOSPC;
+	}
+	*out = zbuf;
+	*out_len = produced;
+	return 0;
 }
 
 /* Runs on the UI/worker thread, between lv_timer_handler ticks. */
@@ -132,14 +157,15 @@ void aster_screenshot_poll(void)
 	s_armed = false;
 
 	const struct shell *sh = s_sh;
-	lv_obj_t *scr = aster_ui_lvgl_screen();
-	lv_draw_buf_t *snap = NULL;
-	void *raw = NULL;
+	uint8_t *zbuf = NULL;
 	const uint8_t *src = NULL;
+	const uint8_t *stream = NULL;
 	uint32_t w = 0, h = 0, pitch = 0;
 	size_t raw_bytes = 0;
+	size_t stream_len = 0;
 	uint32_t crc = 0;
-	bool swap_rows = false; /* source is panel-order: swap while emitting */
+	bool swap_rows = false; /* raw emit still has to swap panel order */
+	bool zlib_stream = false;
 	int rc = -EIO;
 
 	/* Prefer the display's record of what was handed to the wire. It is
@@ -156,15 +182,9 @@ void aster_screenshot_poll(void)
 
 		if (aster_plat_display_glass_frame(&gb, &w, &h, &pitch)) {
 			raw_bytes = (size_t)w * h * 2u;
-			swap_rows = (pitch == w);
-			if (swap_rows) {
-				src = gb;
-			} else if (repack_abi(sh, gb, &raw, w, h, pitch, true)) {
-				src = raw;
-			} else {
-				goto out;
-			}
-			goto stream;
+			src = gb;
+			swap_rows = true;
+			goto pack;
 		}
 	}
 
@@ -178,59 +198,37 @@ void aster_screenshot_poll(void)
 
 		if (aster_gfx_last_frame(&gb, &w, &h, &pitch, &frame_be)) {
 			raw_bytes = (size_t)w * h * 2u;
-			if (pitch == w && !frame_be) {
-				src = gb;
-			} else if (repack_abi(sh, gb, &raw, w, h, pitch, frame_be)) {
-				src = raw;
-			} else {
-				goto out;
-			}
-			goto stream;
+			src = gb;
+			swap_rows = frame_be;
+			goto pack;
 		}
 	}
 
-	if (!scr) {
-		fail(sh, "no-ui");
-		goto out;
-	}
+	fail(sh, "no-frame");
+	goto out;
 
-	snap = lv_snapshot_take(scr, LV_COLOR_FORMAT_RGB565);
-	if (!snap) {
-		fail(sh, "snapshot");
-		goto out;
-	}
-
-	w = snap->header.w;
-	h = snap->header.h;
-	raw_bytes = (size_t)w * h * 2u;
-
-	/* Rows already packed (our 240px RGB565 panel: stride == w*2): encode
-	 * straight from the snapshot buffer. Repacking into a second ~150 KB
-	 * contiguous PSRAM block was what made filer/reader grabs fail with
-	 * `psram` once the shared heap got busy. */
-	if (snap->header.stride == (size_t)w * 2u) {
-		src = snap->data;
+pack:
+	if (compress_frame(src, w, h, pitch, swap_rows, &zbuf, &stream_len) == 0) {
+		stream = zbuf;
+		zlib_stream = true;
+		swap_rows = false;
+		LOG_INF("screenshot zlib %u -> %u", (unsigned)raw_bytes,
+			(unsigned)stream_len);
 	} else {
-		raw = aster_psram_alloc(raw_bytes);
-		if (!raw) {
-			fail(sh, "psram");
+		aster_psram_free(zbuf);
+		zbuf = NULL;
+		if (pitch != w) {
+			fail(sh, "compress");
 			goto out;
 		}
-		/* repack: strip stride padding so the host reads packed rows */
-		for (uint32_t y = 0; y < h; y++) {
-			memcpy((uint8_t *)raw + (size_t)y * w * 2u,
-			       (const uint8_t *)snap->data +
-				       (size_t)y * snap->header.stride,
-			       (size_t)w * 2u);
-		}
-		src = raw;
-		lv_draw_buf_destroy(snap);
-		snap = NULL;
+		stream = src;
+		stream_len = raw_bytes;
+		LOG_INF("screenshot raw %u", (unsigned)raw_bytes);
 	}
 
-stream:
-	shell_fprintf(sh, SHELL_NORMAL, "SHOT hdr %ux%u raw %u\n",
-		      (unsigned)w, (unsigned)h, (unsigned)raw_bytes);
+	shell_fprintf(sh, SHELL_NORMAL, "SHOT hdr %ux%u %s %u\n",
+		      (unsigned)w, (unsigned)h, zlib_stream ? "zlib" : "raw",
+		      (unsigned)stream_len);
 
 	/* Chunk the SOURCE in 480-byte groups (multiple of 3), so only the
 	 * final group can carry an '=' pad tail. 480 raw -> 640 b64 chars.
@@ -250,8 +248,8 @@ stream:
 	unsigned idx = 0;
 
 	crc = 0;
-	while (pos < raw_bytes) {
-		size_t n = raw_bytes - pos;
+	while (pos < stream_len) {
+		size_t n = stream_len - pos;
 		const uint8_t *p;
 
 		if (n > CH) {
@@ -259,12 +257,12 @@ stream:
 		}
 		if (swap_rows) {
 			for (size_t i = 0; i < n; i += 2u) {
-				scratch[i] = src[pos + i + 1u];
-				scratch[i + 1u] = src[pos + i];
+				scratch[i] = stream[pos + i + 1u];
+				scratch[i + 1u] = stream[pos + i];
 			}
 			p = scratch;
 		} else {
-			p = src + pos;
+			p = stream + pos;
 		}
 		crc = crc32_ieee_update(crc, p, n);
 		size_t whole = (n / 3u) * 3u;
@@ -293,12 +291,8 @@ stream:
 	rc = 0;
 
 out:
-	if (snap) {
-		lv_draw_buf_destroy(snap); /* fast path: src aliased its data */
-	}
-	if (raw) {
-		aster_psram_free(raw);
-	}
+	aster_plat_display_glass_drop();
+	aster_psram_free(zbuf);
 	if (rc) {
 		LOG_WRN("screenshot failed (%d)", rc);
 	}

@@ -5,6 +5,7 @@
 #include "aster_platform.h"
 #include "qpanel.h"
 #include "ui_font.h"
+#include "font_sd.h"
 #include "ui_lvgl.h"
 #include "ui_wifi.h"
 #include <errno.h>
@@ -406,6 +407,7 @@ static void show(enum page next, const char *ssid)
 	if (ssid)
 		snprintf(selected, sizeof(selected), "%s", ssid);
 	reset_view();
+	aster_font_sd_cache_drop();
 	page = next;
 	aster_plat_wifi_hotspot_status(&ap_state);
 	if (page == WIFI_LIST) {

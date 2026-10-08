@@ -65,6 +65,28 @@ static int axs_blanking(const struct device *dev,bool blank)
 }
 static int axs_on(const struct device *dev) { return axs_blanking(dev,false); }
 static int axs_off(const struct device *dev) { return axs_blanking(dev,true); }
+/* QSPI glass does not support arbitrary row windows. RAMWR restarts at the
+ * top; RAMWRC continues the previous stream. Caller holds d->lock. `wire`
+ * is already in panel byte order and is either the shadow or a borrowed
+ * full frame. */
+static int axs_tx_locked(const struct device *dev,uint16_t x,uint16_t y,
+                         uint16_t width,uint16_t height,const void *wire)
+{
+ const struct axs_config *c=dev->config;
+ struct axs_data *d=dev->data;
+ bool band=x==0 && width==c->width && (y==0 || y==d->next_row);
+ bool continuation=band && y!=0;
+ uint8_t window[4];
+ sys_put_be16(0,window);sys_put_be16(c->width-1,window+2);
+ int err=continuation?0:axs_cmd(dev,0x2a,window,4);
+ if(!err) err=axs_header(dev,0x32,continuation?0x3c:0x2c);
+ size_t offset=band?(size_t)y*c->width*2u:0;
+ size_t size=(size_t)c->width*(band?height:c->height)*2u;
+ if(!err) err=axs_write_bytes(dev,&d->quad,(const uint8_t *)wire+offset,size);
+ d->next_row=err?0:(band?y+height:c->height);
+ axs_end(dev);
+ return err;
+}
 static int axs_write_frame(const struct device *dev,const uint16_t x,const uint16_t y,
                      const struct display_buffer_descriptor *desc,const void *buffer,bool persistent)
 {
@@ -74,10 +96,6 @@ static int axs_write_frame(const struct device *dev,const uint16_t x,const uint1
     x+desc->width>c->width || y+desc->height>c->height ||
     desc->buf_size<((size_t)(desc->height-1)*desc->pitch+desc->width)*2u) return -EINVAL;
  k_mutex_lock(&d->lock,K_FOREVER);
- /* QSPI glass does not support arbitrary row windows. RAMWR restarts
-  * at the top; RAMWRC continues the previous stream (Espressif driver).
-  * Keep a wire-order shadow for partial/out-of-order rectangles, and
-  * retain the fast continuation path for consecutive full-width bands. */
  bool full=x==0 && y==0 && desc->width==c->width && desc->height==c->height && desc->pitch==c->width;
  if(persistent && !full) {k_mutex_unlock(&d->lock);return -EINVAL;}
  if(persistent) d->borrowed=buffer;
@@ -90,17 +108,28 @@ static int axs_write_frame(const struct device *dev,const uint16_t x,const uint1
   memcpy(d->frame+((size_t)(y+row)*c->width+x)*2u,
          (const uint8_t *)buffer+(size_t)row*desc->pitch*2u,(size_t)desc->width*2u);
  }
- bool band=x==0 && desc->width==c->width && (y==0 || y==d->next_row);
- bool continuation=band && y!=0;
- uint8_t window[4];
- sys_put_be16(0,window);sys_put_be16(c->width-1,window+2);
- int err=continuation?0:axs_cmd(dev,0x2a,window,4);
- if(!err) err=axs_header(dev,0x32,continuation?0x3c:0x2c);
- size_t offset=band?(size_t)y*c->width*2u:0;
- size_t size=(size_t)c->width*(band?desc->height:c->height)*2u;
- if(!err) err=axs_write_bytes(dev,&d->quad,(persistent?(const uint8_t *)buffer:d->frame)+offset,size);
- d->next_row=err?0:(band?y+desc->height:c->height);
- axs_end(dev);
+ int err=axs_tx_locked(dev,x,y,desc->width,desc->height,persistent?buffer:d->frame);
+ k_mutex_unlock(&d->lock);
+ return err;
+}
+/* Byte-swap staging writes the shadow directly. begin() holds d->lock until
+ * shadow_present(); a partial update first materializes a borrowed UI frame. */
+uint8_t *aster_axs15231b_shadow_begin(const struct device *dev,bool replacing_all)
+{
+ const struct axs_config *c=dev->config;
+ struct axs_data *d=dev->data;
+ k_mutex_lock(&d->lock,K_FOREVER);
+ if(!d->frame) {k_mutex_unlock(&d->lock);return NULL;}
+ if(d->borrowed && !replacing_all)
+  memcpy(d->frame,d->borrowed,(size_t)c->width*c->height*2u);
+ d->borrowed=NULL;
+ return d->frame;
+}
+int aster_axs15231b_shadow_present(const struct device *dev,
+                                   uint16_t x,uint16_t y,uint16_t w,uint16_t h)
+{
+ struct axs_data *d=dev->data;
+ int err=axs_tx_locked(dev,x,y,w,h,d->frame);
  k_mutex_unlock(&d->lock);
  return err;
 }

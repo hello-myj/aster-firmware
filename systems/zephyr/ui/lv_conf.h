@@ -33,16 +33,10 @@
  * that each held a 16 KB lv_fs cache here for their whole lifetime. Those
  * are gone (S3a).
  *
- * The floor is not the 22 KB above, it is lv_snapshot_take(): the screen grab
- * reads the display's glass record first and the engine's last frame second,
- * and only falls back to snapshotting the LVGL tree when BOTH miss. That
- * fallback needs w*h*2 = 153,600 B CONTIGUOUS out of this pool, and it exists
- * precisely for the situation where the other two sources are already broken.
- * Sizing the pool down to the 22 KB peak would quietly delete the safety net
- * at the moment it is needed, so 224 KB keeps 153,600 + the full observed
- * peak + ~53 KB spare. ui_screenshot.c asserts this so a later shrink fails
- * the build instead of silently disabling the last resort. Larger boards set
- * ASTER_LVGL_MEM_KB to retain the screenshot reserve and transformed UI layers. */
+ * Screenshots do not allocate from this pool. They read the glass frame or
+ * the engine's last frame and zlib-compress that. 64 KB is about three times
+ * the 22,584 B high-water measured across the launcher, drawer, and quick
+ * panel. Larger boards set ASTER_LVGL_MEM_KB when their chrome needs more. */
 #define LV_MEM_SIZE (CONFIG_ASTER_LVGL_MEM_KB * 1024)
 #define LV_MEM_POOL_INCLUDE "aster_mem.h"
 #define LV_MEM_POOL_ALLOC(size) aster_psram_alloc(size)

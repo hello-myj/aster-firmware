@@ -383,9 +383,18 @@ static int32_t n_surface_create(wasm_exec_env_t env, uint32_t desc_off, uint32_t
 	 * canvas_ready() now also checks (it is false whenever the platform
 	 * is scaling). The w/h test against di is therefore redundant on this
 	 * board and kept only because it is the cheap half. */
-	bool canvas = (desc->flags & ASTER_SURFACE_F_PANEL_CANVAS) &&
-		      fmt == ASTER_PIXEL_RGB565 && w == di.width && h == di.height &&
-		      aster_plat_display_canvas_ready();
+	bool want_canvas = (desc->flags & ASTER_SURFACE_F_PANEL_CANVAS) &&
+			   fmt == ASTER_PIXEL_RGB565 && w == di.width && h == di.height;
+	bool fronts = false;
+
+	if (want_canvas && aster_plat_display_flip_acquire() == 0) {
+		fronts = true;
+	}
+	bool canvas = want_canvas && aster_plat_display_canvas_ready();
+
+	if (fronts && !canvas) {
+		aster_plat_display_flip_release();
+	}
 
 	/* The denial is silent by design (the app still works, just slower),
 	 * but that silence is costly when diagnosing "this app's colours are
@@ -426,6 +435,9 @@ static int32_t n_surface_create(wasm_exec_env_t env, uint32_t desc_off, uint32_t
 			return ASTER_OK;
 		}
 	}
+	if (canvas) {
+		aster_plat_display_flip_release();
+	}
 	return ASTER_ENOMEM;
 }
 
@@ -445,6 +457,9 @@ static int32_t n_surface_destroy(wasm_exec_env_t env, uint32_t h)
 		 * the staging path. Drain before handing the pages back so the
 		 * worker can never read freed linear memory. */
 		aster_plat_display_flush_drain();
+		if (ctx->surfaces[i].canvas) {
+			aster_plat_display_flip_release();
+		}
 		if (ctx->surfaces[i].app_offset) {
 			wasm_runtime_module_free(ctx->module_inst,
 						 ctx->surfaces[i].app_offset);
@@ -707,12 +722,26 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
 	/* whole-buffer pixel span is what exec_into may scribble: revalidate
 	 * it against the surface bounds (creation already did) */
 	uint32_t dx = 0, dy = 0, dw = 0, dh = 0;
+	bool frame_clear = false;
+
+	if (!s->canvas && pw && ph) {
+		for (uint32_t i = 0; i < n; i++) {
+			if (ASTER_GFX_OP(&cmds[i]) == ASTER_GFX_CLEAR) {
+				frame_clear = true;
+				break;
+			}
+		}
+		if (!frame_clear) {
+			aster_gfx_set_clip(px, py, pw, ph);
+		}
+	}
 
 #if IS_ENABLED(CONFIG_ASTER_GFX_TIMING)
 	uint32_t t_raster0 = k_cycle_get_32();
 #endif
 	int32_t ran = aster_gfx_exec_into(base, s->w, s->h, s->pitch, cmds, n, arena,
 					arena_len, &dx, &dy, &dw, &dh, out_be);
+	aster_gfx_set_clip(0, 0, 0, 0);
 #if IS_ENABLED(CONFIG_ASTER_GFX_TIMING)
 	uint32_t t_flush0 = k_cycle_get_32();
 	uint32_t acc_raster = t_flush0 - t_raster0, acc_flush = 0, flushed_px = 0;
@@ -821,18 +850,18 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
 			uint32_t ras = k_cyc_to_us_floor32(s_ras) / 64u;
 			uint32_t flu = k_cyc_to_us_floor32(s_flu) / 64u;
 
-			LOG_INF("gfx tim: raster=%u us flush=%u us sum=%u us "
-				"(max %u/%u) cmds=%u flushed=%u px",
-				(unsigned)ras, (unsigned)flu,
-				(unsigned)(ras + flu),
-				(unsigned)k_cyc_to_us_floor32(s_ras_max),
-				(unsigned)k_cyc_to_us_floor32(s_flu_max),
-				(unsigned)(s_cmds / 64u), (unsigned)(s_px / 64u));
+			/* Printed from a worker thread: a log line written
+			 * here would stall the render thread (a console
+			 * write costs milliseconds) and this frame is
+			 * already at the budget's edge. That worker also
+			 * emits the per-op raster histogram so the
+			 * aggregate can be attributed to an op. */
+			aster_gfx_timing_report(ras, flu,
+				(uint32_t)k_cyc_to_us_floor32(s_ras_max),
+				(uint32_t)k_cyc_to_us_floor32(s_flu_max),
+				(uint32_t)(s_cmds / 64u), (uint32_t)(s_px / 64u));
 			s_n = s_ras = s_flu = s_px = s_cmds = 0;
 			s_ras_max = s_flu_max = 0;
-			/* Same cadence: dump the per-op raster histogram so
-			 * the aggregate above can be attributed to an op. */
-			aster_gfx_op_timing_emit();
 		}
 	}
 #endif

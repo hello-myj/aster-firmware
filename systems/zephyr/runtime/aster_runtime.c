@@ -12,6 +12,7 @@
 #include "aster_platform.h"
 #if IS_ENABLED(CONFIG_ASTER_LVGL)
 #include "ui_font.h"
+#include "font_sd.h"
 #include "ui_gfx.h"
 #include "ui_lvgl.h"
 /* The sheet is not a launcher feature: it goes up over a running app too,
@@ -22,20 +23,119 @@
 #endif
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <zephyr/fs/fs.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/multi_heap/shared_multi_heap.h>
 #include <aster/aster.h>
 #include "wasm_export.h"
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 
 LOG_MODULE_REGISTER(aster_rt, LOG_LEVEL_INF);
 
-#define RUNTIME_POOL_SIZE CONFIG_ASTER_WAMR_HEAP_SIZE
+/* Upper bound on one guest's linear memory, not a block reserved at boot.
+ * The live ceiling is the smaller of this and the largest free external
+ * block minus ASTER_WAMR_RESERVE, so a running app still leaves room for
+ * the panel fronts and a screenshot. */
+#define ASTER_WAMR_RESERVE (1024u * 1024u)
 
-static char *runtime_pool;
+/* Prefix kept in front of every WAMR allocation so realloc can copy the
+ * old size. 16 bytes so the payload stays aligned with aster_psram_alloc. */
+struct wamr_blk {
+	size_t size;
+	uint8_t pad[16 - sizeof(size_t)];
+	uint8_t data[];
+};
+
+static void *wamr_malloc(unsigned int size)
+{
+	struct wamr_blk *blk;
+
+	if (size == 0) {
+		return NULL;
+	}
+	blk = aster_psram_alloc(sizeof(*blk) + size);
+	if (!blk) {
+		return NULL;
+	}
+	blk->size = size;
+	return blk->data;
+}
+
+static void wamr_free(void *ptr)
+{
+	struct wamr_blk *blk;
+
+	if (!ptr) {
+		return;
+	}
+	blk = (struct wamr_blk *)((uint8_t *)ptr - offsetof(struct wamr_blk, data));
+	aster_psram_free(blk);
+}
+
+static void *wamr_realloc(void *ptr, unsigned int size)
+{
+	struct wamr_blk *blk;
+	void *next;
+	size_t keep;
+
+	if (!ptr) {
+		return wamr_malloc(size);
+	}
+	if (size == 0) {
+		wamr_free(ptr);
+		return NULL;
+	}
+	blk = (struct wamr_blk *)((uint8_t *)ptr - offsetof(struct wamr_blk, data));
+	next = wamr_malloc(size);
+	if (!next) {
+		return NULL;
+	}
+	keep = blk->size < size ? blk->size : size;
+	memcpy(next, ptr, keep);
+	wamr_free(ptr);
+	return next;
+}
+
+/* Largest block the external heap will hand out right now. Binary search,
+ * so the guest cap tracks the real hole instead of a fixed probe ladder. */
+static size_t wamr_largest_free(void)
+{
+	size_t lo = 0;
+	size_t hi = 8u * 1024u * 1024u;
+
+	while (hi - lo > 65536u) {
+		size_t mid = ((lo + hi) / 2u) & ~(size_t)65535u;
+		void *p;
+
+		if (mid <= lo) {
+			break;
+		}
+		p = shared_multi_heap_aligned_alloc(SMH_REG_ATTR_EXTERNAL, 16, mid);
+		if (p) {
+			shared_multi_heap_free(p);
+			lo = mid;
+		} else {
+			hi = mid;
+		}
+	}
+	return lo;
+}
+
+static uint32_t wamr_guest_pages(void)
+{
+	size_t hole = wamr_largest_free();
+	size_t budget = hole > ASTER_WAMR_RESERVE ? hole - ASTER_WAMR_RESERVE : 0;
+	size_t cap = CONFIG_ASTER_WAMR_HEAP_SIZE;
+
+	if (budget > cap) {
+		budget = cap;
+	}
+	return (uint32_t)(budget / 65536u);
+}
 static bool runtime_inited;
 
 /* single running app (V1) */
@@ -58,7 +158,6 @@ static void relaunch_policy_after(const char *exited_id);
  * WAMR exec_env is thread-bound; keeping load/init/start/event-loop/stop/
  * teardown on one thread avoids per-launch races and guarantees the
  * self-exit / trap paths always reclaim `current`. */
-K_THREAD_STACK_DEFINE(app_stack_area, CONFIG_ASTER_APP_STACK_SIZE);
 static struct k_thread app_thread_obj;
 static aster_app_ctx_t *worker_pending; /* ctx handed to the worker */
 static int worker_result;             /* start result, valid after worker_ready */
@@ -195,39 +294,41 @@ int aster_runtime_init(void)
 	}
 	k_mutex_init(&app_lock);
 
-	runtime_pool = aster_psram_alloc(RUNTIME_POOL_SIZE);
-	if (!runtime_pool) {
-		LOG_ERR("runtime pool alloc failed (%u)", RUNTIME_POOL_SIZE);
-		return -ENOMEM;
-	}
-
-	args.mem_alloc_type = Alloc_With_Pool;
-	args.mem_alloc_option.pool.heap_buf = runtime_pool;
-	args.mem_alloc_option.pool.heap_size = RUNTIME_POOL_SIZE;
+	args.mem_alloc_type = Alloc_With_Allocator;
+	args.mem_alloc_option.allocator.malloc_func = (void *)wamr_malloc;
+	args.mem_alloc_option.allocator.realloc_func = (void *)wamr_realloc;
+	args.mem_alloc_option.allocator.free_func = (void *)wamr_free;
 	args.n_native_symbols = aster_native_symbol_count();
 	args.native_symbols = aster_native_symbols();
 	args.native_module_name = "env";
 
 	if (!wasm_runtime_full_init(&args)) {
-		aster_psram_free(runtime_pool);
-		runtime_pool = NULL;
 		LOG_ERR("wasm_runtime_full_init failed");
 		return -EIO;
 	}
-	runtime_inited = true;
 	k_sem_init(&worker_go, 0, 1);
 	k_sem_init(&worker_ready, 0, 1);
 	k_sem_init(&worker_done, 0, 1);
 	k_work_init(&relaunch_work, relaunch_fn);
-	k_thread_create(&app_thread_obj, app_stack_area,
-			K_THREAD_STACK_SIZEOF(app_stack_area), worker_fn,
+	k_thread_stack_t *app_stack = aster_dram_alloc(
+			K_KERNEL_STACK_LEN(CONFIG_ASTER_APP_STACK_SIZE));
+
+	if (app_stack == NULL) {
+		LOG_ERR("app stack alloc failed");
+		return -ENOMEM;
+	}
+	k_thread_create(&app_thread_obj, app_stack,
+			K_KERNEL_STACK_LEN(CONFIG_ASTER_APP_STACK_SIZE) -
+				K_KERNEL_STACK_RESERVED, worker_fn,
 			NULL, NULL, NULL, K_PRIO_PREEMPT(7), 0, K_NO_WAIT);
 	k_thread_name_set(&app_thread_obj, "aster_app");
+	runtime_inited = true;
 
 	uint32_t vmaj, vmin, vpat;
 	wasm_runtime_get_version(&vmaj, &vmin, &vpat);
-	LOG_INF("ASTER runtime ready (ABI %u.%u, pool %d KB, WAMR %u.%u.%u)",
-		ASTER_ABI_MAJOR, ASTER_ABI_MINOR, RUNTIME_POOL_SIZE / 1024, vmaj, vmin, vpat);
+	LOG_INF("ASTER runtime ready (ABI %u.%u, guest cap %d KB, WAMR %u.%u.%u)",
+		ASTER_ABI_MAJOR, ASTER_ABI_MINOR, CONFIG_ASTER_WAMR_HEAP_SIZE / 1024,
+		vmaj, vmin, vpat);
 	return 0;
 }
 
@@ -330,15 +431,28 @@ static int ctx_load(aster_app_ctx_t *ctx, const aster_app_rec_t *rec)
 
 	uint32_t stack_size = rec->mem_stack ? rec->mem_stack : 65536;
 	uint32_t heap_size = rec->mem_heap ? rec->mem_heap : 262144;
+	uint32_t pages = wamr_guest_pages();
+	uint32_t budget = pages * 65536u;
+	InstantiationArgs iargs = { 0 };
+
 	if (stack_size > 512 * 1024) {
 		stack_size = 512 * 1024;
 	}
 	if (heap_size > 4 * 1024 * 1024) {
 		heap_size = 4 * 1024 * 1024;
 	}
+	/* Host heap lives inside the linear memory this cap bounds. Leave one
+	 * page for the module's own initial memory when the hole is tight. */
+	if (budget > 65536u && heap_size + 65536u > budget) {
+		heap_size = budget - 65536u;
+	}
+	iargs.default_stack_size = stack_size;
+	iargs.host_managed_heap_size = heap_size;
+	iargs.max_memory_pages = pages;
+	LOG_INF("guest linear cap %u pages (%u KB heap)", pages, heap_size / 1024u);
 
-	ctx->module_inst = wasm_runtime_instantiate(ctx->module, stack_size, heap_size,
-						   error_buf, sizeof(error_buf));
+	ctx->module_inst = wasm_runtime_instantiate_ex(ctx->module, &iargs,
+						       error_buf, sizeof(error_buf));
 	if (!ctx->module_inst) {
 		LOG_ERR("instantiate: %s", error_buf);
 		return -ENOMEM;
@@ -430,6 +544,9 @@ static void drain_keys(aster_app_ctx_t *ctx)
 	aster_key_evt_t kev[ASTER_PLAT_MAX_KEYS];
 	int n = aster_plat_input_keys_poll(kev, ASTER_PLAT_MAX_KEYS);
 	for (int i = 0; i < n && !ctx->quit; i++) {
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+		if (aster_qpanel_exit_is_open()) continue;
+#endif
 		/* Global exit key (platform INPUT_KEY_* code, see Kconfig):
 		 * intercepted BEFORE delivery. A press cleanly quits the
 		 * foreground app; the normal launch policy then relaunches the
@@ -528,18 +645,14 @@ static void ui_service(aster_app_ctx_t *ctx)
 				continue;
 			}
 			if (g == ASTER_GEST_PANEL_UP) {
-				/* Pull-up quits the app. Same route as the exit
-				 * key in drain_keys(): set the flags and let the
-				 * loop fall out. Deliberately NOT a synthesised
-				 * key event -- the app never asked for one, and
-				 * inventing an input it did not receive is how a
-				 * "quit gesture" turns into a stray menu. */
-				LOG_INF("runtime: pull-up (%d,%d) -> quitting %s",
-					(int)tev[i].x, (int)tev[i].y, ctx->id);
-				ctx->exit_clean = true;
-				ctx->quit = true;
-				continue;
-			}
+                /* The existing pull-up gesture asks; only the confirmation
+                 * callback below may actually end the APP. */
+                bool opened=aster_qpanel_request_exit(ctx->rec->name);
+                aster_gesture_reset();
+                LOG_INF("runtime: pull-up -> return confirmation %s (%s)",
+                        ctx->id,opened?"open":"unavailable");
+                continue;
+            }
 		}
 
 		/* Nothing is delivered to the guest while the sheet is up: it
@@ -611,6 +724,10 @@ static void ui_service(aster_app_ctx_t *ctx)
 	 * waits. The screen tree holds the sheet and nothing else, so no
 	 * launcher pixels leak from this pump. */
 	aster_ui_lvgl_pump();
+ if(aster_qpanel_take_exit_confirmed()) {
+  ctx->exit_clean=true;ctx->quit=true;
+  LOG_INF("runtime: confirmed return -> %s",ctx->id);
+ }
 #else
 	/* Headless: no gestures, no sheet, no LVGL -- just the guest's own
 	 * input, and therefore nothing worth doing while it is parked. The
@@ -674,7 +791,11 @@ static void app_event_loop(aster_app_ctx_t *ctx)
 		 * that stops draining the shell's screenshot poll. */
 		ui_service(ctx);
 
-		if (ctx->paused) {
+		if (ctx->paused
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+            || aster_qpanel_exit_is_open()
+#endif
+        ) {
 			k_msleep(20);
 			continue;
 		}
@@ -920,6 +1041,15 @@ static void worker_fn(void *p1, void *p2, void *p3)
 		}
 		worker_pending = NULL;
 
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+		if (strcmp(ctx->id, "aster.reader") == 0 ||
+		    strcmp(ctx->id, "aster.player") == 0 ||
+		    strstr(ctx->id, "lyric") != NULL ||
+		    strstr(ctx->id, "chat") != NULL ||
+		    strstr(ctx->id, ".ai") != NULL) {
+			aster_font_sd_session_begin();
+		}
+#endif
 		app_event_loop(ctx);
 
 		/* teardown (wasm calls must run on this thread) */
@@ -935,6 +1065,9 @@ static void worker_fn(void *p1, void *p2, void *p3)
 		strncpy(id, ctx->id, sizeof(id) - 1);
 		id[sizeof(id) - 1] = 0;
 		bool crashed = ctx->crashed;
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+		aster_font_sd_session_end();
+#endif
 		ctx_cleanup(ctx);
 		k_free(ctx);
 

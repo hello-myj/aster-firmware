@@ -21,6 +21,7 @@
 #include <zephyr/net/wifi_mgmt.h>
 
 #include "aster_kv.h"
+#include "aster_mem.h"
 
 LOG_MODULE_REGISTER(aster_wifi, LOG_LEVEL_INF);
 
@@ -69,7 +70,7 @@ static K_MUTEX_DEFINE(job_mu);
  * chain exceeds 3 KB and used to overwrite the adjacent sleeping audio
  * thread's saved context. Reserve the same stack budget as the main thread
  * so filesystem calls and their interrupt/context-save frames fit. */
-static K_THREAD_STACK_DEFINE(job_stack, 8192);
+static k_thread_stack_t *job_stack;
 static struct k_work_q job_q;
 static bool job_q_up;
 static bool job_busy;
@@ -771,8 +772,15 @@ static int queue_wifi_job(uint32_t op, const char *ssid, const char *psk)
 
 	k_mutex_lock(&job_mu, K_FOREVER);
 	if (!job_q_up) {
+		if (job_stack == NULL) {
+			job_stack = aster_dram_alloc(K_KERNEL_STACK_LEN(8192));
+		}
+		if (job_stack == NULL) {
+			k_mutex_unlock(&job_mu);
+			return -ENOMEM;
+		}
 		k_work_queue_start(&job_q, job_stack,
-				   K_THREAD_STACK_SIZEOF(job_stack),
+				   K_KERNEL_STACK_LEN(8192) - K_KERNEL_STACK_RESERVED,
 				   K_PRIO_PREEMPT(12), NULL);
 		job_q_up = true;
 	}

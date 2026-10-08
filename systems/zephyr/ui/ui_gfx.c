@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/init.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
@@ -79,6 +80,9 @@ static inline uint16_t *row_at(const ppg_target_t *t, uint32_t y)
  * flag (it is linked standalone into the host preview), so the pair is
  * always flipped together -- nothing else may assign either one. */
 static bool s_out_be;
+/* Ordinary surfaces rasterize inside this box when it is set. A panel
+ * canvas leaves it clear and repaints every command in full. */
+static uint32_t s_clip_x, s_clip_y, s_clip_w, s_clip_h;
 
 static inline void set_out_be(bool out_be)
 {
@@ -135,10 +139,25 @@ static inline bool clip_rect(const ppg_target_t *t, int32_t x, int32_t y,
 	if (w == 0u || h == 0u) {
 		return false;
 	}
-	int32_t x0 = x > 0 ? x : 0;
-	int32_t y0 = y > 0 ? y : 0;
-	int32_t x1 = x + (int32_t)w < (int32_t)t->w ? x + (int32_t)w : (int32_t)t->w;
-	int32_t y1 = y + (int32_t)h < (int32_t)t->h ? y + (int32_t)h : (int32_t)t->h;
+	int32_t lim_x = (int32_t)t->w;
+	int32_t lim_y = (int32_t)t->h;
+	int32_t min_x = 0;
+	int32_t min_y = 0;
+
+	if (s_clip_w && s_clip_h) {
+		min_x = (int32_t)s_clip_x;
+		min_y = (int32_t)s_clip_y;
+		if ((int32_t)(s_clip_x + s_clip_w) < lim_x) {
+			lim_x = (int32_t)(s_clip_x + s_clip_w);
+		}
+		if ((int32_t)(s_clip_y + s_clip_h) < lim_y) {
+			lim_y = (int32_t)(s_clip_y + s_clip_h);
+		}
+	}
+	int32_t x0 = x > min_x ? x : min_x;
+	int32_t y0 = y > min_y ? y : min_y;
+	int32_t x1 = x + (int32_t)w < lim_x ? x + (int32_t)w : lim_x;
+	int32_t y1 = y + (int32_t)h < lim_y ? y + (int32_t)h : lim_y;
 
 	if (x1 <= x0 || y1 <= y0) {
 		return false;
@@ -194,11 +213,24 @@ static void fill_row(uint16_t *dst, uint32_t n, uint16_t c)
 static void op_clear(ppg_target_t *t, const aster_gfx_cmd_t *c, acc_t *acc)
 {
 	uint16_t col = ASTER_GFX_U16(c->w[1]);
+	uint32_t x0 = 0, y0 = 0, x1 = t->w, y1 = t->h;
 
-	for (uint32_t y = 0; y < t->h; y++) {
-		fill_row(row_at(t, y), t->w, col);
+	if (s_clip_w && s_clip_h) {
+		x0 = s_clip_x;
+		y0 = s_clip_y;
+		x1 = s_clip_x + s_clip_w;
+		y1 = s_clip_y + s_clip_h;
+		if (x1 > t->w) {
+			x1 = t->w;
+		}
+		if (y1 > t->h) {
+			y1 = t->h;
+		}
 	}
-	acc_merge(acc, 0, 0, t->w, t->h);
+	for (uint32_t y = y0; y < y1; y++) {
+		fill_row(row_at(t, y) + x0, x1 - x0, col);
+	}
+	acc_merge(acc, x0, y0, x1, y1);
 }
 
 static void op_rect(ppg_target_t *t, const aster_gfx_cmd_t *c, acc_t *acc)
@@ -237,6 +269,18 @@ static void run_px(ppg_target_t *t, int32_t py, int32_t a, int32_t b,
 	}
 	if (b >= (int32_t)t->w) {
 		b = (int32_t)t->w - 1;
+	}
+	if (s_clip_w && s_clip_h) {
+		if (py < (int32_t)s_clip_y ||
+		    py >= (int32_t)(s_clip_y + s_clip_h)) {
+			return;
+		}
+		if (a < (int32_t)s_clip_x) {
+			a = (int32_t)s_clip_x;
+		}
+		if (b >= (int32_t)(s_clip_x + s_clip_w)) {
+			b = (int32_t)(s_clip_x + s_clip_w) - 1;
+		}
 	}
 	if (b < a) {
 		return;
@@ -319,10 +363,23 @@ static void op_rect_round_legacy(ppg_target_t *t, int32_t x, int32_t y, uint32_t
 static void fill_span(ppg_target_t *t, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
 		      uint16_t col, acc_t *acc)
 {
-	int32_t cx0 = x0 < 0 ? 0 : x0;
-	int32_t cy0 = y0 < 0 ? 0 : y0;
-	int32_t cx1 = x1 > (int32_t)t->w ? (int32_t)t->w : x1;
-	int32_t cy1 = y1 > (int32_t)t->h ? (int32_t)t->h : y1;
+	int32_t min_x = 0, min_y = 0;
+	int32_t max_x = (int32_t)t->w, max_y = (int32_t)t->h;
+
+	if (s_clip_w && s_clip_h) {
+		min_x = (int32_t)s_clip_x;
+		min_y = (int32_t)s_clip_y;
+		if ((int32_t)(s_clip_x + s_clip_w) < max_x) {
+			max_x = (int32_t)(s_clip_x + s_clip_w);
+		}
+		if ((int32_t)(s_clip_y + s_clip_h) < max_y) {
+			max_y = (int32_t)(s_clip_y + s_clip_h);
+		}
+	}
+	int32_t cx0 = x0 < min_x ? min_x : x0;
+	int32_t cy0 = y0 < min_y ? min_y : y0;
+	int32_t cx1 = x1 > max_x ? max_x : x1;
+	int32_t cy1 = y1 > max_y ? max_y : y1;
 
 	if (cx0 >= cx1 || cy0 >= cy1) {
 		return;
@@ -513,6 +570,12 @@ static inline void px_a(ppg_target_t *t, int32_t x, int32_t y, uint16_t c,
 {
 	if (x < 0 || y < 0 || x >= (int32_t)t->w || y >= (int32_t)t->h ||
 	    a == 0u) {
+		return;
+	}
+	if (s_clip_w && s_clip_h &&
+	    (x < (int32_t)s_clip_x || y < (int32_t)s_clip_y ||
+	     x >= (int32_t)(s_clip_x + s_clip_w) ||
+	     y >= (int32_t)(s_clip_y + s_clip_h))) {
 		return;
 	}
 	uint16_t *d = row_at(t, (uint32_t)y) + x;
@@ -1211,36 +1274,101 @@ static const char *const gfx_op_name[GFX_OP_BUCKETS] = {
 	"TEXT", "reserved", "BMP", "BMP_S", "BMP_A", "BMP_SA",
 };
 
-/* Dump the histogram accumulated since the last call, then clear it. Called
- * on the same 64-frame cadence as the aggregate "gfx tim:" line. */
-void aster_gfx_op_timing_emit(void)
+/* The 64-frame timing dump (the aggregate "gfx tim:" line plus this
+ * histogram) is formatted and written from its own thread, not the caller's:
+ * the caller is the app's render thread, whose frame (raster ~55ms + flush
+ * ~11ms out of a 69ms sample period) leaves ~3ms of slack, while a
+ * synchronous console line costs milliseconds - the burst every 64 frames
+ * was enough to miss the deadline and show as a periodic hitch. The counters
+ * are the render thread's state, so the snapshot is taken there; only
+ * formatting and the console writes move. The worker sits below the app
+ * thread (preempt 7) and above idle, so it runs in the app's inter-frame
+ * sleep and never delays a frame. */
+static struct k_work_q s_tim_wq;
+static struct k_work s_tim_work;
+static uint32_t s_tim_snap[6]; /* ras, flu, ras_max, flu_max, cmds, px */
+static uint32_t s_op_snap_cyc[GFX_OP_BUCKETS];
+static uint32_t s_op_snap_n[GFX_OP_BUCKETS];
+
+static void gfx_timing_dump(struct k_work *work)
 {
 	uint32_t total = 0;
 
+	ARG_UNUSED(work);
+	LOG_INF("gfx tim: raster=%u us flush=%u us sum=%u us "
+		"(max %u/%u) cmds=%u flushed=%u px",
+		(unsigned)s_tim_snap[0], (unsigned)s_tim_snap[1],
+		(unsigned)(s_tim_snap[0] + s_tim_snap[1]),
+		(unsigned)s_tim_snap[2], (unsigned)s_tim_snap[3],
+		(unsigned)s_tim_snap[4], (unsigned)s_tim_snap[5]);
+
 	for (uint32_t i = 0; i < GFX_OP_BUCKETS; i++) {
-		total += s_op_cyc[i];
+		total += s_op_snap_cyc[i];
 	}
 	if (!total) {
 		return;
 	}
 	/* per-op us/frame = cycles / 64 frames, then to us */
 	for (uint32_t i = 0; i < GFX_OP_BUCKETS; i++) {
-		if (!s_op_n[i]) {
+		if (!s_op_snap_n[i]) {
 			continue;
 		}
-		uint32_t us = k_cyc_to_us_floor32(s_op_cyc[i]) / 64u;
-		uint32_t pct = (uint32_t)((uint64_t)s_op_cyc[i] * 100u / total);
+		uint32_t us = k_cyc_to_us_floor32(s_op_snap_cyc[i]) / 64u;
+		uint32_t pct = (uint32_t)((uint64_t)s_op_snap_cyc[i] * 100u / total);
 
 		if (us >= 100u || pct >= 3u) {
 			LOG_INF("gfx op: %-8s %5u us/frame %3u%%  n=%u",
 				gfx_op_name[i], (unsigned)us, (unsigned)pct,
-				(unsigned)(s_op_n[i] / 64u));
+				(unsigned)(s_op_snap_n[i] / 64u));
 		}
-		s_op_cyc[i] = 0;
-		s_op_n[i] = 0;
 	}
 }
+
+static int gfx_timing_wq_init(void)
+{
+	k_thread_stack_t *stack = aster_dram_alloc(K_KERNEL_STACK_LEN(2048));
+
+	k_work_queue_init(&s_tim_wq);
+	if (stack == NULL) {
+		LOG_ERR("gfx timing stack alloc failed");
+		return -ENOMEM;
+	}
+	k_work_queue_start(&s_tim_wq, stack,
+			   K_KERNEL_STACK_LEN(2048) - K_KERNEL_STACK_RESERVED,
+			   K_PRIO_PREEMPT(10), NULL);
+	k_thread_name_set(&s_tim_wq.thread, "gfx_tim");
+	k_work_init(&s_tim_work, gfx_timing_dump);
+	return 0;
+}
+SYS_INIT(gfx_timing_wq_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+
+/* Snapshot the histogram and the aggregate numbers (both are the render
+ * thread's state), then clear them; the worker prints from the snapshot. */
+void aster_gfx_timing_report(uint32_t raster_us, uint32_t flush_us,
+			     uint32_t raster_max_us, uint32_t flush_max_us,
+			     uint32_t cmds, uint32_t px)
+{
+	s_tim_snap[0] = raster_us;
+	s_tim_snap[1] = flush_us;
+	s_tim_snap[2] = raster_max_us;
+	s_tim_snap[3] = flush_max_us;
+	s_tim_snap[4] = cmds;
+	s_tim_snap[5] = px;
+	memcpy(s_op_snap_cyc, s_op_cyc, sizeof(s_op_cyc));
+	memcpy(s_op_snap_n, s_op_n, sizeof(s_op_n));
+	memset(s_op_cyc, 0, sizeof(s_op_cyc));
+	memset(s_op_n, 0, sizeof(s_op_n));
+	k_work_submit(&s_tim_work);
+}
 #endif /* CONFIG_ASTER_GFX_TIMING */
+
+void aster_gfx_set_clip(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
+{
+	s_clip_x = x;
+	s_clip_y = y;
+	s_clip_w = w;
+	s_clip_h = h;
+}
 
 int aster_gfx_exec_into(uint8_t *buf565, uint32_t w, uint32_t h, uint32_t pitch,
 		      const aster_gfx_cmd_t *cmds, uint32_t n,
@@ -1248,10 +1376,17 @@ int aster_gfx_exec_into(uint8_t *buf565, uint32_t w, uint32_t h, uint32_t pitch,
 		      uint32_t *dirty_x, uint32_t *dirty_y, uint32_t *dirty_w,
 		      uint32_t *dirty_h, bool out_be)
 {
+	/* Commands paint only their own pixels; the accumulator is the
+	 * dirty box the present uses. A panel canvas (out_be) still has to
+	 * repaint every pixel it will show, because its front buffer holds
+	 * an older frame. */
 	ppg_target_t t = { .px = (uint16_t *)buf565, .w = w, .h = h, .pitch = pitch };
 	acc_t acc = { 0 };
 
 	set_out_be(out_be);
+	if (out_be) {
+		s_clip_x = s_clip_y = s_clip_w = s_clip_h = 0;
+	}
 
 	s_last_buf = buf565;
 	s_last_w = w;

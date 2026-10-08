@@ -40,7 +40,7 @@ config ASTER_CFG_LAUNCHER
     bool "Built-in system desktop"
     default y
 config ASTER_CFG_USB_CONSOLE
-    bool "USB-only debugging (shell uses Serial/JTAG; file service paused)"
+    bool "USB console (shell, logs and file transfer on Serial/JTAG)"
     depends on ASTER_HW_WAVESHARE_35B
     default n
 endmenu

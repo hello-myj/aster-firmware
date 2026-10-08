@@ -73,6 +73,12 @@ static K_MUTEX_DEFINE(sess_mu);
 static K_MUTEX_DEFINE(effect_mu);
 static K_SEM_DEFINE(play_go, 0, 1);
 static K_SEM_DEFINE(play_wake, 0, 1);
+/* The player thread and its stack exist only while a session is running. */
+static struct k_thread play_thread;
+static void *play_stack;
+static bool play_alive;
+static bool play_join;
+static K_MUTEX_DEFINE(play_life);
 
 static struct fs_file_t sess_file;
 static struct {
@@ -81,6 +87,13 @@ static struct {
 	size_t off;
 	bool playing;
 } effects[EFFECT_SLOTS];
+
+/* Firmware UI voice: flash-resident mono PCM, independent of APP handles. */
+static struct {
+ const int16_t *pcm;
+ size_t frames, off;
+ unsigned gain, priority;
+} ui_voice;
 
 static struct {
 	uint8_t *buf;
@@ -482,6 +495,8 @@ static int i2s_submit(void *blk, bool *started)
 		bytes[slot] = effects[slot].playing ?
 			MIN(effects[slot].size - effects[slot].off, (size_t)AUDIO_BLOCK) : 0;
 	}
+ size_t ui_frames = ui_voice.pcm ? MIN(ui_voice.frames-ui_voice.off,
+                                      AUDIO_BLOCK/ASTER_PLAT_AUDIO_FRAME) : 0;
 	for (size_t i = 0; i < AUDIO_BLOCK / sizeof(int16_t); i++) {
 		int32_t value = dst[i];
 		for (int slot = 0; slot < EFFECT_SLOTS; slot++) {
@@ -491,6 +506,8 @@ static int i2s_submit(void *blk, bool *started)
 				value += src[i];
 			}
 		}
+  size_t frame=i/CONFIG_ASTER_AUDIO_CHANNELS;
+  if(frame<ui_frames) value += (int32_t)ui_voice.pcm[ui_voice.off+frame]*(int32_t)ui_voice.gain/1000;
 		dst[i] = (int16_t)CLAMP(value, -32768, 32767);
 	}
 	for (int slot = 0; slot < EFFECT_SLOTS; slot++) {
@@ -499,6 +516,8 @@ static int i2s_submit(void *blk, bool *started)
 			effects[slot].playing = false;
 		}
 	}
+ ui_voice.off += ui_frames;
+ if(ui_voice.off>=ui_voice.frames) ui_voice.pcm=NULL;
 	k_mutex_unlock(&effect_mu);
 	int err = i2s_write(i2s_dev, blk, AUDIO_BLOCK);
 
@@ -1104,7 +1123,16 @@ static void player_loop(void *a, void *b, void *c)
 	ARG_UNUSED(c);
 
 	for (;;) {
-		k_sem_take(&play_go, K_FOREVER);
+		/* Caller holds play_life across the give, so a token posted
+		 * for this thread is visible once the lock is acquired. An
+		 * empty semaphore means the session is over: drop the stack. */
+		k_mutex_lock(&play_life, K_FOREVER);
+		if (k_sem_take(&play_go, K_NO_WAIT) != 0) {
+			play_alive = false;
+			k_mutex_unlock(&play_life);
+			return;
+		}
+		k_mutex_unlock(&play_life);
 
 		k_mutex_lock(&sess_mu, K_FOREVER);
 		uint8_t *buf = sess.buf;
@@ -1227,7 +1255,7 @@ static void player_loop(void *a, void *b, void *c)
 			if (effect_only) {
 				err = feed_silence(&started);
 				k_mutex_lock(&effect_mu, K_FOREVER);
-				bool active = false;
+				bool active = ui_voice.pcm != NULL;
 				for (int i = 0; i < EFFECT_SLOTS; i++) {
 					active |= effects[i].playing;
 				}
@@ -1238,7 +1266,7 @@ static void player_loop(void *a, void *b, void *c)
 					 * A concurrent cue waits for IDLE and starts a new session. */
 					k_mutex_lock(&sess_mu, K_FOREVER);
 					k_mutex_lock(&effect_mu, K_FOREVER);
-					active = false;
+					active = ui_voice.pcm != NULL;
 					for (int i = 0; i < EFFECT_SLOTS; i++) {
 						active |= effects[i].playing;
 					}
@@ -1328,11 +1356,34 @@ static void player_loop(void *a, void *b, void *c)
 	}
 }
 
-/* Above the wasm app worker (preempt 7): a lyrics/page commit runs
- * lv_refr_now on the app thread and would starve this loop long enough
- * for the ~48 ms I2S queue to underrun, which used to drop the session. */
-K_THREAD_DEFINE(aster_aplay, AUDIO_STACK, player_loop, NULL, NULL, NULL,
-		K_PRIO_PREEMPT(6), K_FP_REGS, 0);
+static int wake_player(void)
+{
+	k_mutex_lock(&play_life, K_FOREVER);
+	if (!play_alive) {
+		/* The exiting player drops play_life before it returns, so
+		 * joining while this lock is held cannot deadlock. */
+		if (play_join) {
+			k_thread_join(&play_thread, K_FOREVER);
+			play_join = false;
+		}
+		aster_dram_free(play_stack);
+		play_stack = aster_dram_alloc(K_KERNEL_STACK_LEN(AUDIO_STACK));
+		if (!play_stack) {
+			k_mutex_unlock(&play_life);
+			return -ENOMEM;
+		}
+		play_alive = true;
+		play_join = true;
+		k_thread_create(&play_thread, play_stack,
+				K_KERNEL_STACK_LEN(AUDIO_STACK) - K_KERNEL_STACK_RESERVED,
+				player_loop, NULL, NULL, NULL,
+				K_PRIO_PREEMPT(6), K_FP_REGS, K_NO_WAIT);
+		k_thread_name_set(&play_thread, "aster_aplay");
+	}
+	k_sem_give(&play_go);
+	k_mutex_unlock(&play_life);
+	return 0;
+}
 
 static int play_blocks(const uint8_t *pcm, size_t size)
 {
@@ -1692,6 +1743,7 @@ int aster_plat_audio_set_volume(int percent)
 		return -EINVAL;
 	}
 	g_vol = (uint8_t)percent;
+ if(!percent) aster_plat_audio_ui_stop();
 	k_mutex_lock(&audio_lock, K_FOREVER);
 	int err = codecs_init();
 	if (err == 0) {
@@ -1784,6 +1836,52 @@ done:
 	return err;
 }
 
+/* Never wait for hardware or a closing session on the UI worker. A busy cue
+ * is dropped, never queued for late playback. PCM lifetime must be static. */
+int aster_plat_audio_ui_play(const int16_t *pcm, size_t frames, unsigned gain,
+                            unsigned priority)
+{
+ if(!pcm || !frames || gain>1000 || CONFIG_ASTER_AUDIO_BITS!=16) return -EINVAL;
+ if(!g_vol) return -EAGAIN;
+ if(k_mutex_lock(&sess_mu,K_NO_WAIT)) return -EAGAIN;
+ if(sess.effect_closing || sess.stop || sess.state==ASTER_AUDIO_PAUSED ||
+    k_mutex_lock(&effect_mu,K_NO_WAIT)) {
+  k_mutex_unlock(&sess_mu);return -EAGAIN;
+ }
+ if(ui_voice.pcm && ui_voice.priority>priority) {
+  k_mutex_unlock(&effect_mu);k_mutex_unlock(&sess_mu);return -EAGAIN;
+ }
+ ui_voice.pcm=pcm;ui_voice.frames=frames;ui_voice.off=0;
+ ui_voice.gain=gain;ui_voice.priority=priority;
+ k_mutex_unlock(&effect_mu);
+ if(sess.state==ASTER_AUDIO_IDLE) {
+  sess.effect_only=true;sess.size=1;sess.off=0;sess.err=0;
+  sess.state=ASTER_AUDIO_PLAYING;
+  if (wake_player() != 0) {
+   sess_clear_locked();
+   k_mutex_unlock(&sess_mu);
+   return -ENOMEM;
+  }
+ }
+ k_mutex_unlock(&sess_mu);return 0;
+}
+void aster_plat_audio_ui_stop(void)
+{
+ k_mutex_lock(&effect_mu,K_FOREVER);ui_voice.pcm=NULL;
+ k_mutex_unlock(&effect_mu);
+}
+
+/* On launcher handoff, finish the idle UI session before the APP can use
+ * synchronous audio/record. Never stop an APP background playback session. */
+void aster_plat_audio_ui_release(void)
+{
+ aster_plat_audio_ui_stop();
+ k_mutex_lock(&sess_mu,K_FOREVER);
+ bool idle_ui=sess.effect_only;
+ k_mutex_unlock(&sess_mu);
+ if(idle_ui) (void)aster_plat_audio_stop();
+}
+
 int aster_plat_audio_effect_play(uint32_t handle)
 {
 	if (!handle || handle > EFFECT_SLOTS) {
@@ -1820,7 +1918,14 @@ retry:
 		sess.off = 0;
 		sess.err = 0;
 		sess.state = ASTER_AUDIO_PLAYING;
-		k_sem_give(&play_go);
+		if (wake_player() != 0) {
+			k_mutex_lock(&effect_mu, K_FOREVER);
+			effects[handle - 1].playing = false;
+			k_mutex_unlock(&effect_mu);
+			sess_clear_locked();
+			k_mutex_unlock(&sess_mu);
+			return -ENOMEM;
+		}
 	}
 	k_mutex_unlock(&sess_mu);
 	return 0;
@@ -2066,7 +2171,13 @@ int aster_plat_audio_start_path(const char *path)
 
 	while (k_sem_take(&play_wake, K_NO_WAIT) == 0) {
 	}
-	k_sem_give(&play_go);
+	if (wake_player() != 0) {
+		k_mutex_lock(&sess_mu, K_FOREVER);
+		file_abort();
+		sess_clear_locked();
+		k_mutex_unlock(&sess_mu);
+		return -ENOMEM;
+	}
 	return 0;
 }
 

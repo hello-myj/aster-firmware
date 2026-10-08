@@ -1,6 +1,7 @@
 # West-tree patches
 
-The base patch, Waveshare QSPI correction and opt-in PSRAM TX DMA patch, applied to `zephyr/`
+The base patch, Waveshare QSPI correction, shared-I2C recovery, USB console
+batching and opt-in PSRAM TX DMA patch, applied to `zephyr/`
 (the west tree). It must be (re-)applied after any `west update` or
 checkout of a different Zephyr revision.
 
@@ -335,4 +336,69 @@ alignment/cache-writeback checks alone do not establish physical stability.
 
 ```bash
 git -C /path/to/zephyr apply /path/to/aster-firmware/patches/aster_zephyr_v4.4.2_psram_dma.patch
+```
+
+## aster_zephyr_v4.4.2_usb_serial_console_batch.patch
+
+Batch USB Serial/JTAG console output. `serial_esp32_usb_poll_out` flushed
+(`WR_DONE`) after every single character, and log lines reach it one byte at a
+time: with `CONFIG_LOG_MODE_IMMEDIATE` the shell log backend re-enables its
+transport in blocking mode (`z_shell_log_backend_enable`), whose write path is
+`polling_write` - a `uart_poll_out` per character. So every byte paid the
+endpoint turnaround between a flush and the FIFO accepting the next byte -
+measured on hardware at ~80us, i.e. 6.5ms for a 75-character log line and 11ms
+for a 140-character one (adjacent-line timestamps in captured logs). With
+immediate mode that stall lands on whatever thread logged; in the cube app a
+burst of six timing lines every 64 frames (30ms+ for the burst, adjacent
+timestamps) was long enough to miss the frame deadline.
+
+Bytes now accumulate in the 64-byte TX FIFO, which the hardware flushes on its
+own when full:
+
+- a `'\n'` flushes synchronously (every log line ends in one, so lines - panic
+  output included - reach the host as before), and so does any byte logged
+  from an ISR;
+- any other byte (shell prompts, character echo) is flushed by a 250us one-shot
+  timer, so typing still echoes immediately;
+- when the timer finds the FIFO still busy (it filled exactly to 64 bytes and
+  auto-flushed), it retries briefly, because a 64-byte packet is an incomplete
+  USB transaction until more data or a zero-length packet follows (see the
+  flush note in `usb_serial_jtag_ll.h`); the retry is bounded so a disconnected
+  host cannot leave a timer spinning.
+
+Measured after (waveshare-35b, cube app running, usb-debug image): the same
+six-line burst costs 4ms wall (~0.7ms/line, all six timestamps in the same
+millisecond), multi-line shell output (`aster app list`) arrives intact, and
+prompt/echo latency is unchanged (the 250us timer covers newline-less text).
+The companion firmware change (ui_gfx timing dump moved to a worker thread) is
+what actually keeps the burst off the render thread; this patch is what makes
+each line cheap for whichever thread emits it.
+
+The change is unconditional but self-contained to this driver; `fifo_fill`
+(the interrupt-driven path) already batched its flush and is untouched. Apply
+after the other west-tree patches:
+
+```sh
+git -C ../../zephyr apply "$PWD/patches/aster_zephyr_v4.4.2_usb_serial_console_batch.patch"
+```
+
+## aster_zephyr_v4.4.2_sram_tail_heap.patch
+
+On ESP32 with the libc heap in the SRAM tail, place the kernel heap at the
+front of that tail instead of a `.bss` array, and allocate the system
+workqueue and shell stacks from that tail when each thread is created.
+Apply to the Zephyr tree:
+
+```sh
+git -C ../../zephyr apply "$PWD/patches/aster_zephyr_v4.4.2_sram_tail_heap.patch"
+```
+
+## aster_zephyr_v4.4.2_esp_task_stacks.patch
+
+Allocate the ESP timer task and the ESP32-S3 Wi-Fi task stack when the task
+is created, from the same internal tail, instead of keeping them in `.bss`.
+Apply to `modules/hal/espressif`:
+
+```sh
+git -C ../../modules/hal/espressif apply "$PWD/patches/aster_zephyr_v4.4.2_esp_task_stacks.patch"
 ```
