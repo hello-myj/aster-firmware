@@ -23,6 +23,16 @@
  * Firmware may ignore the flag (rotated panel, buffers unavailable); check
  * flags in aster_surface_buffer_t to see what you got. */
 #define ASTER_SURFACE_F_PANEL_CANVAS 0x00000001u
+/* Opt-in compatibility canvas. The app supplies an explicit width and height;
+ * that buffer is its coordinate space. On present the firmware scales it onto
+ * the glass with keep-aspect (scale = min(panel/buf) on each axis), centers
+ * the result and paints the unused margins black. Scale may be greater or
+ * less than one. Touch samples that belong to the surface are mapped back by
+ * subtracting the margin and dividing by the same scale, then clamped into
+ * the buffer. Do not combine with ASTER_SURFACE_F_PANEL_CANVAS: that would
+ * scale a buffer that is already the panel. Surfaces that leave this clear
+ * stay 1:1 with the screen. */
+#define ASTER_SURFACE_F_SCALE_FIT 0x00000002u
 
 typedef struct {
 	uint32_t size;    /* sizeof(aster_surface_desc_t) */

@@ -786,7 +786,12 @@ endmenu
 
 source "Kconfig.zephyr"
 
+# Package identity is the CPU platform, not the board. A package built for
+# xtensa installs on every xtensa board; accelerometer, panel size and the
+# other board facts stay runtime checks (aster_system_has_feature,
+# aster_display_get_info). AOT still uses CONFIG_ASTER_AOT_TARGET_ID.
 config ASTER_TARGET_ID
 	string
-	default "lckfb-s3" if ASTER_HW_LCKFB_S3
-	default "waveshare-35b" if ASTER_HW_WAVESHARE_35B
+	default "xtensa" if ASTER_CPU_ARCH_XTENSA
+	default "riscv" if ASTER_CPU_ARCH_RISCV
+	default "arm" if ASTER_CPU_ARCH_ARM

@@ -1846,6 +1846,220 @@ bool aster_plat_display_app_scaled(void)
 #endif
 }
 
+/* Optional keep-aspect canvas (ASTER_SURFACE_F_SCALE_FIT). Separate from
+ * ASTER_APP_SPACE_DIV: that divisor stays an integer cover of the glass and
+ * is compiled out when it is 1. This map is armed only while a surface that
+ * asked for it is what the glass is showing.
+ *
+ * scale = min(glass_w / buf_w, glass_h / buf_h), evaluated as a cross
+ * multiply so the pixel loop uses an integer numerator and denominator.
+ * The fitted rectangle is centered. Margins are black. */
+static struct {
+	bool active;
+	bool front_ref;
+	uint32_t bw, bh;
+} s_fit;
+
+static uint8_t *s_fit_scratch;
+static size_t s_fit_scratch_bytes;
+
+static void scale_fit_box(uint32_t bw, uint32_t bh, uint32_t gw, uint32_t gh,
+			  uint32_t *dw, uint32_t *dh, uint32_t *mx, uint32_t *my)
+{
+	if ((uint64_t)gw * bh <= (uint64_t)gh * bw) {
+		*dw = gw;
+		*dh = (uint32_t)(((uint64_t)bh * gw) / bw);
+	} else {
+		*dh = gh;
+		*dw = (uint32_t)(((uint64_t)bw * gh) / bh);
+	}
+	if (*dw < 1u) {
+		*dw = 1u;
+	}
+	if (*dh < 1u) {
+		*dh = 1u;
+	}
+	if (*dw > gw) {
+		*dw = gw;
+	}
+	if (*dh > gh) {
+		*dh = gh;
+	}
+	*mx = (gw - *dw) / 2u;
+	*my = (gh - *dh) / 2u;
+}
+
+/* Destination-driven nearest neighbour. `swap` stores panel byte order. */
+static void scale_fit_blit(uint16_t *dst, uint32_t dpitch, bool swap,
+			   const uint8_t *src, uint32_t pitch,
+			   uint32_t bw, uint32_t bh, uint32_t gw, uint32_t gh,
+			   uint32_t dw, uint32_t dh, uint32_t mx, uint32_t my)
+{
+	for (uint32_t dy = 0; dy < gh; dy++) {
+		uint16_t *row = dst + (size_t)dy * dpitch;
+
+		memset(row, 0, (size_t)gw * 2u);
+		if (dy < my || dy >= my + dh) {
+			continue;
+		}
+		uint32_t sy = (uint32_t)(((uint64_t)(dy - my) * bh) / dh);
+		const uint16_t *srow;
+
+		if (sy >= bh) {
+			sy = bh - 1u;
+		}
+		srow = (const uint16_t *)(src + (size_t)sy * pitch * 2u);
+		for (uint32_t dx = mx; dx < mx + dw && dx < gw; dx++) {
+			uint32_t sx = (uint32_t)(((uint64_t)(dx - mx) * bw) / dw);
+			uint16_t v;
+
+			if (sx >= bw) {
+				sx = bw - 1u;
+			}
+			v = srow[sx];
+			row[dx] = swap ? sys_cpu_to_be16(v) : v;
+		}
+	}
+}
+
+static int scale_fit_send_front(uint16_t *dst, uint32_t pw, uint32_t ph)
+{
+	const uint8_t *bytes = (const uint8_t *)dst;
+
+	sys_cache_data_flush_range(dst, (size_t)pw * ph * 2u);
+	glass_note_full(bytes, pw, ph, pw, true);
+#if IS_ENABLED(CONFIG_ASTER_DISP_ASYNC)
+	{
+		uint8_t fi = s_flip;
+		uint8_t slot = (uint8_t)(ASTER_DISP_FLIP_SLOT0 + fi);
+
+		s_slots[slot].job = (struct aster_disp_job){
+			.buf = bytes,
+			.desc = {
+				.buf_size = (size_t)pw * ph * 2u,
+				.width = pw,
+				.height = ph,
+				.pitch = pw,
+			},
+			.px = 0,
+			.py = 0,
+		};
+		disp_slot_arm(slot);
+	}
+#else
+	if (disp_direct_send(&(struct aster_disp_job){
+			.buf = bytes,
+			.desc = {
+				.buf_size = (size_t)pw * ph * 2u,
+				.width = pw,
+				.height = ph,
+				.pitch = pw,
+			},
+		})) {
+		return ASTER_EIO;
+	}
+#endif
+	s_flip ^= 1u;
+	return ASTER_OK;
+}
+
+void aster_plat_display_scale_fit_disarm(void)
+{
+	s_fit.active = false;
+	s_fit.bw = 0;
+	s_fit.bh = 0;
+	if (s_fit.front_ref || s_fit_scratch) {
+		aster_plat_display_flush_drain();
+	}
+	if (s_fit.front_ref) {
+		aster_plat_display_flip_release();
+		s_fit.front_ref = false;
+	}
+	if (s_fit_scratch) {
+		shared_multi_heap_free(s_fit_scratch);
+		s_fit_scratch = NULL;
+		s_fit_scratch_bytes = 0;
+	}
+}
+
+int aster_plat_display_scale_fit_present(const uint8_t *src_le, uint32_t w,
+				       uint32_t h, uint32_t pitch)
+{
+	uint32_t lw, lh, dw, dh, mx, my;
+
+	if (!aster_plat_display_count() || !disp_dev) {
+		return ASTER_ENODEV;
+	}
+	if (!src_le || !w || !h) {
+		return ASTER_EINVAL;
+	}
+	if (!pitch) {
+		pitch = w;
+	}
+	logical_geom(&lw, &lh);
+	scale_fit_box(w, h, lw, lh, &dw, &dh, &mx, &my);
+	/* Unrotated glass: the front buffers are already the full frame the
+	 * wire reads. Draw the keep-aspect picture straight into one of them. */
+	if (s_rot == 0 && IS_ENABLED(CONFIG_ASTER_DISP_FLIP_DBUF)) {
+		if (!s_front_ok) {
+			if (aster_plat_display_flip_acquire() == 0) {
+				s_fit.front_ref = true;
+			}
+		}
+		if (s_front_ok && s_front[s_flip]) {
+			uint8_t fi = s_flip;
+#if IS_ENABLED(CONFIG_ASTER_DISP_ASYNC)
+			disp_slot_acquire((uint8_t)(ASTER_DISP_FLIP_SLOT0 + fi));
+#endif
+			scale_fit_blit((uint16_t *)s_front[fi], lw, true, src_le, pitch,
+				       w, h, lw, lh, dw, dh, mx, my);
+			{
+				int err = scale_fit_send_front((uint16_t *)s_front[fi], lw, lh);
+
+				if (err == ASTER_OK) {
+					s_fit.active = true;
+					s_fit.bw = w;
+					s_fit.bh = h;
+				}
+				return err;
+			}
+		}
+	}
+	/* Rotated panel, or no front buffer: build one logical LE frame and
+	 * hand it to the ordinary full-frame path. AXS still presents that
+	 * frame from row 0; nothing here opens a partial window. */
+	{
+		size_t need = (size_t)lw * lh * 2u;
+
+		if (!s_fit_scratch || s_fit_scratch_bytes < need) {
+			uint8_t *next = shared_multi_heap_aligned_alloc(
+				SMH_REG_ATTR_EXTERNAL, 32, need);
+
+			if (!next) {
+				return ASTER_ENOMEM;
+			}
+			if (s_fit_scratch) {
+				shared_multi_heap_free(s_fit_scratch);
+			}
+			s_fit_scratch = next;
+			s_fit_scratch_bytes = need;
+		}
+		scale_fit_blit((uint16_t *)s_fit_scratch, lw, false, src_le, pitch,
+			       w, h, lw, lh, dw, dh, mx, my);
+		{
+			int err = aster_plat_display_write_at_ex(s_fit_scratch, 0, 0, lw, lh,
+								 lw, false);
+
+			if (err == ASTER_OK) {
+				s_fit.active = true;
+				s_fit.bw = w;
+				s_fit.bh = h;
+			}
+			return err;
+		}
+	}
+}
+
 /* The inverse of the present map: the app pixel under a finger. x,y arrive as
  * LOGICAL pixels -- what aster_plat_input_poll() reports and what the input
  * mapping in aster_runtime.c hands over -- and leave as app pixels.
@@ -1860,21 +2074,50 @@ bool aster_plat_display_app_scaled(void)
  * there is nothing to map and no sample to drop. */
 bool aster_plat_display_app_touch(uint32_t *x, uint32_t *y)
 {
+	/* DIV scaling is unchanged, and it does not run together with a
+	 * scale-fit surface: that surface already names its own coordinate
+	 * space. */
 #if CONFIG_ASTER_APP_SPACE_DIV > 1
-	uint32_t aw, ah, vx, vy;
+	if (disp_dev && s_app_scaled && !s_fit.active) {
+		uint32_t aw, ah, vx, vy;
 
-	if (!disp_dev || !s_app_scaled) {
+		app_geom(&aw, &ah);
+		vx = *x / CONFIG_ASTER_APP_SPACE_DIV;
+		vy = *y / CONFIG_ASTER_APP_SPACE_DIV;
+		*x = vx < aw ? vx : aw - 1u;
+		*y = vy < ah ? vy : ah - 1u;
 		return true;
 	}
-	app_geom(&aw, &ah);
-	vx = *x / CONFIG_ASTER_APP_SPACE_DIV;
-	vy = *y / CONFIG_ASTER_APP_SPACE_DIV;
-	*x = vx < aw ? vx : aw - 1u;
-	*y = vy < ah ? vy : ah - 1u;
-#else
-	ARG_UNUSED(x);
-	ARG_UNUSED(y);
 #endif
+	if (!s_fit.active || !disp_dev || !x || !y || !s_fit.bw || !s_fit.bh) {
+		return true;
+	}
+	{
+		uint32_t lw, lh, dw, dh, mx, my;
+		int32_t rx, ry;
+		uint32_t sx, sy;
+
+		logical_geom(&lw, &lh);
+		scale_fit_box(s_fit.bw, s_fit.bh, lw, lh, &dw, &dh, &mx, &my);
+		rx = (int32_t)*x - (int32_t)mx;
+		ry = (int32_t)*y - (int32_t)my;
+		if (rx < 0) {
+			rx = 0;
+		}
+		if (ry < 0) {
+			ry = 0;
+		}
+		if ((uint32_t)rx >= dw) {
+			rx = (int32_t)dw - 1;
+		}
+		if ((uint32_t)ry >= dh) {
+			ry = (int32_t)dh - 1;
+		}
+		sx = (uint32_t)(((uint64_t)rx * s_fit.bw) / dw);
+		sy = (uint32_t)(((uint64_t)ry * s_fit.bh) / dh);
+		*x = sx < s_fit.bw ? sx : s_fit.bw - 1u;
+		*y = sy < s_fit.bh ? sy : s_fit.bh - 1u;
+	}
 	return true;
 }
 

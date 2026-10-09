@@ -17,6 +17,7 @@
 #include "aster_perms.h"
 #include "aster_platform.h"
 #include "aster_time.h"
+#include "aster_mem.h"
 #if IS_ENABLED(CONFIG_ASTER_IMGDEC)
 #include "imgdec.h"
 #endif
@@ -342,14 +343,29 @@ static int32_t n_surface_create(wasm_exec_env_t env, uint32_t desc_off, uint32_t
 	if (!aster_plat_display_app_space(&aw, &ah)) {
 		return ASTER_ENOTSUP;
 	}
+	/* PANEL_CANVAS already is the glass. Scaling it again would letterbox
+	 * a buffer that was rasterized in panel pixels. */
+	if ((desc->flags & ASTER_SURFACE_F_SCALE_FIT) &&
+	    (desc->flags & ASTER_SURFACE_F_PANEL_CANVAS)) {
+		return ASTER_EINVAL;
+	}
+	bool scale_fit = (desc->flags & ASTER_SURFACE_F_SCALE_FIT) != 0;
+	/* The flag's buffer size is the app's coordinate space, so 0 is not
+	 * "use the panel" -- the app has to say how big that space is. */
+	if (scale_fit && (desc->width == 0 || desc->height == 0)) {
+		return ASTER_EINVAL;
+	}
 	uint32_t w = desc->width ? desc->width : aw;
 	uint32_t h = desc->height ? desc->height : ah;
 	/* Either orientation of the app space is a legal request -- 240x320 is
 	 * the space, 320x240 is the same glass the other way up. Anything
 	 * else has no present path that could put it on the wire: the scaling
-	 * present is written against the app space's own axes. */
+	 * present is written against the app space's own axes. A scale-fit
+	 * surface is the exception: its size is chosen by the app and mapped
+	 * onto the glass later, so it is not clipped to app space. */
 	if (w == 0 || h == 0 ||
-	    !((w <= aw && h <= ah) || (w <= ah && h <= aw))) {
+	    (scale_fit && (w > 4096u || h > 4096u)) ||
+	    (!scale_fit && !((w <= aw && h <= ah) || (w <= ah && h <= aw)))) {
 		return ASTER_EINVAL;
 	}
 	uint32_t fmt = desc->format;
@@ -431,6 +447,7 @@ static int32_t n_surface_create(wasm_exec_env_t env, uint32_t desc_off, uint32_t
 			ctx->surfaces[i].pitch = w;
 			ctx->surfaces[i].format = fmt;
 			ctx->surfaces[i].canvas = canvas;
+			ctx->surfaces[i].scale_fit = scale_fit;
 			*out = ASTER_HTYPE_SURFACE | (uint32_t)(i + 1);
 			return ASTER_OK;
 		}
@@ -464,8 +481,14 @@ static int32_t n_surface_destroy(wasm_exec_env_t env, uint32_t h)
 			wasm_runtime_module_free(ctx->module_inst,
 						 ctx->surfaces[i].app_offset);
 		}
+		bool was_fit = ctx->surfaces[i].scale_fit;
+
 		ctx->surfaces[i].used = false;
 		ctx->surfaces[i].canvas = false;
+		ctx->surfaces[i].scale_fit = false;
+		if (was_fit) {
+			aster_plat_display_scale_fit_disarm();
+		}
 	}
 	return ASTER_OK;
 }
@@ -495,11 +518,40 @@ static int32_t n_surface_acquire(wasm_exec_env_t env, uint32_t h, uint32_t buf_o
 						ctx->surfaces[i].format == ASTER_PIXEL_BGR565) ? 2
 					: (ctx->surfaces[i].format == ASTER_PIXEL_RGB888 ? 3 : 4)),
 		.format = ctx->surfaces[i].format,
-		.flags = ctx->surfaces[i].canvas ? ASTER_SURFACE_F_PANEL_CANVAS : 0u,
+		.flags = (ctx->surfaces[i].canvas ? ASTER_SURFACE_F_PANEL_CANVAS : 0u) |
+			 (ctx->surfaces[i].scale_fit ? ASTER_SURFACE_F_SCALE_FIT : 0u),
 	};
 	size_t n = buf_size < sizeof(sb) ? buf_size : sizeof(sb);
 	memcpy(dst, &sb, n);
 	return ASTER_OK;
+}
+
+/* Scale-fit present. RGB565 is sampled directly. Any other accepted format is
+ * converted once into a firmware RGB565 buffer, then scaled with the same
+ * keep map. The conversion buffer is not the glass; the platform writes the
+ * scaled frame into the existing full-frame present path. */
+static int32_t present_scale_fit(aster_surface_t *s, const uint8_t *src)
+{
+	if (s->format == ASTER_PIXEL_RGB565) {
+		return aster_plat_display_scale_fit_present(src, s->w, s->h, s->pitch);
+	}
+	uint32_t bpp = (s->format == ASTER_PIXEL_BGR565) ? 2
+			 : (s->format == ASTER_PIXEL_RGB888 ? 3 : 4);
+	size_t bytes = (size_t)s->w * s->h * 2u;
+	uint16_t *tmp = aster_psram_alloc(bytes);
+
+	if (!tmp) {
+		return ASTER_ENOMEM;
+	}
+	int err = aster_convert_to_rgb565(src, s->w * bpp, s->format, tmp, s->w * 2u,
+					  s->w, s->h);
+
+	if (!err) {
+		err = aster_plat_display_scale_fit_present((const uint8_t *)tmp, s->w, s->h,
+							   s->w);
+	}
+	aster_psram_free(tmp);
+	return err;
 }
 
 static int32_t n_surface_present(wasm_exec_env_t env, uint32_t h)
@@ -523,6 +575,16 @@ static int32_t n_surface_present(wasm_exec_env_t env, uint32_t h)
 		 * panel-order front buffer, so this is just "hand it over". */
 		return aster_plat_display_canvas_present();
 	}
+	if (s->scale_fit) {
+		uint8_t *fit = (uint8_t *)wasm_runtime_addr_app_to_native(ctx->module_inst,
+									  s->app_offset);
+
+		if (!fit) {
+			return ASTER_EBADF;
+		}
+		return present_scale_fit(s, fit);
+	}
+	aster_plat_display_scale_fit_disarm();
 	uint8_t *src = (uint8_t *)wasm_runtime_addr_app_to_native(ctx->module_inst,
 								  s->app_offset);
 	if (!src) {
@@ -615,6 +677,11 @@ static int32_t n_surface_flush(wasm_exec_env_t env, uint32_t h, uint32_t src_off
 	}
 #endif
 	aster_surface_t *s = &ctx->surfaces[i];
+	if (s->scale_fit) {
+		/* A scale-fit surface is presented as a whole keep-aspect frame.
+		 * A 1:1 region push would ignore the margins and the scale. */
+		return ASTER_ENOTSUP;
+	}
 	if (s->format != ASTER_PIXEL_RGB565) {
 		return ASTER_ENOTSUP; /* flush is the fast 565-only path by design */
 	}
@@ -774,7 +841,12 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
 	if (dw && dh) {
 		int err;
 
-		if (s->canvas) {
+		if (!s->scale_fit) {
+			aster_plat_display_scale_fit_disarm();
+		}
+		if (s->scale_fit) {
+			err = present_scale_fit(s, base);
+		} else if (s->canvas) {
 			/* A canvas present only works whole-screen: the two front
 			 * buffers alternate, so a partial frame would leave the
 			 * untouched rows holding a frame from two presents ago.
