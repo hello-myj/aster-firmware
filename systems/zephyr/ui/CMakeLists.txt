@@ -13,10 +13,9 @@ list(FILTER ASTER_LVGL_SOURCES EXCLUDE REGEX "/libs/")
 list(FILTER ASTER_LVGL_SOURCES EXCLUDE REGEX "/stdlib/(uefi|rtthread|micropython)/")
 
 # Only the decoders something actually opens: icons reach LVGL as in-memory
-# ASTI descriptors -- the chrome ones baked into rodata by launcher_icons.inc,
-# the app ones read off the card and decoded in firmware -- so lv_fs has no
-# consumers left, and tiny_ttf, its only one, is gone with it
-# (aster_lv_fs.c deleted).
+# ASTI descriptors -- chrome baked by flux_icons.inc, app icons read off the
+# card and decoded in firmware -- so lv_fs has no consumers left, and
+# tiny_ttf, its only one, is gone with it (aster_lv_fs.c deleted).
 list(APPEND ASTER_LVGL_SOURCES
 	${ASTER_LVGL_DIR}/src/libs/bin_decoder/lv_bin_decoder.c
 	${ASTER_LVGL_DIR}/src/libs/rle/lv_rle.c
@@ -50,11 +49,7 @@ if(CONFIG_ASTER_WIFI)
 endif()
 
 if(CONFIG_ASTER_LAUNCHER_NATIVE)
-	if(CONFIG_ASTER_LAUNCHER_FLUX)
-		target_sources(app PRIVATE launcher/flux.c launcher/flux_font.c flux_draw.c)
-	else()
-		target_sources(app PRIVATE launcher/launcher.c)
-	endif()
+	target_sources(app PRIVATE launcher/flux.c launcher/flux_font.c flux_draw.c)
 	target_include_directories(app PRIVATE launcher)
 endif()
 

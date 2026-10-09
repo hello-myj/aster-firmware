@@ -382,6 +382,16 @@ uint32_t aster_ui_lvgl_height(void)
 	return s_h;
 }
 
+uint32_t aster_ui_lvgl_layout_width(void)
+{
+	return s_disp ? (uint32_t)lv_display_get_horizontal_resolution(s_disp) : s_w;
+}
+
+uint32_t aster_ui_lvgl_layout_height(void)
+{
+	return s_disp ? (uint32_t)lv_display_get_vertical_resolution(s_disp) : s_h;
+}
+
 lv_indev_t *aster_ui_lvgl_indev(void)
 {
 	return s_indev;

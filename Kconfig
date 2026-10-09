@@ -403,10 +403,11 @@ config ASTER_SYSTEM_UI_ENABLE
 config ASTER_LAUNCHER_FLUX
 	bool "FLUX Rev.04 ribbon launcher"
 	depends on ASTER_LAUNCHER_NATIVE
-	default y if ASTER_HW_WAVESHARE_35B
-	default n
+	default y
 	help
-	  Native 320x480 ribbon launcher based on the FLUX Rev.04 reference.
+	  The built-in home screen. Layout is the FLUX Rev.04 320x480 reference;
+	  each axis scales onto the glass. The previous clock-and-drawer launcher
+	  is gone.
 
 config ASTER_LAUNCHER_NATIVE
 	bool "Built-in native launcher (LVGL, no guest app)"

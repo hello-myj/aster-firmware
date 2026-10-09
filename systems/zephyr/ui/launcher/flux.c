@@ -83,6 +83,35 @@ static entry_t entries[MAX_ENTRIES] __attribute__((section(".ext_ram.bss")));
 static int entry_n, ids[MAX_ENTRIES], count, group, selected[4];
 /* phase is in thousandths of an index, preserving sub-pixel drag motion. */
 static int phase, from_phase, target_phase, pull, from_pull;
+/* Design is 320x480. Each axis scales onto the glass, so a 240x320 panel
+ * fills the screen instead of letterboxing a shrunken bitmap. Glyphs stay
+ * square; only the spacing follows the two edges. */
+static int view_w = 320, view_h = 480;
+static int ax(int v)
+{
+ return view_w ? (int)((int64_t)v * view_w / 320) : v;
+}
+static int ay(int v)
+{
+ return view_h ? (int)((int64_t)v * view_h / 480) : v;
+}
+static int as(int v)
+{
+ int64_t sx = (int64_t)view_w * 480, sy = (int64_t)view_h * 320;
+ int64_t m = sx < sy ? sx : sy;
+ int r;
+ if (!view_w || !view_h) return v;
+ r = (int)((int64_t)v * m / (320 * 480));
+ return v && !r ? 1 : r;
+}
+static void to_design(uint32_t *x, uint32_t *y)
+{
+ if (!view_w || !view_h || !x || !y) return;
+ *x = (uint32_t)((uint64_t)*x * 320 / (uint32_t)view_w);
+ *y = (uint32_t)((uint64_t)*y * 480 / (uint32_t)view_h);
+ if (*x > 319) *x = 319;
+ if (*y > 479) *y = 479;
+}
 static unsigned scroll_duration=FLUX_SNAP_MS;
 static bool coasting, draw_pending;
 static uint64_t animation_ms, last_draw, hold_ms, clock_sec=UINT64_MAX;
@@ -149,10 +178,10 @@ static lv_obj_t *box(lv_obj_t *parent,int x,int y,int w,int h,uint32_t color,int
 {
  lv_obj_t *o=lv_obj_create(parent);
  lv_obj_remove_style_all(o);
- lv_obj_set_pos(o,x,y);lv_obj_set_size(o,w,h);
+ lv_obj_set_pos(o,ax(x),ay(y));lv_obj_set_size(o,ax(w),ay(h));
  lv_obj_set_style_bg_color(o,lv_color_hex(color),0);
  lv_obj_set_style_bg_opa(o,LV_OPA_COVER,0);
- lv_obj_set_style_radius(o,radius,0);
+ lv_obj_set_style_radius(o,as(radius),0);
  lv_obj_clear_flag(o,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
  return o;
 }
@@ -164,23 +193,26 @@ static void scale(lv_obj_t *o,int s)
 static lv_obj_t *text(lv_obj_t *parent,const char *value,int x,int y,int w,uint32_t color,int size,int zoom)
 {
  lv_obj_t *o=lv_label_create(parent);
- const lv_font_t *native=aster_flux_font(aster_flux_font_pixels(size,zoom,value),value);
- lv_obj_set_pos(o,x,y);lv_obj_set_width(o,native?w:w*256/zoom);
+ unsigned px=aster_flux_font_pixels(size,zoom,value);
+ const lv_font_t *native=aster_flux_font((unsigned)as((int)px),value);
+ int z=native?256:as(zoom);
+ lv_obj_set_pos(o,ax(x),ay(y));lv_obj_set_width(o,ax(w)*256/z);
  lv_obj_set_style_text_font(o,native?native:aster_ui_font(size),0);
  lv_obj_set_user_data(o,(void *)(uintptr_t)((size<<24)|(zoom<<12)|w));
  lv_obj_set_style_text_color(o,lv_color_hex(color),0);
  lv_label_set_long_mode(o,LV_LABEL_LONG_DOT);lv_label_set_text(o,value);
  lv_obj_clear_flag(o,LV_OBJ_FLAG_CLICKABLE);
- if(!native) {aster_ui_font_warm(size,value);if(zoom!=256) scale(o,zoom);}
+ if(!native) {aster_ui_font_warm(size,value);if(z!=256) scale(o,z);}
  return o;
 }
 static void set_text(lv_obj_t *o,const char *value)
 {
  if(o && strcmp(lv_label_get_text(o),value)) {
   uintptr_t spec=(uintptr_t)lv_obj_get_user_data(o);int size=spec>>24,zoom=(spec>>12)&4095,width=spec&4095;
-  const lv_font_t *native=aster_flux_font(aster_flux_font_pixels(size,zoom,value),value);
-  int new_zoom=native?256:zoom;
-  lv_obj_set_width(o,width*256/new_zoom);scale(o,new_zoom);
+  unsigned px=aster_flux_font_pixels(size,zoom,value);
+  const lv_font_t *native=aster_flux_font((unsigned)as((int)px),value);
+  int new_zoom=native?256:as(zoom);
+  lv_obj_set_width(o,ax(width)*256/new_zoom);scale(o,new_zoom);
   lv_obj_set_style_text_font(o,native?native:aster_ui_font(size),0);
   if(!native) aster_ui_font_warm(size,value);
   lv_label_set_text(o,value);
@@ -191,8 +223,8 @@ static lv_obj_t *icon(lv_obj_t *parent,int number,int x,int y,int size,uint32_t 
  lv_obj_t *o=lv_image_create(parent);
  unsigned face=0;
  for(unsigned i=0;i<ARRAY_SIZE(flux_icon_sizes);i++) if(flux_icon_sizes[i]==size) {face=i;break;}
- lv_image_set_src(o,&chrome[face][number]);lv_obj_set_pos(o,x,y);
- lv_image_set_scale(o,size*256/flux_icon_sizes[face]);lv_image_set_pivot(o,0,0);
+ lv_image_set_src(o,&chrome[face][number]);lv_obj_set_pos(o,ax(x),ay(y));
+ lv_image_set_scale(o,as(size)*256/flux_icon_sizes[face]);lv_image_set_pivot(o,0,0);
  lv_obj_set_style_image_recolor(o,lv_color_hex(color),0);
  lv_obj_set_style_image_recolor_opa(o,LV_OPA_COVER,0);
  return o;
@@ -360,8 +392,8 @@ static void bind_ribbon(int slot,int idx)
  text(o,meta,43,12,240,INK,16,128);
  if(!e->builtin && ((same && ribbons[slot].data) || load_icon(slot,e->id))) {
   lv_obj_t *img=lv_image_create(o);lv_image_set_src(img,&ribbons[slot].icon);
-  lv_image_set_pivot(img,0,0);lv_image_set_scale(img,56*256/ribbons[slot].icon.header.w);
-  lv_obj_set_pos(img,43,43);
+  lv_image_set_pivot(img,0,0);lv_image_set_scale(img,as(56)*256/ribbons[slot].icon.header.w);
+  lv_obj_set_pos(img,ax(43),ay(43));
   if(ribbons[slot].icon.header.cf==LV_COLOR_FORMAT_A8) {
    lv_obj_set_style_image_recolor(img,lv_color_hex(INK),0);lv_obj_set_style_image_recolor_opa(img,LV_OPA_COVER,0);
   }
@@ -428,8 +460,8 @@ static void redraw(void)
   if(idx<0 || a>=2400 || !ribbons[k].art) {lv_obj_add_flag(o,LV_OBJ_FLAG_HIDDEN);continue;}
   lv_obj_clear_flag(o,LV_OBJ_FLAG_HIDDEN);
   int shift=idx==selected[group]?pull:0;
-  lv_obj_set_pos(o,-20+a*9/1000+shift,126+d*FLUX_RIBBON_PITCH/1000-70);
-  lv_image_set_pivot(o,180,70);
+  lv_obj_set_pos(o,ax(-20+a*9/1000+shift),ay(126+d*FLUX_RIBBON_PITCH/1000-70));
+  lv_image_set_pivot(o,ax(180),ay(70));
   lv_image_set_rotation(o,wrap(-90+CLAMP(d*60/1000,-120,120),3600));
   int zoom=MAX(174,256-a*41/1000);
   lv_image_set_scale(o,zoom);
@@ -438,7 +470,7 @@ static void redraw(void)
  for(int threshold=3;threshold>=0;threshold--) for(int k=0;k<RIBBONS;k++)
   if(index[k]>=0 && abs(distance(index[k],phase,count))/1000==threshold)
    lv_obj_move_foreground(ribbons[k].obj);
- lv_obj_set_x(handle,3+MIN(230,pull));
+ lv_obj_set_x(handle,ax(3+MIN(230,pull)));
 }
 static void settle(int target)
 {
@@ -475,12 +507,12 @@ static void slider_card(int y,const char *name,const char *hint,uint32_t color,i
  text(card,name,15,10,60,color,20,280);
  char buf[16];snprintf(buf,sizeof(buf),"%d%%",value);
  lv_obj_t *out=text(card,buf,205,16,65,DIM,16,220);
- lv_obj_t *s=lv_slider_create(card);lv_obj_set_pos(s,15,55);lv_obj_set_size(s,250,8);
+ lv_obj_t *s=lv_slider_create(card);lv_obj_set_pos(s,ax(15),ay(55));lv_obj_set_size(s,ax(250),ay(8));
  lv_slider_set_range(s,kind==0?25:0,100);lv_slider_set_value(s,value,LV_ANIM_OFF);
  lv_obj_set_style_bg_color(s,lv_color_hex(0x394330),LV_PART_MAIN);
  lv_obj_set_style_bg_color(s,lv_color_hex(color),LV_PART_INDICATOR);
  lv_obj_set_style_bg_color(s,lv_color_hex(color),LV_PART_KNOB);
- lv_obj_set_style_pad_all(s,5,LV_PART_KNOB);
+ lv_obj_set_style_pad_all(s,as(5),LV_PART_KNOB);
  lv_obj_set_user_data(s,out);
  lv_obj_add_event_cb(s,slider_changed,LV_EVENT_VALUE_CHANGED,(void *)(intptr_t)kind);
  lv_obj_add_event_cb(s,slider_changed,LV_EVENT_RELEASED,(void *)(intptr_t)kind);
@@ -580,7 +612,7 @@ static void build_system(void)
  text(body,"SYSTEM / ASTER",17,15,280,DIM,16,128);
  text(body,"设备与运行状态",17,38,286,FG,20,280);
  char info[480];
- snprintf(info,sizeof(info),"Waveshare ESP32-S3 3.5B\n\n显示   320 × 480 / QSPI\nABI     3.7.0\n应用   %d 个已安装\nSD       %s\n运行   %llu 秒\n\n启动与错误日志通过 USB shell 查看。",aster_app_mgr_count(),aster_storage_mounted()?"已挂载":"未挂载",(unsigned long long)(k_uptime_get()/1000));
+ snprintf(info,sizeof(info),"%s\n\n显示   %u × %u\nABI     3.7.0\n应用   %d 个已安装\nSD       %s\n运行   %llu 秒\n\n启动与错误日志通过 USB shell 查看。",CONFIG_ASTER_BOARD_ID,(unsigned)aster_ui_lvgl_width(),(unsigned)aster_ui_lvgl_height(),aster_app_mgr_count(),aster_storage_mounted()?"已挂载":"未挂载",(unsigned long long)(k_uptime_get()/1000));
  text(body,info,17,100,286,FG,16,256);
 }
 static void show_page(int next)
@@ -635,10 +667,11 @@ static int ribbon_hit(int x,int y)
   lv_obj_t *o=ribbons[k].obj;
   if(!o || !ribbons[k].art || lv_obj_has_flag(o,LV_OBJ_FLAG_HIDDEN)) continue;
   lv_area_t area;lv_obj_get_coords(o,&area);
-  lv_point_t p={x-area.x1,y-area.y1},pivot={180,70};
+  int bw=ribbons[k].art->header.w,bh=ribbons[k].art->header.h;
+  lv_point_t p={x-area.x1,y-area.y1},pivot={bw/2,bh/2};
   int zoom=lv_image_get_scale_x(o);
   lv_point_transform(&p,-lv_image_get_rotation(o),65536/zoom,65536/zoom,&pivot,false);
-  if(p.x<0 || p.x>=360 || p.y<0 || p.y>=140) continue;
+  if(p.x<0 || p.x>=bw || p.y<0 || p.y>=bh) continue;
   for(int i=0;i<count;i++) if(ids[i]==ribbons[k].entry) {
    int d=abs(distance(i,phase,count));
    if(d<best) {best=d;found=i;}
@@ -646,23 +679,26 @@ static int ribbon_hit(int x,int y)
  }
  return found;
 }
-static void touch(const aster_touch_evt_t *e)
+static void touch(const aster_touch_evt_t *raw)
 {
+ aster_touch_evt_t mapped=*raw;
+ to_design(&mapped.x,&mapped.y);
+ const aster_touch_evt_t *e=&mapped;
  bool pressed=e->action!=ASTER_TOUCH_UP;
  bool owned=visible && page==HOME && !modal && !aster_wifi_settings_is_open();
  if(e->action==ASTER_TOUCH_DOWN) {
   memset(&drag,0,sizeof(drag));
   if(owned && ((e->y>=93 && e->y<373) || (e->y>=404 && e->y<=447))) {
-   aster_ui_lvgl_pointer(e->x,e->y,false);
+   aster_ui_lvgl_pointer(raw->x,raw->y,false);
    drag.down=true;drag.handle=e->y>=404;drag.x=e->x;drag.y=e->y;
-   drag.hit=drag.handle?-1:ribbon_hit(e->x,e->y);
+   drag.hit=drag.handle?-1:ribbon_hit(raw->x,raw->y);
    drag.stopped=animating && !drag.handle;
    drag.base=phase;drag.started=k_uptime_get();animating=false;coasting=false;
    selected[group]=wrap(nearest(phase),count);caption();
    flux_velocity_reset(&drag.track,e->y,drag.started);
   }
  }
- if(!drag.down) {aster_ui_lvgl_pointer(e->x,e->y,pressed);return;}
+ if(!drag.down) {aster_ui_lvgl_pointer(raw->x,raw->y,pressed);return;}
  int dx=(int)e->x-drag.x,dy=(int)e->y-drag.y;
  if(!drag.axis && dx*dx+dy*dy>36) {
   drag.axis=drag.handle?1:abs(dy)>=6?2:3;drag.moved=true;
@@ -686,7 +722,7 @@ static void touch(const aster_touch_evt_t *e)
    else if(k_uptime_get()-drag.started>300) settle(nearest(phase)*1000);
    else if(drag.handle) action=ACT_OPEN;
    else {
-    if(drag.hit>=0 && ribbon_hit(e->x,e->y)==drag.hit) {
+    if(drag.hit>=0 && ribbon_hit(raw->x,raw->y)==drag.hit) {
      if(drag.hit==selected[group]) action=ACT_OPEN;else settle(drag.hit*1000);
     }
    }
@@ -744,7 +780,11 @@ void aster_launcher_show(void)
  if(visible || !aster_ui_lvgl_screen()) return;
  aster_launcher_init();aster_qpanel_force_close();aster_gesture_reset();
  if(aster_plat_display_orientation_get()!=ASTER_ORIENT_PORTRAIT) (void)aster_plat_display_orientation_set(ASTER_ORIENT_PORTRAIT);
- aster_ui_lvgl_resync_window();lv_obj_clean(aster_ui_lvgl_screen());
+ aster_ui_lvgl_resync_window();
+ view_w=(int)aster_ui_lvgl_width();view_h=(int)aster_ui_lvgl_height();
+ if(view_w<1) view_w=320;
+ if(view_h<1) view_h=480;
+ lv_obj_clean(aster_ui_lvgl_screen());
  aster_ui_lvgl_pointer(0,0,0);lv_indev_reset(aster_ui_lvgl_indev(),NULL);
  read_entries();filter_entries();visible=true;dirty=false;launching=false;memset(&drag,0,sizeof(drag));
  memset(&app_drag,0,sizeof(app_drag));

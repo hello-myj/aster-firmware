@@ -534,8 +534,8 @@ void aster_wifi_settings_open(lv_obj_t *parent)
 {
 	if (root)
 		return;
-	w = aster_ui_lvgl_width() - 8;
-	h = aster_ui_lvgl_height() - 8;
+	w = aster_ui_lvgl_layout_width() - 8;
+	h = aster_ui_lvgl_layout_height() - 8;
 	root = lv_obj_create(parent);
 	lv_obj_add_flag(root, LV_OBJ_FLAG_FLOATING);
 	style(root, 0, 0, w, h, BG);

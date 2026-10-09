@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT
  * Touch gesture recognizer: press/move/release samples in, one discrete
  * gesture out. Pure -- no LVGL, no policy, no knowledge of what a gesture
- * means. The consumer (launcher.c, qpanel.c) maps ASTER_GEST_* to actions.
+ * means. The consumer (the launcher, qpanel.c) maps ASTER_GEST_* to actions.
  *
  * Why a recognizer at all, when LVGL has an indev: the touch ring in
  * firmware/platform/esp32s3/input.c is a DESTRUCTIVE single consumer --

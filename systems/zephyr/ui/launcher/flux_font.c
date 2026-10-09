@@ -60,7 +60,12 @@ unsigned aster_flux_font_pixels(unsigned size,unsigned zoom,const char *text)
 const lv_font_t *aster_flux_font(unsigned pixels,const char *text)
 {
  const lv_font_t *font=NULL;
- for(unsigned i=0;i<sizeof(fonts)/sizeof(fonts[0]);i++) if(fonts[i].px==pixels) {font=fonts[i].font;break;}
+ unsigned best=1000,best_px=1000;
+ for(unsigned i=0;i<sizeof(fonts)/sizeof(fonts[0]);i++) {
+  unsigned d=fonts[i].px>pixels?fonts[i].px-pixels:pixels-fonts[i].px;
+  if(d<best || (d==best && fonts[i].px<best_px)) {best=d;best_px=fonts[i].px;font=fonts[i].font;}
+  if(!d) break;
+ }
  if(!font) return NULL;
  /* Unknown installed names retain the SD font fallback. */
  const unsigned char *p=(const unsigned char *)text;

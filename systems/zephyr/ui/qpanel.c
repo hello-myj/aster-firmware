@@ -345,8 +345,8 @@ static bool snapshot_take(void)
 {
 	const uint8_t *gb = NULL;
 	uint32_t w = 0, h = 0, pitch = 0;
-	const uint32_t lw = aster_ui_lvgl_width();
-	const uint32_t lh = aster_ui_lvgl_height();
+	const uint32_t lw = aster_ui_lvgl_layout_width();
+	const uint32_t lh = aster_ui_lvgl_layout_height();
 
 	/* The record is allowed to ALIAS a front buffer the display worker is
 	 * still streaming (glass_note_full's alias_ok), so reading it before
@@ -391,8 +391,8 @@ static bool snapshot_take(void)
  * it -- see aster_qpanel_close(). */
 static void glass_put_back(void)
 {
-	const uint32_t lw = aster_ui_lvgl_width();
-	const uint32_t lh = aster_ui_lvgl_height();
+	const uint32_t lw = aster_ui_lvgl_layout_width();
+	const uint32_t lh = aster_ui_lvgl_layout_height();
 
 	/* pitch is in PIXELS per row (write_at_ex multiplies by 2 itself);
 	 * passing bytes/row makes the staging gather step twice as far per row
@@ -489,8 +489,8 @@ static void on_wifi_btn(lv_event_t *e)
 {
 	ARG_UNUSED(e);
 	lv_obj_set_pos(s_sheet, 4, 4);
-	lv_obj_set_size(s_sheet, aster_ui_lvgl_width() - 8,
-			aster_ui_lvgl_height() - 8);
+	lv_obj_set_size(s_sheet, aster_ui_lvgl_layout_width() - 8,
+			aster_ui_lvgl_layout_height() - 8);
 	aster_wifi_settings_open(s_sheet);
 }
 
@@ -579,7 +579,7 @@ static void on_theme_btn(lv_event_t *e)
 	s_ops->apply(i);
 	/* Nothing below may touch a widget: apply() asks the host to rebuild
 	 * its tree for the new palette, and that rebuild takes this sheet
-	 * down (aster_qpanel_force_close in launcher.c). The sheet has no
+	 * down (aster_qpanel_force_close in the launcher). The sheet has no
 	 * business surviving its host's palette changing under it -- the
 	 * whole screen restyles, so it closes and shows you that. */
 }
@@ -601,8 +601,8 @@ static void build(void)
 {
 	lv_obj_t *scr = aster_ui_lvgl_screen();
 	lv_obj_t *row, *l;
-	int dw = (int)aster_ui_lvgl_width();
-	int dh = (int)aster_ui_lvgl_height();
+	int dw = (int)aster_ui_lvgl_layout_width();
+	int dh = (int)aster_ui_lvgl_layout_height();
 	bool has_vol = IS_ENABLED(CONFIG_ASTER_AUDIO);
 	bool has_wifi = IS_ENABLED(CONFIG_ASTER_WIFI);
 	bool has_theme = s_ops && s_ops->count && s_ops->index &&
@@ -790,7 +790,7 @@ bool aster_qpanel_request_exit(const char *name)
 {
  if(s_sheet || !aster_ui_lvgl_screen() || !snapshot_take()) return false;
  load_palette();s_exit_mode=true;s_exit_confirmed=false;s_frozen=true;
- int w=(int)aster_ui_lvgl_width(),h=(int)aster_ui_lvgl_height();
+ int w=(int)aster_ui_lvgl_layout_width(),h=(int)aster_ui_lvgl_layout_height();
  int cw=MIN(w-32,288),ch=194;
  s_scrim=lv_obj_create(aster_ui_lvgl_screen());
  lv_obj_remove_style_all(s_scrim);lv_obj_set_size(s_scrim,w,h);
