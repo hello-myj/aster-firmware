@@ -2742,7 +2742,19 @@ load_text_section(const uint8 *buf, const uint8 *buf_end, AOTModule *module,
     }
 
     /* The layout is: literal size + literal + code (with plt table) */
+#if (WASM_MEM_DUAL_BUS_MIRROR != 0)
+    /* Executable PSRAM was populated through its data-bus mirror. The
+     * instruction alias is not coherent until the final icache flush, so
+     * reading this header there can turn a zero literal size into UINT32_MAX.
+     * Parse via the data bus, but retain instruction addresses for execution. */
+    const uint8 *header = os_get_dbus_mirror((void *)buf);
+    const uint8 *header_end = header + (buf_end - buf);
+    read_uint32(header, header_end, module->literal_size);
+    buf += sizeof(uint32);
+#else
     read_uint32(buf, buf_end, module->literal_size);
+#endif
+    CHECK_BUF(buf, buf_end, module->literal_size);
 
     /* literal data is at beginning of the text section */
     module->literal = (uint8 *)buf;

@@ -47,4 +47,6 @@ int aster_ui_fonts_advance(void);
  * cpfont size (no-op when px is outside the baked set). UI thread. */
 void aster_ui_font_warm(uint8_t px, const char *utf8);
 
+void aster_ui_fonts_prepare(uint32_t width,uint32_t height,const char *title);
+
 #endif /* ASTER_UI_FONT_H */

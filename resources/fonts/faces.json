@@ -4,7 +4,7 @@
   "version": 4,
   "flags": 0,
   "ttf": "ui.ttf",
-  "big_from": 32,
+  "big_from": 256,
   "bake": {
     "ss": 4,
     "gamma": 1.0,
@@ -12,6 +12,58 @@
     "lut": "round"
   },
   "faces": [
+    {
+      "px": 12,
+      "file": "ui_12.cpfont",
+      "line_h": 16,
+      "asc": 13,
+      "desc": -4,
+      "coverage": "full",
+      "intervals": 138,
+      "codepoints": 28988,
+      "bytes": 2429876,
+      "max_bmp": 85,
+      "max_scratch": 169
+    },
+    {
+      "px": 14,
+      "file": "ui_14.cpfont",
+      "line_h": 18,
+      "asc": 15,
+      "desc": -4,
+      "coverage": "full",
+      "intervals": 138,
+      "codepoints": 28988,
+      "bytes": 3165879,
+      "max_bmp": 105,
+      "max_scratch": 210
+    },
+    {
+      "px": 16,
+      "file": "ui_16.cpfont",
+      "line_h": 21,
+      "asc": 17,
+      "desc": -5,
+      "coverage": "full",
+      "intervals": 138,
+      "codepoints": 28988,
+      "bytes": 3777946,
+      "max_bmp": 145,
+      "max_scratch": 289
+    },
+    {
+      "px": 18,
+      "file": "ui_18.cpfont",
+      "line_h": 24,
+      "asc": 19,
+      "desc": -5,
+      "coverage": "full",
+      "intervals": 138,
+      "codepoints": 28988,
+      "bytes": 4582956,
+      "max_bmp": 171,
+      "max_scratch": 342
+    },
     {
       "px": 20,
       "file": "ui_20.cpfont",
@@ -26,19 +78,71 @@
       "max_scratch": 420
     },
     {
-      "px": 16,
-      "file": "ui_16.cpfont",
-      "line_h": 21,
-      "asc": 17,
-      "desc": -5,
+      "px": 24,
+      "file": "ui_24.cpfont",
+      "line_h": 31,
+      "asc": 26,
+      "desc": -7,
       "coverage": "full",
       "intervals": 138,
       "codepoints": 28988,
-      "bytes": 3777946,
-      "max_bmp": 145,
-      "max_scratch": 289
+      "bytes": 7572577,
+      "max_bmp": 300,
+      "max_scratch": 600
+    },
+    {
+      "px": 28,
+      "file": "ui_28.cpfont",
+      "line_h": 37,
+      "asc": 30,
+      "desc": -8,
+      "coverage": "full",
+      "intervals": 138,
+      "codepoints": 28988,
+      "bytes": 9951421,
+      "max_bmp": 406,
+      "max_scratch": 812
+    },
+    {
+      "px": 32,
+      "file": "ui_32.cpfont",
+      "line_h": 42,
+      "asc": 34,
+      "desc": -9,
+      "coverage": "full",
+      "intervals": 138,
+      "codepoints": 28988,
+      "bytes": 12664830,
+      "max_bmp": 528,
+      "max_scratch": 1056
+    },
+    {
+      "px": 40,
+      "file": "ui_40.cpfont",
+      "line_h": 52,
+      "asc": 42,
+      "desc": -11,
+      "coverage": "full",
+      "intervals": 138,
+      "codepoints": 28988,
+      "bytes": 19586836,
+      "max_bmp": 820,
+      "max_scratch": 1640
+    },
+    {
+      "px": 48,
+      "file": "ui_48.cpfont",
+      "line_h": 63,
+      "asc": 51,
+      "desc": -13,
+      "coverage": "full",
+      "intervals": 138,
+      "codepoints": 28988,
+      "bytes": 27776035,
+      "max_bmp": 1176,
+      "max_scratch": 2352
     }
   ],
-  "max_bmp": 210,
-  "max_scratch": 420
+  "max_bmp": 1176,
+  "max_scratch": 2352
 }

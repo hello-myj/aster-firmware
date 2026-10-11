@@ -13,8 +13,7 @@
  * rings, its per-slot scratch and the sprite cache need no locking.
  *
  * Text goes through the public LVGL font chain: aster_ui_font() snaps to a
- * baked cpfont face whenever possible (per-glyph tiny_ttf fallback covers
- * unbaked codepoints). aster_font_sd_poll/commit at exec head advance the
+ * nearest published native cpfont face with full source-font coverage. aster_font_sd_poll/commit at exec head advance the
  * async glyph-bitmap pipeline, so a cold glyph draws as a correct-size
  * blank for one frame and the real bitmap the next -- same behaviour the
  * LVGL labels have.

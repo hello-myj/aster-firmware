@@ -105,6 +105,13 @@ int main(void) {
  desc=(struct display_buffer_descriptor){320,480,320,sizeof(ui)};calls=0;
  assert(axs_write(&dev,0,0,&desc,ui)==0);
  ui[0]=0x88;assert(frame[0]==0x39 && state.borrowed==NULL);
+ /* A native APP front may be freed after its last send drains. Releasing
+  * the borrow must preserve the last image in the driver's own shadow. */
+ calls=0;assert(aster_axs15231b_write_persistent(&dev,&desc,ui)==0);
+ assert(state.borrowed==ui);
+ aster_axs15231b_release_persistent(&dev);
+ assert(state.borrowed==NULL && !locks && !memcmp(frame,ui,sizeof(frame)));
+ ui[0]=0x77;assert(frame[0]==0x88);
  return 0;
 }
 ''')

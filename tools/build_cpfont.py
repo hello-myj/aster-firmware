@@ -19,9 +19,8 @@
 #         resources/fonts/faces.json     (bake record: sizes + metrics;
 #                                          font_metrics.py turns it into the
 #                                          firmware/SDK tables)
-#   * 12/14/16/18/20/24 : every codepoint mapped in ui.ttf (~29k)
-#   * 32/48             : Latin + CJK punct + kana + GB2312 level-1 subset
-#                         (clock / big titles; keeps the big files small)
+# All ten published sizes cover every mapped codepoint in ui.ttf (~29k).
+# --big-from can explicitly request a subset for experimental resource sets.
 # Sizes are DEVICE PIXELS (set_char_size y_size = px<<6 @ 72 dpi), unlike
 # CrossPoint's own script which uses points @150 dpi.
 
@@ -34,6 +33,10 @@ import sys
 from pathlib import Path
 
 import freetype
+try:
+    import numpy as np
+except ImportError:
+    np = None
 from fontTools.ttLib import TTFont
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,8 +49,8 @@ MANIFEST_DEFAULT = FONT_DIR / "faces.json"
 # faces.json, and tools/font_metrics.py turns that into the firmware/SDK
 # tables (contract/include/aster/font_metrics.h) and checks them.
 # Nothing downstream keeps its own copy of the list.
-FULL_SIZES = [12, 14, 16, 18, 20, 24]
-BIG_SIZES = [32, 48]
+FULL_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 40, 48]
+BIG_SIZES = []
 
 MAGIC = b"CPFONT\x00\x00"
 CPFONT_VERSION = 4
@@ -144,6 +147,17 @@ def resample_anchored(gray4, w4, h4, l4, t4, left1, top1, ss, margin=2):
     oy = t4 - ss * top
     ow = 2 * margin + (w4 + ss - 1) // ss
     oh = 2 * margin + (h4 + ss - 1) // ss
+    if np is not None:
+        # Integral-image sums match the scalar edge/background rules exactly.
+        source = np.frombuffer(gray4, dtype=np.uint8).reshape(h4, w4)
+        sums = np.pad(source.cumsum(0, dtype=np.int64).cumsum(1), ((1, 0), (1, 0)))
+        yy = oy + ss * np.arange(oh)
+        xx = ox + ss * np.arange(ow)
+        y0, y1 = np.clip(yy, 0, h4), np.clip(yy + ss, 0, h4)
+        x0, x1 = np.clip(xx, 0, w4), np.clip(xx + ss, 0, w4)
+        area = (sums[y1[:, None], x1] - sums[y0[:, None], x1]
+                - sums[y1[:, None], x0] + sums[y0[:, None], x0])
+        return ((area + n // 2) // n).astype(np.uint8).tobytes(), ow, oh, left, top
     out = bytearray(ow * oh)
     for Y in range(oh):
         y0 = oy + ss * Y
@@ -436,9 +450,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--ttf", default=str(TTF_DEFAULT))
     ap.add_argument("--sizes", default=None,
-                    help="comma list; default 12,14,16,18,20,24,32,48")
-    ap.add_argument("--big-from", type=int, default=32,
-                    help="sizes >= this bake only the common subset")
+                    help="comma list; default 12,14,16,18,20,24,28,32,40,48")
+    ap.add_argument("--big-from", type=int, default=256,
+                    help="optional subset threshold; default covers the full font at all sizes")
     ap.add_argument("--out", default=str(FONT_DIR),
                     help="directory for the .cpfont files (and, unless "
                          "--manifest says otherwise, for faces.json)")

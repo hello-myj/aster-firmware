@@ -34,6 +34,7 @@ LOG_MODULE_REGISTER(aster_fsvc, LOG_LEVEL_INF);
 #define HAVE_CDC 0
 #endif
 
+#define FSVC_MAX_FILE (32u * 1024u * 1024u) /* includes full 48px SD fonts */
 #define BUF_SZ      512
 #define LINE_MAX    192
 #define IDLE_MS     5     /* main-loop poll gap */
@@ -251,9 +252,15 @@ static int pump_body(const struct device *dev, struct fs_file_t *f, uint32_t wan
 				t0 = k_uptime_get();
 			} else if (k_uptime_get() - t0 > BODY_TMO_MS) {
 				return -ETIMEDOUT;
-			} else {
-				k_msleep(1);
-			}
+			} else if (transfer_shell) {
+                k_msleep(1);
+            } else {
+                /* Native USB delivers 64-byte packets. A millisecond sleep
+                 * per packet throttles large full-font resources. Yield to
+                 * ready peers, then poll again without a tick-long pause. */
+                k_busy_wait(50);
+                k_yield();
+            }
 		}
 		int w = fs_write(f, buf, n);
 		if (w != (int)n) {
@@ -301,7 +308,7 @@ static void publish_part(const char *tmp, const char *path, uint32_t len)
 static void do_put(const struct device *dev, const char *path, uint32_t len,
 		   uint32_t want_crc, uint32_t off)
 {
-	if (len == 0 || len > 16u * 1024 * 1024) {
+	if (len == 0 || len > FSVC_MAX_FILE) {
 		cdc_reply("ERR %d", -EFBIG);
 		return;
 	}

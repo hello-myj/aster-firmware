@@ -1,26 +1,8 @@
 /* SPDX-License-Identifier: MIT
- * UI font router for the LVGL runtime.
- *
- * One backend: cpfont (font_sd.c), pre-baked 4bpp bitmaps per baked size
- * (ASTER_FONT_BAKED_PX). Metrics live in PSRAM and the bitmaps stream in
- * asynchronously, so the first frame never blocks on SD. aster_ui_font(px)
- * clamps any requested size to the nearest baked one -- there is no size it
- * refuses to answer, because there is no longer a second backend to answer
- * for it.
- *
- * There used to be a second backend -- an lv_tiny_ttf instance per pixel
- * size, all reading one ui.ttf off the SD card. It is gone, and the cost it
- * carried is the reason: eight resident metric tables and their glyph
- * caches were the single largest consumer of the PSRAM heap, with no
- * release path.
- *
- * What it also did, and what is worth knowing before "just add it back": a
- * rasterizer on hand means every codepoint outside the bake still draws. So
- * a bake that quietly shrank, or a card that lost a file, looked like a
- * font with a few odd characters rather than like a hole. With one source,
- * coverage is the whole story -- a face that is not READY now draws
- * nothing, which is why the state is logged instead of being inferred
- * from a page that merely looks thin.
+ * Shared native-size cpfont router. Full-coverage SD resources supply glyphs;
+ * the loader allocates per-size LRU caches on demand and releases them when
+ * ownership passes between desktop and APP. A requested size chooses the
+ * nearest published face; rasterized glyph pixels are never resized here.
  */
 #include "ui_font.h"
 #include "font_sd.h"
@@ -69,20 +51,7 @@ const lv_font_t aster_ui_placeholder_font = {
  * Size routing                                                         *
  * ------------------------------------------------------------------ */
 
-/* Nearest baked size, ALWAYS -- there is no "unbaked" answer any more.
- *
- * This used to return -1 outside a +/-4 px window, and that was correct
- * while a rasterizer sat behind it: an unbaked size still drew, from
- * tiny_ttf, and a caller asking for one was served. With a single face the
- * window is the whole question -- 12 and 14, which every app in the tree
- * names, would fall outside it and get nothing at all. Hard-clamping instead
- * means they draw at 20 px: text that overflows rather than text that
- * vanishes. That is a silent failure mode, but it is the one to prefer, and
- * it is the same rule the guest-side table applies (aster_text_snap).
- *
- * The list comes from font_sd (generated from the bake record), never a copy
- * kept here: a stale copy would snap callers onto a size with no .cpfont
- * behind it and draw blanks. */
+/* Firmware and SDK use the same generated face order and nearest-size rule. */
 static int cp_snap_px(uint8_t px)
 {
 	int best = -1;
@@ -132,8 +101,7 @@ const lv_font_t *aster_ui_font(uint8_t px)
 		if (!warned) {
 			warned = true;
 			LOG_ERR("no drawable face for %upx (nearest baked %dpx): "
-				"SD missing/not mounted, ui_*.cpfont absent, or still "
-				"streaming; text will be blank",
+				"SD missing/not mounted, ui_*.cpfont absent, or no glyph cache memory; text will be blank",
 				(unsigned)px, snap);
 		}
 		return &aster_ui_placeholder_font;
@@ -142,7 +110,7 @@ const lv_font_t *aster_ui_font(uint8_t px)
 }
 
 /* ------------------------------------------------------------------ *
- * Recovery poll + async staging commit (UI thread)                     *
+ * Resource discovery and repaint generation (UI thread)                     *
  * ------------------------------------------------------------------ */
 
 int aster_ui_fonts_advance(void)
@@ -179,9 +147,7 @@ int aster_ui_fonts_poll(void)
 	return edge;
 }
 
-/* Pre-warm the baked face for a requested size: snap to the nearest
- * baked slot and queue its bitmaps for async burst fetch. Never blocks,
- * drops silently when the queue is full. */
+/* Fetch cold glyphs before presentation; cache hits stay in PSRAM. */
 void aster_ui_font_warm(uint8_t px, const char *utf8)
 {
 	int snap = cp_snap_px(px ? px : ASTER_FONT_UI_PX);
@@ -189,4 +155,26 @@ void aster_ui_font_warm(uint8_t px, const char *utf8)
 	if (snap > 0) {
 		aster_font_sd_warm((uint8_t)snap, utf8);
 	}
+}
+
+/* Prepare the common body/title sizes after hardware orientation is known.
+ * Exact requested sizes still work independently; no glyph bitmap is scaled. */
+static uint8_t screen_font_px(uint32_t role,uint32_t width,uint32_t height)
+{
+ uint64_t x=(uint64_t)width*role*256u/320u,y=(uint64_t)height*role*256u/480u;
+ uint64_t request=MIN(x,y),best=UINT64_MAX;uint8_t pick=ASTER_FONT_UI_PX;
+ for(uint32_t i=0;i<aster_font_sd_face_n();i++) {
+  uint8_t px=aster_font_sd_face_px(i);uint64_t size=(uint64_t)px*256u;
+  uint64_t d=size>request?size-request:request-size;
+  if(d<best) {best=d;pick=px;}
+ }
+ return pick;
+}
+void aster_ui_fonts_prepare(uint32_t width,uint32_t height,const char *title)
+{
+ const char *common="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .,:;!?+-/%()";
+ uint8_t body=screen_font_px(16,width,height),heading=screen_font_px(20,width,height);
+ (void)aster_font_sd_poll();
+ (void)aster_ui_font(body);aster_ui_font_warm(body,common);
+ (void)aster_ui_font(heading);aster_ui_font_warm(heading,title?title:"");
 }

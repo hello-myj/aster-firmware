@@ -1,26 +1,9 @@
 /* SPDX-License-Identifier: MIT
- * cpfont v4 bitmap-font loader: LVGL lv_font_t backend for pre-baked
- * CrossPoint-format glyph bitmaps streamed from the SD card.
- *
- * Format + mechanism: docs/cpfont-notes.md (port of CrossPoint Reader CJK,
- * MIT, (github.com/CrossPoint-CJK/crosspoint-reader-cjk)). Independent
- * implementation; wire-compatible with official .cpfont files (single
- * style: regular).
- *
- * Per-size slot lifecycle (all SD work sliced so no caller ever blocks):
- *   EMPTY --(UI poll: header+TOC+interval tables resident)--> TABLE --(the
- *   system workqueue streams the compact metric table in 32 KB chunks)-->
- *   READY (metrics pure-RAM from then on). Bitmaps fill a bump+epoch ring
- *   (RING_BYTES 48 KB, RING_SLOTS 512 entries per size) lazily: warm() bursts and
- *   render-time misses are merged into contiguous-index runs and fetched on
- *   the system workqueue (s_lock is never held across SD I/O). A bitmap requested
- *   before it is resident renders as a correct-sized blank box and is
- *   filled + committed on the next aster_font_sd_commit().
- *
- * Thread model: state transitions, ring writes and teardown happen only on
- * the UI thread; the fetch/stream worker runs on the system workqueue
- * guarded by one mutex plus a cancel-sync before any table free. FatFs is
- * REENTRANT so its own state is safe; our slot structs are the ones we lock.
+ * Full-coverage cpfont resources on SD. Header/interval metadata stays
+ * resident; each used size lazily allocates its own LRU glyph cache in PSRAM.
+ * Prewarm before presentation, release on screen-owner changes. Font objects
+ * remain stable while their glyph storage is released. All calls use the
+ * shared WAMR/LVGL worker, including session teardown.
  */
 #ifndef ASTER_FONT_SD_H
 #define ASTER_FONT_SD_H
@@ -39,41 +22,29 @@
 uint32_t aster_font_sd_face_n(void);
 uint8_t aster_font_sd_face_px(uint32_t i);
 
-/* Flip finished streams to READY + throttled re-probe of missing files.
- * Returns 1 when any slot newly reached READY (caller repaints).
+/* Discover SD face headers and interval metadata, retrying missing files.
+ * Returns 1 when a new native face becomes available (caller repaints).
  * UI thread only. */
 int aster_font_sd_poll(void);
 
-/* True while at least one slot is still streaming its metric table from
- * SD. Used to hold the launcher's very first paint until the baked fonts
- * can answer (UI thread only). */
+/* Legacy progress hooks: prewarm is synchronous, so no background queue remains. */
 bool aster_font_sd_streaming(void);
-/* True while a glyph prefetch is queued or the SD worker is still reading
- * bitmaps. The launcher holds the splash until names and descriptions land. */
 bool aster_font_sd_busy(void);
-
-/* Boot-splash progress 0..100 across all baked sizes (0 before discovery,
- * 100 when every slot is READY or DEAD). UI thread only. */
 uint32_t aster_font_sd_progress(void);
 
 /* cpfont-backed font for `px`, or NULL when `px` is not a baked size, its
- * file is absent, or it has not finished streaming its metric table. The
+ * file is absent, or cache allocation fails. The
  * pointer is stable for the slot lifetime. */
 const lv_font_t *aster_font_sd_get(uint8_t px);
 
-/* Queue the unique codepoints of `utf8` for async bitmap prefetch at `px`
- * (runs merged into single burst reads). Never blocks; drops when full. */
+/* Preload UTF-8 glyphs into this size cache. Cold glyphs read SD synchronously;
+ * prewarm during boot/init to avoid cold I/O during normal drawing. */
 void aster_font_sd_warm(uint8_t px, const char *utf8);
 
-/* Drain worker completions into the bitmap rings. Returns 1 when new
- * bitmaps landed (caller repaints the screen). UI thread only. */
+/* Compatibility hook: synchronous glyph reads have no staged completions. */
 bool aster_font_sd_commit(void);
 
-/* "Repaint now?" for a guest that does not pump this module itself.
- * Advances poll+commit (a non-drawing app would otherwise strand fills in
- * staging) and returns true when something landed or a slot came READY.
- * Reading is idempotent: the request is cleared by the draw (ack below),
- * not by the read, so asking twice in a frame cannot swallow the signal. */
+/* Poll newly available SD font metadata; glyphs load in the requesting call. */
 bool aster_font_sd_repaint_pending(void);
 
 /* Clear the repaint request. Called by the draw entry point (ui_gfx.c),
@@ -87,19 +58,16 @@ uint32_t aster_font_sd_generation(void);
  * false while the slot is not ready.) */
 bool aster_font_sd_has_cp(uint8_t px, uint32_t cp);
 
-/* Boot-time hook: registers the baked sizes and loads only the interval
- * tables. Metric tables and bitmap rings stay unloaded until a reading
- * session asks for them. */
+/* Boot registers all native sizes; poll discovers their interval tables.
+ * Glyph caches allocate only when a size is requested. */
 void aster_font_sd_init(void);
 
-/* Reader, lyrics and chat call this on the UI thread as they start. The
- * first call allocates the metric tables and rings; the matching end
- * releases them. Nested calls are counted. */
+/* Every APP begins a session before init. Desktop glyph caches are released;
+ * requested sizes allocate on demand. End releases APP glyph caches. */
 void aster_font_sd_session_begin(void);
 void aster_font_sd_session_end(void);
 
-/* Drop the small on-demand glyph cache. Pages that draw SSIDs or file
- * names call this as they close. */
+/* Release all size caches when ownership changes; interval metadata stays. */
 void aster_font_sd_cache_drop(void);
 
 /* Profiling (CONFIG_ASTER_LVGL_PROFILER builds the printer; counters always
@@ -107,13 +75,13 @@ void aster_font_sd_cache_drop(void);
 typedef struct {
 	uint32_t reads;         /* SD read calls (incl. table chunks)      */
 	uint32_t read_bytes;
-	uint32_t warm_bursts;   /* merged burst reads served               */
+	uint32_t warm_bursts;   /* prewarm calls               */
 	uint32_t warm_glyphs;   /* glyphs covered by warm bursts           */
-	uint32_t misses;        /* on-demand white-box + async fetch       */
-	uint32_t miss_filled;   /* async fills committed to the ring       */
-	uint32_t evictions;     /* ring LRU drops                          */
+	uint32_t misses;        /* cold SD glyph loads       */
+	uint32_t miss_filled;   /* successful cold loads       */
+	uint32_t evictions;     /* LRU glyph removals                          */
 	uint32_t oversize;      /* glyphs dropped: bigger than a loader    */
-				/* buffer (STG_BMP / SCRATCH_BYTES).       */
+				/* buffer (SCRATCH_BYTES).       */
 				/* Non-zero means holes in the page; the  */
 				/* two buffers are bake-derived, so this  */
 				/* should never grow except on a bake/card */
@@ -121,5 +89,12 @@ typedef struct {
 } aster_font_sd_stats_t;
 
 void aster_font_sd_stats(aster_font_sd_stats_t *out);
+
+typedef struct {
+ uint32_t px,coverage,glyphs,used,bytes;
+ bool available;
+} aster_font_cache_status_t;
+/* Snapshot stored in stable slots; shell never dereferences cache allocations. */
+bool aster_font_sd_cache_status(uint32_t index,aster_font_cache_status_t *out);
 
 #endif /* ASTER_FONT_SD_H */

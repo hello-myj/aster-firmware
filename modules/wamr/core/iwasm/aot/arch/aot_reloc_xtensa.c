@@ -224,9 +224,11 @@ apply_relocation(AOTModule *module, uint8 *target_section_addr,
             int32 initial_addend;
             /* (S + A) */
             if ((intptr_t)insn_addr & 3) {
-                set_error_buf(error_buf, error_buf_size,
-                              "AOT module load failed: "
-                              "instruction address unaligned.");
+                if (error_buf != NULL)
+                    snprintf(error_buf, error_buf_size,
+                             "AOT module load failed: unaligned R_XTENSA_32 "
+                             "base=%p offset=%u addr=%p",
+                             target_section_addr, (unsigned)reloc_offset, insn_addr);
                 return false;
             }
             CHECK_RELOC_OFFSET(4);

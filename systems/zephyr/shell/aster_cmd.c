@@ -181,6 +181,23 @@ static int cmd_sys_abi(const struct shell *sh, size_t argc, char **argv)
  * `peak`, not `used`: the peak is what a cut would have to survive. */
 extern struct k_heap _system_heap;
 
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+static int cmd_sys_fonts(const struct shell *sh,size_t argc,char **argv)
+{
+ ARG_UNUSED(argc);ARG_UNUSED(argv);
+ unsigned total=0;
+ for(uint32_t i=0;i<aster_font_sd_face_n();i++) {
+  aster_font_cache_status_t st;
+  if(!aster_font_sd_cache_status(i,&st)) continue;
+  shell_print(sh,"%upx: %s coverage=%u cached=%u bitmap=%u alloc=%u B",
+    st.px,st.available?"SD":"missing",st.coverage,st.glyphs,st.used,st.bytes);
+  total+=st.bytes;
+ }
+ shell_print(sh,"glyph cache total=%u B (interval metadata separate)",total);
+ return 0;
+}
+#endif
+
 static int cmd_sys_mem(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc); ARG_UNUSED(argv);
@@ -874,6 +891,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_sys,
 	SHELL_CMD(features, NULL, "capability list", cmd_sys_features),
 	SHELL_CMD(abi, NULL, "ABI version", cmd_sys_abi),
 	SHELL_CMD(mem, NULL, "memory budget (heap peak / ext ram)", cmd_sys_mem),
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+    SHELL_CMD(fonts, NULL, "native font sizes and glyph cache allocations", cmd_sys_fonts),
+#endif
 #if IS_ENABLED(CONFIG_ASTER_LVGL)
 	SHELL_CMD(lvgl, NULL, "LVGL heap pool + baked font face state",
 		  cmd_sys_lvgl),

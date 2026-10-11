@@ -694,6 +694,12 @@ int aster_pkg_install_file(const char *src_path)
 	 * this device is decided once, here -- the extraction below and the
 	 * manifest's "aot" flag both read it, so they cannot disagree. */
 	bool aot_ok = alen && atarget == CONFIG_ASTER_AOT_TARGET_ID;
+	if (!aot_ok) {
+		LOG_ERR("install: %s requires AOT target %u (package target=%u, bytes=%u)",
+			m.id, (unsigned)CONFIG_ASTER_AOT_TARGET_ID, atarget, (unsigned)alen);
+		aster_psram_free(img);
+		return alen ? ASTER_EABI : ASTER_ENOTSUP;
+	}
 
 	/* Signature gate BEFORE anything is written to the app dir. Policy is
 	 * compile-time (docs/package-format.md); a tampered or alien-keyed package
@@ -790,22 +796,16 @@ int aster_pkg_install_file(const char *src_path)
 			err = aster_fs_write_safe(&f, aot, alen);
 			fs_close(&f);
 			if (err < (int)alen) {
-				/* not fatal: wasm fallback still runs, but say so
-				 * loudly -- this exact silent failure cost 20x fps */
-				LOG_WRN("install: aot write %s (%d/%u), interpreter fallback",
+				LOG_ERR("install: aot write %s (%d/%u)",
 					dst, err, (unsigned)alen);
+				aster_psram_free(img);
+				return ASTER_EIO;
 			}
+		} else {
+			LOG_ERR("install: aot open %s (%d)", dst, err);
+			aster_psram_free(img);
+			return ASTER_EIO;
 		}
-	} else if (alen) {
-		/* The package HAS an AOT image, for the wrong CPU. It installs
-		 * and runs, at roughly 1/20th the frame rate. This used to
-		 * happen with no log line at all -- the app just got slow, and
-		 * the only way to find out why was to hexdump the package
-		 * header against the board config. */
-		LOG_ERR("install: %s: package AOT target %u, this device runs %u "
-			"-- aot DROPPED, app will run interpreted (much slower); "
-			"rebuild the package for this device's AOT target",
-			m.id, atarget, (unsigned)CONFIG_ASTER_AOT_TARGET_ID);
 	}
 
 	/* launcher tile: ASTI at /SD:/aster/apps/<id>/icon.bin */
@@ -888,21 +888,6 @@ int aster_pkg_install_file(const char *src_path)
 	if (r >= 0 && m.description[0]) {
 		r = json_string_field(line + w, sizeof(line) - w, "description", m.description);
 		if (r >= 0) { w += r; r = 0; }
-	}
-
-	/* Record a dropped AOT so the reason outlives the install log. Written
-	 * only when there is something to skip, so every package that matched
-	 * (the ordinary case) produces the exact byte string it always did.
-	 * The value is the package's target id, not a boolean: "why is this
-	 * app at 2 fps" is answered by which target it wanted. */
-	if (r >= 0 && alen && !aot_ok) {
-		r = snprintf(line + w, sizeof(line) - w, ",\"aot_skip\":%u", atarget);
-		if (r < 0 || r >= (int)sizeof(line) - w) {
-			r = -1;
-		} else {
-			w += r;
-			r = 0;
-		}
 	}
 
 	if (r >= 0) {

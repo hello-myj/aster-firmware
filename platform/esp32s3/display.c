@@ -152,6 +152,7 @@ BUILD_ASSERT((ASTER_FORMATS_CONVERTIBLE & ASTER_FMT_BIT(ASTER_DISP_NATIVE_FORMAT
 #if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
 extern int aster_axs15231b_write_persistent(const struct device *dev,
  const struct display_buffer_descriptor *desc,const void *buffer);
+extern void aster_axs15231b_release_persistent(const struct device *dev);
 /* shadow_begin holds the driver lock until shadow_present. */
 extern uint8_t *aster_axs15231b_shadow_begin(const struct device *dev, bool replacing_all);
 extern int aster_axs15231b_shadow_present(const struct device *dev,
@@ -1272,6 +1273,13 @@ void aster_plat_display_flip_release(void)
 	if (--s_front_refs > 0) {
 		return;
 	}
+	aster_plat_display_flush_drain();
+#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
+	/* A native front can be borrowed by the panel driver. Materialize its
+	 * last image before releasing that buffer, so screenshots and later
+	 * partial writes never read freed memory. */
+	if (disp_dev) aster_axs15231b_release_persistent(disp_dev);
+#endif
 	for (int i = 0; i < ASTER_DISP_FRONT_N; i++) {
 		if (s_front[i]) {
 			shared_multi_heap_free(s_front[i]);
@@ -1904,29 +1912,74 @@ static void scale_fit_blit(uint16_t *dst, uint32_t dpitch, bool swap,
 			   uint32_t bw, uint32_t bh, uint32_t gw, uint32_t gh,
 			   uint32_t dw, uint32_t dh, uint32_t mx, uint32_t my)
 {
+	/* Native-size packed frames only need byte-order conversion. Avoid the
+	 * resampling map entirely and convert two RGB565 pixels per word. */
+	if (bw == gw && bh == gh && dw == gw && dh == gh && !mx && !my &&
+	    pitch == gw && dpitch == gw && !((uintptr_t)src & 3u) &&
+	    !((uintptr_t)dst & 3u)) {
+		uint32_t pixels = gw * gh;
+		if (!swap) {
+			memcpy(dst, src, (size_t)pixels * 2u);
+		} else {
+			const uint32_t *in = (const uint32_t *)src;
+			uint32_t *out = (uint32_t *)dst;
+			for (uint32_t i = 0; i < pixels / 2u; i++) {
+				uint32_t v = in[i];
+				out[i] = ((v & 0x00ff00ffu) << 8) | ((v & 0xff00ff00u) >> 8);
+			}
+			if (pixels & 1u) dst[pixels-1] = sys_cpu_to_be16(((const uint16_t *)src)[pixels-1]);
+		}
+		return;
+	}
+	uint32_t xstep = bw / dw, xrem = bw % dw;
+	uint32_t ystep = bh / dh, yrem = bh % dh;
+	uint32_t sy = 0, previous_sy = UINT32_MAX;
+	uint64_t yerror = 0;
+	/* One panel row (320/480 entries on the supported displays). Keep this
+	 * short-lived map on the APP worker stack; no heap allocation per frame. */
+	uint32_t xindex[dw];
+	uint32_t sx = 0;
+	uint64_t xerror = 0;
+
+	for (uint32_t dx = 0; dx < dw; dx++) {
+		xindex[dx] = sx;
+		sx += xstep;
+		xerror += xrem;
+		if (xerror >= dw) {
+			xerror -= dw;
+			sx++;
+		}
+	}
+
 	for (uint32_t dy = 0; dy < gh; dy++) {
 		uint16_t *row = dst + (size_t)dy * dpitch;
 
-		memset(row, 0, (size_t)gw * 2u);
 		if (dy < my || dy >= my + dh) {
+			memset(row, 0, (size_t)gw * 2u);
 			continue;
 		}
-		uint32_t sy = (uint32_t)(((uint64_t)(dy - my) * bh) / dh);
-		const uint16_t *srow;
+		/* Upscaling repeats source rows. Copy the already converted output
+		 * instead of resampling that row and swapping its pixels again. */
+		if (sy == previous_sy) {
+			memcpy(row, row - dpitch, (size_t)gw * 2u);
+		} else {
+			const uint16_t *srow = (const uint16_t *)(src + (size_t)sy * pitch * 2u);
 
-		if (sy >= bh) {
-			sy = bh - 1u;
-		}
-		srow = (const uint16_t *)(src + (size_t)sy * pitch * 2u);
-		for (uint32_t dx = mx; dx < mx + dw && dx < gw; dx++) {
-			uint32_t sx = (uint32_t)(((uint64_t)(dx - mx) * bw) / dw);
-			uint16_t v;
+			memset(row, 0, (size_t)mx * 2u);
+			memset(row + mx + dw, 0, (size_t)(gw - mx - dw) * 2u);
+			/* Reuse the exact nearest-neighbour map for every source row. */
+			for (uint32_t dx = 0; dx < dw; dx++) {
+				uint16_t v = srow[xindex[dx]];
 
-			if (sx >= bw) {
-				sx = bw - 1u;
+				row[mx + dx] = swap ? sys_cpu_to_be16(v) : v;
 			}
-			v = srow[sx];
-			row[dx] = swap ? sys_cpu_to_be16(v) : v;
+		}
+		previous_sy = sy;
+		sy += ystep;
+		yerror += yrem;
+		if (yerror >= dh) {
+			yerror -= dh;
+			sy++;
 		}
 	}
 }
@@ -1944,6 +1997,7 @@ static int scale_fit_send_front(uint16_t *dst, uint32_t pw, uint32_t ph)
 
 		s_slots[slot].job = (struct aster_disp_job){
 			.buf = bytes,
+			.persistent_ui = IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B),
 			.desc = {
 				.buf_size = (size_t)pw * ph * 2u,
 				.width = pw,
@@ -1958,6 +2012,7 @@ static int scale_fit_send_front(uint16_t *dst, uint32_t pw, uint32_t ph)
 #else
 	if (disp_direct_send(&(struct aster_disp_job){
 			.buf = bytes,
+			.persistent_ui = IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B),
 			.desc = {
 				.buf_size = (size_t)pw * ph * 2u,
 				.width = pw,

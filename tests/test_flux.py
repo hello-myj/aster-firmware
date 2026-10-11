@@ -258,60 +258,24 @@ int main(void) {
 }
 ''')
 
-    def test_native_fonts_raw_bitmap_wrapper_and_unknown_text(self):
-        source=(ROOT/'systems/zephyr/ui/launcher/flux_font.c').read_text()
-        implementation=source[source.index('typedef struct {'):]
-        implementation=implementation.replace('#include "flux_fonts.inc"','#include "'+str(ROOT/'systems/zephyr/ui/launcher/flux_fonts.inc')+'"')
+    def test_desktop_font_uses_shared_native_size_cache(self):
+        s=(ROOT/'systems/zephyr/ui/launcher/flux_font.c').read_text()
+        code=s[s.index('unsigned aster_flux_font_pixels'):]
         run_c(r'''
 #include <assert.h>
 #include <stdint.h>
-#include <stdbool.h>
 #include <string.h>
-#include <stddef.h>
-#define LV_FONT_GLYPH_FORMAT_A8 8
-#define LV_COLOR_FORMAT_A8 8
-typedef struct {uint8_t *data;struct {unsigned w,h,stride;} header;} lv_draw_buf_t;
-typedef struct font lv_font_t;
-typedef struct {unsigned adv_w,box_w,box_h,stride,format;int ofs_x,ofs_y;bool is_placeholder,req_raw_bitmap;struct {unsigned index;} gid;void *entry;const lv_font_t *resolved_font;} lv_font_glyph_dsc_t;
-struct font {
- bool (*get_glyph_dsc)(const lv_font_t *,lv_font_glyph_dsc_t *,uint32_t,uint32_t);
- const void *(*get_glyph_bitmap)(lv_font_glyph_dsc_t *,lv_draw_buf_t *);
- unsigned line_height,base_line,static_bitmap;const void *dsc;
-};
-static void lv_draw_buf_init(lv_draw_buf_t *b,unsigned w,unsigned h,unsigned cf,unsigned stride,void *data,unsigned len) {
- assert(cf==8 && len==w*h);b->data=data;b->header.w=w;b->header.h=h;b->header.stride=stride;
-}
-''' +implementation+r'''
+typedef struct {unsigned px;} lv_font_t;
+static lv_font_t requested;
+static unsigned warmed;
+static const lv_font_t *aster_ui_font(uint8_t px) {requested.px=px;return &requested;}
+static void aster_ui_font_warm(uint8_t px,const char *s) {assert(s);warmed=px;}
+''' +code+r'''
 int main(void) {
  assert(aster_flux_font_pixels(16,112,"SDK APP")==12);
  assert(aster_flux_font_pixels(16,128,"上下拨动")==14);
- assert(aster_flux_font_pixels(16,192,"aster")==12);
- assert(aster_flux_font_pixels(20,384,"音乐")==30);
- assert(aster_flux_font(12,"上下拨动") && aster_flux_font(12,"aster"));
- const lv_font_t *f=aster_flux_font(30,"音乐");assert(f && f->static_bitmap);
- assert(aster_flux_font(16,"Wi-Fi 100%"));
- /* Unbaked sizes select the closest face; ties select the smaller face. */
- assert(aster_flux_font(15,"test")==aster_flux_font(14,"test"));
- assert(!aster_flux_font(30,"🙂") && !aster_flux_font(16,"\xc3"));
- lv_font_glyph_dsc_t g={0};assert(f->get_glyph_dsc(f,&g,0x97f3,0));
- assert(g.box_w && g.box_h && g.adv_w>0 && g.stride==g.box_w);
- g.resolved_font=f;g.req_raw_bitmap=true;
- const void *raw=f->get_glyph_bitmap(&g,NULL);assert(raw);
- g.req_raw_bitmap=false;
- const lv_draw_buf_t *wrapper=f->get_glyph_bitmap(&g,NULL);
- assert(wrapper->data==raw && wrapper->header.w==g.box_w && wrapper->header.h==g.box_h);
- uint8_t pixels[4096];lv_draw_buf_t out={.data=pixels};
- assert(f->get_glyph_bitmap(&g,&out)==&out && !memcmp(pixels,raw,g.box_w*g.box_h));
- assert(!f->get_glyph_dsc(f,&g,0x1f642,0));
- /* Native small glyphs retain intermediate A8 coverage, not binary
-  * or coarse 4bpp edges, and also keep fully opaque stroke pixels. */
- f=aster_flux_font(14,"aster");assert(f->get_glyph_dsc(f,&g,'e',0));
- g.resolved_font=f;g.req_raw_bitmap=true;
- const uint8_t *small=f->get_glyph_bitmap(&g,NULL);bool ink=false,gray=false,full_a8=false;
- for(unsigned i=0;i<g.box_w*g.box_h;i++) {
-  ink|=small[i]==255;gray|=small[i]>0 && small[i]<255;full_a8|=small[i]%17!=0;
- }
- assert(ink && gray && full_a8);
+ assert(aster_flux_font_pixels(20,384,"任意应用名字")==30);
+ assert(aster_flux_font(30,"任意应用名字")==&requested && requested.px==30 && warmed==30);
  return 0;
 }
 ''')

@@ -389,52 +389,29 @@ static int ctx_load(aster_app_ctx_t *ctx, const aster_app_rec_t *rec)
 	char path[224];
 	aster_storage_app_dir(dir, sizeof(dir), rec->id);
 
-	const char *entry = "app.wasm";
-	bool want_aot = rec->has_aot && IS_ENABLED(CONFIG_ASTER_AOT);
-	if (want_aot) {
-		entry = "app.aot";
+	if (!rec->has_aot || !IS_ENABLED(CONFIG_ASTER_AOT)) {
+		LOG_ERR("AOT required on device: rebuild and reinstall %s with AOT", rec->id);
+		return -ENOTSUP;
 	}
 
-	snprintf(path, sizeof(path), "%s/%s", dir, entry);
+	snprintf(path, sizeof(path), "%s/app.aot", dir);
 	int err = load_image(path, &ctx->img, &ctx->img_size);
 	if (err) {
-		/* fall back to wasm if aot file is missing */
-		if (want_aot) {
-			snprintf(path, sizeof(path), "%s/app.wasm", dir);
-			err = load_image(path, &ctx->img, &ctx->img_size);
-			want_aot = false;
-		}
-		if (err) {
-			LOG_ERR("load %s: %d", path, err);
-			return err;
-		}
+		LOG_ERR("load required AOT %s: %d", path, err);
+		return err;
+	}
+	if (get_package_type(ctx->img, (uint32_t)ctx->img_size) != Wasm_Module_AoT) {
+		LOG_ERR("invalid AOT image: %s", path);
+		aster_psram_free(ctx->img);
+		ctx->img = NULL;
+		return -EINVAL;
 	}
 
 	char error_buf[160];
 	ctx->module = wasm_runtime_load(ctx->img, (uint32_t)ctx->img_size,
 					error_buf, sizeof(error_buf));
-	if (!ctx->module && want_aot) {
-		/* Corrupt/incompatible AOT image: drop it and fall back to the
-		 * wasm body (same as a missing app.aot), once per boot. The
-		 * bad file is removed so the next load skips straight to wasm. */
-		LOG_WRN("aot load failed (%s); falling back to wasm", error_buf);
-		aster_psram_free(ctx->img);
-		ctx->img = NULL;
-		snprintf(path, sizeof(path), "%s/app.aot", dir);
-		(void)fs_unlink(path);
-		aster_app_mgr_clear_aot(rec->id);
-		want_aot = false;
-		snprintf(path, sizeof(path), "%s/app.wasm", dir);
-		err = load_image(path, &ctx->img, &ctx->img_size);
-		if (err) {
-			LOG_ERR("load %s: %d", path, err);
-			return err;
-		}
-		ctx->module = wasm_runtime_load(ctx->img, (uint32_t)ctx->img_size,
-						error_buf, sizeof(error_buf));
-	}
 	if (!ctx->module) {
-		LOG_ERR("wasm_runtime_load: %s", error_buf);
+		LOG_ERR("AOT load failed: %s", error_buf);
 		aster_psram_free(ctx->img);
 		ctx->img = NULL;
 		return -EINVAL;
@@ -487,7 +464,7 @@ static int ctx_load(aster_app_ctx_t *ctx, const aster_app_rec_t *rec)
 		return -EINVAL;
 	}
 
-	ctx->is_aot = (want_aot);
+	ctx->is_aot = true;
 	ctx->mem_max = rec->mem_max ? rec->mem_max : 4u * 1024u * 1024u;
 	return 0;
 }
@@ -1016,9 +993,16 @@ static void worker_fn(void *p1, void *p2, void *p3)
 
 		/* publish the owner *before* running aster_app_init: native
 		 * calls (surface/fs) resolve ctx_of() during init too */
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+        aster_font_sd_session_begin();
+        aster_ui_fonts_prepare(aster_ui_lvgl_width(),aster_ui_lvgl_height(),ctx->rec->name);
+#endif
 		current = ctx;
 		worker_result = ctx_startup(ctx);
 		if (worker_result != ASTER_OK) {
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+            aster_font_sd_session_end();
+#endif
 			current = NULL;
 #if IS_ENABLED(CONFIG_ASTER_AUDIO)
 			(void)aster_plat_audio_stop();
@@ -1052,15 +1036,6 @@ static void worker_fn(void *p1, void *p2, void *p3)
 		}
 		worker_pending = NULL;
 
-#if IS_ENABLED(CONFIG_ASTER_LVGL)
-		if (strcmp(ctx->id, "aster.reader") == 0 ||
-		    strcmp(ctx->id, "aster.player") == 0 ||
-		    strstr(ctx->id, "lyric") != NULL ||
-		    strstr(ctx->id, "chat") != NULL ||
-		    strstr(ctx->id, ".ai") != NULL) {
-			aster_font_sd_session_begin();
-		}
-#endif
 		app_event_loop(ctx);
 
 		/* teardown (wasm calls must run on this thread) */

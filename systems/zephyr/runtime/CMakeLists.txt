@@ -12,10 +12,10 @@ elseif(CONFIG_ASTER_CPU_ARCH_RISCV)
 elseif(CONFIG_ASTER_CPU_ARCH_X86)
   set(WAMR_BUILD_TARGET "X86_64")
 endif()
-# Interpreter + AOT both enabled (design doc sec.37): universal wasm + optional
-# native AOT. libc-builtin provides memset/strlen/etc for plain-C apps.
-set(WAMR_BUILD_INTERP 1)
-set(WAMR_BUILD_FAST_INTERP 1)
+# Physical devices execute AOT only. The independent POSIX test/simulator
+# runtime enables its own WASM interpreter in systems/posix/CMakeLists.txt.
+set(WAMR_BUILD_INTERP 0)
+set(WAMR_BUILD_FAST_INTERP 0)
 set(WAMR_BUILD_AOT 1)
 set(WAMR_BUILD_LIBC_BUILTIN 1)
 set(WAMR_BUILD_LIBC_WASI 0)

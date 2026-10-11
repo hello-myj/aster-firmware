@@ -58,7 +58,9 @@ typedef struct {
 	uint32_t        peak_mem;    /* wasm linear memory bytes */
 } aster_app_rec_t;
 
-#define ASTER_APP_MAX_RECS 16
+/* Installed APP records live in PSRAM; this does not increase the number
+ * of concurrently running applications (CONFIG_ASTER_APP_MAX). */
+#define ASTER_APP_MAX_RECS 64
 
 int  aster_app_mgr_init(void);
 /* rescan /SD:/aster/apps. The runtime-owned fields (state, start counters) of

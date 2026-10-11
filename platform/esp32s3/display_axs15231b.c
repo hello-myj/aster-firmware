@@ -138,13 +138,24 @@ static int axs_write(const struct device *dev,const uint16_t x,const uint16_t y,
 {
  return axs_write_frame(dev,x,y,desc,buffer,false);
 }
-/* Internal UI-only contract: buffer remains allocated for the UI lifetime;
+/* Internal native-front contract: buffer remains allocated while borrowed;
  * callers serialize drawing and screenshot capture, and wait before reuse.
+ * Release the borrow after DMA drains and before the owner frees its front.
  * Never used for guest memory or short-lived staging/band buffers. */
 int aster_axs15231b_write_persistent(const struct device *dev,
                      const struct display_buffer_descriptor *desc,const void *buffer)
 {
  return axs_write_frame(dev,0,0,desc,buffer,true);
+}
+void aster_axs15231b_release_persistent(const struct device *dev)
+{
+ const struct axs_config *c=dev->config;
+ struct axs_data *d=dev->data;
+ k_mutex_lock(&d->lock,K_FOREVER);
+ if(d->borrowed && d->borrowed!=d->frame)
+  memcpy(d->frame,d->borrowed,(size_t)c->width*c->height*2u);
+ d->borrowed=NULL;
+ k_mutex_unlock(&d->lock);
 }
 static void axs_capabilities(const struct device *dev,struct display_capabilities *cap)
 {

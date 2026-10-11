@@ -61,6 +61,9 @@ if(selection MATCHES "CONFIG_ASTER_CFG_USB_CONSOLE=y")
   # Native USB sends 64-byte packets; the default 8-byte TX ring makes
   # screenshots pay USB/WSL interrupt latency for every tiny fragment.
   file(APPEND "${bridge}" "CONFIG_SHELL_BACKEND_SERIAL_TX_RING_BUFFER_SIZE=1024\n")
+  # The native Serial/JTAG RX interrupt path can leave the host OUT endpoint
+  # stalled. Polling drains its FIFO and also supports shared binary transfers.
+  file(APPEND "${bridge}" "CONFIG_SHELL_BACKEND_SERIAL_INTERRUPT_DRIVEN=n\nCONFIG_SHELL_BACKEND_SERIAL_API_POLLING=y\nCONFIG_SHELL_BACKEND_SERIAL_RX_POLL_PERIOD=1\n")
 endif()
 set(CONF_FILE "${ASTER_ROOT}/prj.conf;${selected_conf};${ASTER_USER_CONFIG};${bridge}")
 set(DTC_OVERLAY_FILE "${selected_overlay}" CACHE STRING "Hardware overlays" FORCE)

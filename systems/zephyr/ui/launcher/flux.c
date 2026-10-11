@@ -487,10 +487,10 @@ static void caption(void)
   * AUTO height would wrap long package text over the launch controls. */
  lv_obj_set_height(description,lv_font_get_line_height(lv_obj_get_style_text_font(description,0)));
  lv_obj_set_height(pull_label,lv_font_get_line_height(lv_obj_get_style_text_font(pull_label,0)));
- /* The track scales with the viewport, while APP captions keep their SD
-  * font size. Center after selecting the font instead of scaling a fixed y. */
- if(IS_ENABLED(CONFIG_ASTER_HW_LCKFB_S3))
-  lv_obj_align(pull_label,LV_ALIGN_LEFT_MID,ax(65),0);
+ /* Both native UI and APP captions center using their actual line height.
+  * The label stays between the handle and arrow as the viewport changes. */
+ lv_obj_set_style_text_align(pull_label,LV_TEXT_ALIGN_CENTER,0);
+ lv_obj_center(pull_label);
  set_text(filter_label,group_names[group]);
 }
 /* Keep entries that remain in the five-ribbon window. Crossing an index
@@ -624,9 +624,18 @@ static void build_home(void)
   lv_obj_center(filter_label);
   lv_obj_set_ext_click_area(filter,4);
  }
- text(body,"SCROLL THE MOMENT",17,38,190,0x91a184,16,128);
- position=text(body,"",250,38,55,0x91a184,16,128);
+ lv_obj_t *subtitle=text(body,"SCROLL THE MOMENT",17,38,190,0x91a184,16,128);
+ position=text(body,"",lckfb?211:250,38,lckfb?92:55,0x91a184,16,128);
  stage=box(body,0,53,320,280,BG,0);
+ if(lckfb) {
+  /* Native glyphs keep their line height when the design spacing shrinks.
+   * Reserve the entire header row before clipping the ribbon stage. */
+  int line_h=lv_font_get_line_height(lv_obj_get_style_text_font(subtitle,0));
+  int stage_top=MAX(ay(53),ay(38)+line_h+as(6));
+  lv_obj_set_y(stage,stage_top);
+  lv_obj_set_height(stage,MAX(1,ay(333)-stage_top));
+  lv_obj_set_style_text_align(position,LV_TEXT_ALIGN_RIGHT,0);
+ }
  text(stage,"FLUX",18,3,130,0x24202c,20,600);
  for(int k=0;k<RIBBONS;k++) {
   ribbons[k].entry=-1;ribbons[k].obj=lv_image_create(stage);
@@ -718,7 +727,7 @@ static void build_system(void)
 }
 static void show_page(int next)
 {
- aster_font_sd_cache_drop();
+ /* Desktop pages share one cache owner; keep hot glyphs until APP entry. */
  if(next!=HOME) {animating=false;coasting=false;phase=selected[group]*1000;pull=0;}
  for(int i=0;i<RIBBONS;i++) {ribbons[i].obj=NULL;ribbons[i].entry=-1;}
  if(body) lv_obj_delete(body);
@@ -888,6 +897,7 @@ void aster_launcher_show(void)
  view_w=(int)aster_ui_lvgl_width();view_h=(int)aster_ui_lvgl_height();
  if(view_w<1) view_w=320;
  if(view_h<1) view_h=480;
+ aster_ui_fonts_prepare(view_w,view_h,"流光");
  lv_obj_clean(aster_ui_lvgl_screen());
  aster_ui_lvgl_pointer(0,0,0);lv_indev_reset(aster_ui_lvgl_indev(),NULL);
  read_entries();filter_entries();warm_visible_text();visible=true;dirty=false;launching=false;memset(&drag,0,sizeof(drag));

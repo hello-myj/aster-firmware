@@ -407,7 +407,7 @@ static void show(enum page next, const char *ssid)
 	if (ssid)
 		snprintf(selected, sizeof(selected), "%s", ssid);
 	reset_view();
-	aster_font_sd_cache_drop();
+	/* Cache lifetime follows the screen owner, not this settings page. */
 	page = next;
 	aster_plat_wifi_hotspot_status(&ap_state);
 	if (page == WIFI_LIST) {
