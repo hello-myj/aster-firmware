@@ -196,7 +196,10 @@ static int enabled=1;
 #define IS_ENABLED(x) (x)
 static const void *disp_dev=(void *)1;static uint8_t frame[320*480*2],old[2];
 static const uint8_t *s_glass=old;static uint32_t s_glass_w=1,s_glass_h=1,s_glass_pitch=1;
+static bool s_glass_ui;
 static int drained;
+static int held;
+static bool glass_shadow_hold(void) {held++;return s_glass!=NULL;}
 static void aster_plat_display_flush_drain(void) {drained++;}
 static const void *display_get_framebuffer(const void *dev) {assert(dev && drained);return frame;}
 static void panel_geom(uint32_t *w,uint32_t *h) {*w=320;*h=480;}
@@ -207,7 +210,11 @@ int main(void) {
  assert(buf==frame && w==320 && h==480 && pitch==320 && drained==1);
  enabled=0;
  assert(aster_plat_display_glass_frame(&buf,&w,&h,&pitch));
- assert(buf==old && w==1 && h==1 && pitch==1 && drained==1);
+ assert(buf==old && w==1 && h==1 && pitch==1 && drained==2);
+ assert(held==1);
+ s_glass_ui=true;
+ assert(aster_plat_display_glass_frame(&buf,&w,&h,&pitch));
+ assert(buf==old && drained==3 && held==1); /* same-worker UI alias needs no copy */
  s_glass=NULL;assert(!aster_plat_display_glass_frame(&buf,&w,&h,&pitch));
  return 0;
 }

@@ -26,6 +26,7 @@ void aster_flux_draw_forget(const void *source)
 }
 void aster_flux_draw_prepare(const void *source,uint32_t stride)
 {
+ if(stride<360u*2u) return;
  aster_flux_draw_forget(source);
  for(unsigned i=0;i<5;i++) if(!prepared[i].source) {
   uint8_t *map=aster_psram_alloc(45*140+102);if(!map) return;
@@ -97,7 +98,10 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
  if(!lv_area_intersect(&area,clipped,&t->clip_area) ||
     !lv_area_intersect(&area,&area,&layer->buf_area)) return LV_RESULT_OK;
  int width=lv_area_get_width(&area);
- if(width>480) return LV_RESULT_INVALID;
+ int height=lv_area_get_height(&area);
+ /* A wrapped ribbon angle can hand this loop a clip that never advances.
+  * Bail out instead of spinning with interrupts effectively starved. */
+ if(width<1 || height<1 || width>480 || height>480) return LV_RESULT_INVALID;
  uint32_t started=k_cycle_get_32();
  /* Write directly into the cached framebuffer; an intermediate scanline
   * would add two PSRAM copies for every transformed bounding rectangle. */
@@ -117,8 +121,8 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
   int x0=area.x1-coords->x1-d->pivot.x;
   int y0=y-coords->y1-d->pivot.y;
   int offset=d->antialias?0:32768;
-  int32_t sx=(int64_t)(cs*x0-sn*y0)*factor/d->scale_x+d->pivot.x*65536+offset;
-  int32_t sy=(int64_t)(sn*x0+cs*y0)*factor/d->scale_y+d->pivot.y*65536+offset;
+  int32_t sx=((int64_t)cs*x0-(int64_t)sn*y0)*factor/d->scale_x+d->pivot.x*65536+offset;
+  int32_t sy=((int64_t)sn*x0+(int64_t)cs*y0)*factor/d->scale_y+d->pivot.y*65536+offset;
   uint16_t *out=(uint16_t *)(layer->draw_buf->data+
     (y-layer->buf_area.y1)*layer->draw_buf->header.stride)+area.x1-layer->buf_area.x1;
   uint16_t *dst=out;
@@ -128,7 +132,9 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
    if(d->antialias) {
     /* Skip whole uniform source tiles. Transform stepping and four-tap
      * sampling are needed only near actual artwork and polygon edges. */
-    if(detail && dxs>0 && (unsigned)ix<352 && (unsigned)iy<136) {
+    /* The tile skip was measured for one scale on both axes. A non-uniform
+     * fit can produce a zero step and spin on this core. */
+    if(detail && d->scale_x==d->scale_y && dxs>0 && (unsigned)ix<352 && (unsigned)iy<136) {
      unsigned tile=(iy/8)*45+ix/8;
      if(!(detail[45*140+tile/8]&(1u<<(tile&7)))) {
       /* Empty margins extend across many tiles; step to the first
@@ -145,6 +151,8 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
        int r=((iy&7)*65536+(sy&65535))/(-dys)+1;
        if(r<run) run=r;
       }
+      /* run <= 0 makes x += run-1 cancel the for-loop increment and spin. */
+      if(run<1) run=1;
       if(run>area.x2-x+1) run=area.x2-x+1;
       if(mix>=32) {
        uint16_t value=swap16(solid);for(int k=0;k<run;k++) dst[k]=value;

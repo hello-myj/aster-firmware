@@ -825,10 +825,12 @@ static uint8_t s_flip; /* alternates 0/1 */
  * partial write still forgets the record, i.e. the v1 behaviour. */
 static const uint8_t *s_glass;
 static uint32_t s_glass_w, s_glass_h, s_glass_pitch;
+static bool s_glass_ui; /* persistent UI frame, read on its owning worker */
 
 static void glass_forget(void)
 {
 	s_glass = NULL;
+	s_glass_ui = false;
 }
 
 #if IS_ENABLED(CONFIG_ASTER_SCREENSHOT)
@@ -905,6 +907,7 @@ static void glass_blit(const uint8_t *src, uint32_t px, uint32_t py,
 static void glass_track(const uint8_t *src, uint32_t px, uint32_t py,
 			uint32_t w, uint32_t h, uint32_t pitch, bool whole)
 {
+	s_glass_ui = false;
 	/* AXS already owns a persistent wire-order shadow; grab it after drain. */
 	if (IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)) return;
 	if (!s_glass) {
@@ -922,6 +925,7 @@ static void glass_track(const uint8_t *src, uint32_t px, uint32_t py,
 static void glass_note_full(const uint8_t *buf, uint32_t w, uint32_t h,
 			    uint32_t pitch, bool alias_ok)
 {
+	s_glass_ui = false;
 	if (IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)) return;
 	if (alias_ok) {
 		s_glass = buf;
@@ -1101,14 +1105,19 @@ void aster_plat_display_glass_drop(void)
 bool aster_plat_display_glass_frame(const uint8_t **buf, uint32_t *w, uint32_t *h,
 				  uint32_t *pitch)
 {
+	/* Both the AXS driver shadow and the ST7789 persistent UI alias can
+	 * still be in flight. Snapshot only after the transfer completes. */
+	aster_plat_display_flush_drain();
 	if (IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B) && disp_dev) {
-		aster_plat_display_flush_drain();
 		const uint8_t *frame=display_get_framebuffer(disp_dev);
 		if (frame) {
 			panel_geom(w,h);*pitch=*w;*buf=frame;return true;
 		}
 	}
-	if (!glass_shadow_hold() || !s_glass) {
+	/* The UI and screenshot run on one worker; after drain its persistent
+	 * frame stays stable through compression. Keep that alias for repeated
+	 * grabs instead of dropping it with a temporary snapshot shadow. */
+	if (!s_glass || (!s_glass_ui && !glass_shadow_hold())) {
 		return false;
 	}
 	*buf = s_glass;
@@ -2171,12 +2180,16 @@ int aster_plat_display_write_at(const uint8_t *buf, uint32_t x, uint32_t y,
 	return aster_plat_display_write_at_ex(buf, x, y, w, h, pitch, false);
 }
 
-#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
 int aster_plat_display_write_persistent_ui(const uint8_t *buf,uint32_t w,uint32_t h,uint32_t pitch)
 {
  uint32_t pw,ph;panel_geom(&pw,&ph);
  if(!disp_dev || !buf || s_rot || w!=pw || h!=ph || pitch!=w) return ASTER_EINVAL;
- struct aster_disp_job job={.buf=buf,.persistent_ui=true,
+ /* The UI owns this full frame until DMA completes, and screenshots run
+  * on that same worker. ST7789 can therefore record the stable alias;
+  * AXS continues to use its driver's authoritative panel shadow. */
+ glass_note_full(buf,w,h,pitch,true);
+ s_glass_ui=!IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B);
+ struct aster_disp_job job={.buf=buf,.persistent_ui=IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B),
   .desc={.width=w,.height=h,.pitch=pitch,.buf_size=(size_t)w*h*2u}};
 #if IS_ENABLED(CONFIG_ASTER_DISP_ASYNC)
  disp_slot_post(ASTER_DISP_SHARED_SLOT,&job);return ASTER_OK;
@@ -2184,7 +2197,6 @@ int aster_plat_display_write_persistent_ui(const uint8_t *buf,uint32_t w,uint32_
  return disp_direct_send(&job)?ASTER_EIO:ASTER_OK;
 #endif
 }
-#endif
 
 int aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 				 uint32_t w, uint32_t h, uint32_t pitch,

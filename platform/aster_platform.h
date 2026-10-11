@@ -52,7 +52,7 @@ int  aster_plat_display_write_at(const uint8_t *buf, uint32_t x, uint32_t y,
 int  aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 				  uint32_t w, uint32_t h, uint32_t pitch,
 				  bool be_pixels_swapped);
-/* Internal native-UI frame: persistent BE full-panel double buffers only.
+/* Internal native-UI frame: persistent BE full-panel buffers only.
  * Serialize screenshots with drawing and wait for flush before buffer reuse.
  * Not available to APPs; short-lived buffers must use write_at_ex. */
 int aster_plat_display_write_persistent_ui(const uint8_t *buf,uint32_t w,uint32_t h,uint32_t pitch);

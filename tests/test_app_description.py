@@ -46,7 +46,7 @@ int main(void) {
 #include <stdbool.h>
 #define ASTER_APP_DESCRIPTION_MAX 128
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof((x)[0]))
-enum {FILES,MIXER,SYSTEM,CLOCK,ICON_BOX,ICON_FILES,ICON_SETTINGS,ICON_TERMINAL,ICON_CLOCK};
+enum {HOME,FILTERS,MIXER,FILES,CLOCK,SYSTEM,ICON_BOX,ICON_FILES,ICON_SETTINGS,ICON_TERMINAL,ICON_CLOCK};
 typedef struct {char id[64],name[40],category[16],description[128];} aster_app_rec_t;
 static aster_app_rec_t recs[]={
  {.id="aster.player",.name="Player",.description="APP 自己的介绍"},
@@ -59,15 +59,23 @@ static const aster_app_rec_t *aster_app_mgr_find(const char *id) {
  return NULL;
 }
 #define MAX_ENTRIES 20
+#define ASTER_FONT_UI_PX 20
+#define ASTER_FONT_CAPTION_PX 16
+static int warm_calls;
+static void aster_ui_font_warm(int px,const char *s) {(void)px;(void)s;warm_calls++;}
 ''' + types + '\nstatic entry_t entries[MAX_ENTRIES];static int entry_n;\n' + read + r'''
 int main(void) {
  read_entries(); assert(entry_n==7);
+ assert(warm_calls==3); /* all app titles use the independent SD face */
+ assert(!strcmp(entries[0].name,"Player")); /* package owns even known app names */
  assert(!strcmp(entries[0].description,"APP 自己的介绍"));
  assert(!strcmp(entries[1].description,"独立安装的介绍"));
  assert(!entries[2].description[0]);
  recs[1].description[0]=0; /* borrowed registry storage changed */
+ snprintf(recs[0].name,sizeof(recs[0].name),"新播放器");
  assert(!strcmp(entries[1].description,"独立安装的介绍"));
  read_entries(); assert(!entries[1].description[0]);
+ assert(!strcmp(entries[0].name,"新播放器")); /* rename needs no firmware rebuild */
  return 0;
 }
 ''')

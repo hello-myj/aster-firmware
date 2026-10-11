@@ -31,12 +31,13 @@ class Sounds(unittest.TestCase):
 #define ASTER_AUDIO_PAUSED 2
 #define K_NO_WAIT 0
 #define K_FOREVER -1
-static int sess_mu,effect_mu,play_go,wakes,locked,g_vol=70;
+static int sess_mu,effect_mu,wakes,locked,g_vol=70,wake_error,clears;
 static int k_mutex_lock(int *mu,int wait) {(void)mu;assert(wait==0 || wait==-1);return locked;}
 static void k_mutex_unlock(int *mu) {(void)mu;}
-static void k_sem_give(int *sem) {(void)sem;wakes++;}
 static struct {bool effect_closing,stop,effect_only;size_t size,off;int err,state;} sess;
 static struct {const int16_t *pcm;size_t frames,off;unsigned gain,priority;} ui_voice;
+static int wake_player(void) {wakes++;return wake_error;}
+static void sess_clear_locked(void) {clears++;sess.state=ASTER_AUDIO_IDLE;sess.effect_only=false;}
 ''' + code + r'''
 int main(void) {
  static const int16_t a[]={100,200}, b[]={300,400};
@@ -53,6 +54,9 @@ int main(void) {
  assert(aster_plat_audio_ui_play(b,2,1000,1)==-EAGAIN);
  g_vol=0;assert(aster_plat_audio_ui_play(b,2,1000,1)==-EAGAIN);
  assert(aster_plat_audio_ui_play(b,2,1001,1)==-EINVAL);
+ g_vol=70;sess.state=ASTER_AUDIO_IDLE;wake_error=-ENOMEM;
+ assert(aster_plat_audio_ui_play(b,2,1000,1)==-ENOMEM);
+ assert(clears==1 && sess.state==ASTER_AUDIO_IDLE && !sess.effect_only);
  return 0;
 }
 ''')

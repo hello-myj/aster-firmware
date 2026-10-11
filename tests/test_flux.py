@@ -5,7 +5,7 @@ from test_waveshare import ROOT, run_c
 class Flux(unittest.TestCase):
     def test_neighbor_cache_retains_existing_textures(self):
         source=(ROOT/'systems/zephyr/ui/launcher/flux.c').read_text()
-        helper=source[source.index('static int cache_slot'):source.index('static void redraw(void)\n{')]
+        helper=source[source.index('static int cache_slot'):source.index('static void ribbon_order')]
         run_c(r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -23,6 +23,53 @@ int main(void) {
  assert(cache_slot(before_wrap,across_wrap,5,0)==0);
  int smaller[3]={2,3,4};
  assert(cache_slot(resident,smaller,3,2)==1);
+ return 0;
+}
+''')
+
+    def test_stable_layer_order_does_not_invalidate_stage(self):
+        source=(ROOT/'systems/zephyr/ui/launcher/flux.c').read_text()
+        cyclic=source[source.index('static int nearest'):source.index('static entry_t *current')]
+        order=source[source.index('static void ribbon_order'):source.index('static void redraw(void)\n{')]
+        run_c(r'''
+#include <assert.h>
+#include <stdlib.h>
+#include <stdint.h>
+#define RIBBONS 5
+typedef struct {int id;} lv_obj_t;
+static lv_obj_t objects[6]={{0},{1},{2},{3},{4},{5}};
+static lv_obj_t *children[6]={objects,objects+1,objects+2,objects+3,objects+4,objects+5};
+static lv_obj_t *stage=objects;
+static struct {lv_obj_t *obj;} ribbons[5]={{objects+1},{objects+2},{objects+3},{objects+4},{objects+5}};
+static int phase,count=13,invalidations;
+static int lv_obj_get_child_count(lv_obj_t *o) {(void)o;return 6;}
+static void lv_obj_move_to_index(lv_obj_t *o,int target) {
+ int old=0;while(children[old]!=o) old++;
+ if(old==target) return;
+ invalidations++;
+ if(old>target) for(int i=old;i>target;i--) children[i]=children[i-1];
+ else for(int i=old;i<target;i++) children[i]=children[i+1];
+ children[target]=o;
+}
+''' +cyclic+order+r'''
+static void check(const int index[5]) {
+ ribbon_order(index);assert(children[0]==objects);
+ int prior=4;
+ for(int i=1;i<6;i++) {
+  int idx=index[children[i]->id-1];
+  int depth=idx<0?4:abs(distance(idx,phase,count))/1000;
+  assert(depth<=prior);prior=depth;
+ }
+ int before=invalidations;
+ ribbon_order(index);assert(invalidations==before);
+}
+int main(void) {
+ const int resident[5]={11,12,0,1,2};
+ for(phase=-400;phase<500;phase+=10) check(resident);
+ const int next[5]={3,12,0,1,2};
+ for(phase=500;phase<1500;phase+=10) check(next);
+ count=3;phase=0;const int small[5]={0,1,2,-1,-1};check(small);
+ count=0;const int empty[5]={-1,-1,-1,-1,-1};check(empty);
  return 0;
 }
 ''')
@@ -105,6 +152,23 @@ static void aster_psram_free(void *p) {free(p);}
 int main(void) {
  /* Rounded interpolation preserves constant colors and is symmetric
   * across each edge: half white/black must not acquire a dark bias. */
+ /* Check RGB565 interpolation against a floating-point bilinear
+  * definition, including arbitrary four-color inputs and exact endpoints. */
+ for(unsigned seed=0;seed<256;seed++) {
+  uint16_t pixels[4];
+  for(unsigned i=0;i<4;i++) pixels[i]=(uint16_t)((seed*1664525u+i*1013904223u)>>8);
+  for(unsigned wx=0;wx<=256;wx+=16) for(unsigned wy=0;wy<=256;wy+=16) {
+   double fx=wx/256.0,fy=wy/256.0;
+   unsigned expected=0;
+   for(unsigned c=0;c<3;c++) {
+    unsigned shift=c==0?11:c==1?5:0,mask=c==1?63:31;
+    double top=((pixels[0]>>shift)&mask)*(1-fx)+((pixels[1]>>shift)&mask)*fx;
+    double bottom=((pixels[2]>>shift)&mask)*(1-fx)+((pixels[3]>>shift)&mask)*fx;
+    expected|=(unsigned)(top*(1-fy)+bottom*fy+0.5)<<shift;
+   }
+   assert(sample565(pixels,wx,wy)==expected);
+  }
+ }
  const uint16_t constant[4]={0x39e7,0x39e7,0x39e7,0x39e7};
  const uint16_t edge[4]={0,0xffff,0,0xffff},reverse[4]={0xffff,0,0xffff,0};
  assert(sample565(edge,128,56)==0x8410);
@@ -225,7 +289,9 @@ int main(void) {
  assert(aster_flux_font_pixels(20,384,"音乐")==30);
  assert(aster_flux_font(12,"上下拨动") && aster_flux_font(12,"aster"));
  const lv_font_t *f=aster_flux_font(30,"音乐");assert(f && f->static_bitmap);
- assert(aster_flux_font(16,"Wi-Fi 100%") && !aster_flux_font(15,"test"));
+ assert(aster_flux_font(16,"Wi-Fi 100%"));
+ /* Unbaked sizes select the closest face; ties select the smaller face. */
+ assert(aster_flux_font(15,"test")==aster_flux_font(14,"test"));
  assert(!aster_flux_font(30,"🙂") && !aster_flux_font(16,"\xc3"));
  lv_font_glyph_dsc_t g={0};assert(f->get_glyph_dsc(f,&g,0x97f3,0));
  assert(g.box_w && g.box_h && g.adv_w>0 && g.stride==g.box_w);

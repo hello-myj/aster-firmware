@@ -86,8 +86,13 @@ BUILD_ASSERT(LV_DRAW_BUF_STRIDE_ALIGN == 1,
 
 enum { ST_EMPTY = 0, ST_TABLE, ST_READY, ST_DEAD, ST_SPARSE };
 
-#define SPARSE_BYTES (16u * 1024u)
-#define SPARSE_N     48u
+/* A launcher caption plus dynamic titles can exceed 48 glyphs. Retain a
+ * small working set across adjacent cards instead of refetching every
+ * caption from SD. Offsets/counts below remain 16/8 bits respectively. */
+#define SPARSE_BYTES (48u * 1024u)
+#define SPARSE_N     192u
+BUILD_ASSERT(SPARSE_BYTES <= UINT16_MAX && SPARSE_N <= UINT8_MAX,
+             "sparse glyph cache exceeds its offset/count fields");
 
 typedef struct {
 	uint16_t adv;		/* 12.4 fixed-point */
@@ -214,9 +219,10 @@ struct sparse_ent {
 	uint16_t off;
 	uint16_t len;
 };
-static struct sparse_ent s_sparse[SPARSE_N];
+static struct sparse_ent s_sparse[SPARSE_N] __attribute__((section(".ext_ram.bss.font_sd")));
 static struct k_mutex s_lock;
 static struct k_work_delayable s_work;
+static atomic_t s_fetch_busy;
 static uint32_t s_probe_ms;
 static bool s_inited;
 static bool s_probe_first;	/* first discovery sweeps all slots at once */
@@ -739,6 +745,7 @@ static void work_fn(struct k_work *w)
 	bool streamed = false;
 
 	ARG_UNUSED(w);
+	atomic_set(&s_fetch_busy, 1);
 
 	/* one metric chunk (SD I/O outside the lock) */
 	for (uint32_t i = 0; i < ARRAY_SIZE(s_slots); i++) {
@@ -767,6 +774,8 @@ static void work_fn(struct k_work *w)
 		/* back off hard on repeated SD failures (card removed) */
 		k_work_schedule(&s_work,
 				s_io_fails > 3u ? K_MSEC(1000) : K_MSEC(5));
+	} else {
+		atomic_set(&s_fetch_busy, 0);
 	}
 }
 
@@ -1279,6 +1288,16 @@ bool aster_font_sd_streaming(void)
 		}
 	}
 	return false;
+}
+
+bool aster_font_sd_busy(void)
+{
+	bool queued;
+
+	k_mutex_lock(&s_lock, K_FOREVER);
+	queued = s_miss_h != s_miss_t;
+	k_mutex_unlock(&s_lock);
+	return queued || atomic_get(&s_fetch_busy);
 }
 
 /* Repaint signal for guests that do not pump the pipeline themselves (the

@@ -28,6 +28,7 @@
 #include "aster_storage.h"
 #include "aster_mem.h"
 #include "aster_kv.h"
+#include <aster/font_metrics.h>
 #include "aster_time.h"
 LOG_MODULE_REGISTER(aster_flux, LOG_LEVEL_INF);
 #include "flux_icons.inc"
@@ -41,6 +42,7 @@ LOG_MODULE_REGISTER(aster_flux, LOG_LEVEL_INF);
 #define INK 0x211d28
 #define MAX_ENTRIES (ASTER_APP_MAX_RECS + 4)
 #define RIBBONS 5
+#define FLUX_FRAME_MS 16
 #define KV_ID "aster.launcher.flux"
 enum { HOME, FILTERS, MIXER, FILES, CLOCK, SYSTEM };
 enum { ACT_NONE, ACT_BACK, ACT_FILTERS, ACT_MIXER, ACT_PREV, ACT_NEXT,
@@ -57,22 +59,22 @@ typedef struct {
  uint8_t group, builtin, icon;
 } entry_t;
 typedef struct {
- const char *id, *name, *code;
+ const char *id, *code;
  uint32_t color;
  uint8_t group;
 } known_t;
 static const known_t known[] = {
- {"aster.player","音乐","MUSIC",0xb6a4ff,1},
- {"aster.reader","阅读","READING",0x8debc1,1},
- {"aster.gallery","图库","GALLERY",0xf3a8ef,1},
- {"aster.starcatch","摘星星","PLAY",0xffce8e,2},
- {"aster.game.2048","2048","PLAY",0xff9e6d,2},
- {"aster.snake","贪吃蛇","PLAY",0xc6e986,2},
- {"aster.imucube","姿态立方体","SENSOR",0x76dbde,3},
- {"aster.chess","国际象棋","PLAY",0xffb3b7,2},
- {"aster.neon-duel","霓虹对决","PLAY",0xbc99ff,2},
- {"aster.gfxshow","图形演示","GRAPHICS",0xefafd4,3},
- {"aster.apitest","设备信息","DEVICE",0x9ddde9,3},
+ {"aster.player","MUSIC",0xb6a4ff,1},
+ {"aster.reader","READING",0x8debc1,1},
+ {"aster.gallery","GALLERY",0xf3a8ef,1},
+ {"aster.starcatch","PLAY",0xffce8e,2},
+ {"aster.game.2048","PLAY",0xff9e6d,2},
+ {"aster.snake","PLAY",0xc6e986,2},
+ {"aster.imucube","SENSOR",0x76dbde,3},
+ {"aster.chess","PLAY",0xffb3b7,2},
+ {"aster.neon-duel","PLAY",0xbc99ff,2},
+ {"aster.gfxshow","GRAPHICS",0xefafd4,3},
+ {"aster.apitest","DEVICE",0x9ddde9,3},
 };
 static const char *const group_names[]={"全部","媒体","玩乐","探索"};
 static const char *const group_codes[]={"FULL SPECTRUM","SOUND & LIGHT","PLAY FREQUENCY","NEW POSSIBILITIES"};
@@ -83,26 +85,44 @@ static entry_t entries[MAX_ENTRIES] __attribute__((section(".ext_ram.bss")));
 static int entry_n, ids[MAX_ENTRIES], count, group, selected[4];
 /* phase is in thousandths of an index, preserving sub-pixel drag motion. */
 static int phase, from_phase, target_phase, pull, from_pull;
+static int catalog_warmed;
 /* Design is 320x480. Each axis scales onto the glass, so a 240x320 panel
  * fills the screen instead of letterboxing a shrunken bitmap. Glyphs stay
  * square; only the spacing follows the two edges. */
 static int view_w = 320, view_h = 480;
+/* Ribbon art is baked in the 360x140 design. The fused rotator only accepts
+ * that size; a scaled bake falls through to an LVGL alloc that halts. */
+static int design_px;
 static int ax(int v)
 {
- return view_w ? (int)((int64_t)v * view_w / 320) : v;
+ if (design_px || !view_w) return v;
+ return (int)((int64_t)v * view_w / 320);
 }
 static int ay(int v)
 {
- return view_h ? (int)((int64_t)v * view_h / 480) : v;
+ if (design_px || !view_h) return v;
+ return (int)((int64_t)v * view_h / 480);
 }
 static int as(int v)
 {
- int64_t sx = (int64_t)view_w * 480, sy = (int64_t)view_h * 320;
- int64_t m = sx < sy ? sx : sy;
+ int64_t sx, sy, m;
  int r;
- if (!view_w || !view_h) return v;
+ if (design_px || !view_w || !view_h) return v;
+ sx = (int64_t)view_w * 480; sy = (int64_t)view_h * 320;
+ m = sx < sy ? sx : sy;
  r = (int)((int64_t)v * m / (320 * 480));
  return v && !r ? 1 : r;
+}
+/* Uniform 256=1x fit. Both ribbon axes share it so the tilt stays square
+ * and the fused drawer's tile skip remains valid. */
+static int fit256(void)
+{
+ int sx, sy, f;
+ if (!view_w || !view_h) return 256;
+ sx = view_w * 256 / 320;
+ sy = view_h * 256 / 480;
+ f = sx < sy ? sx : sy;
+ return f < 1 ? 1 : f;
 }
 static void to_design(uint32_t *x, uint32_t *y)
 {
@@ -185,24 +205,18 @@ static lv_obj_t *box(lv_obj_t *parent,int x,int y,int w,int h,uint32_t color,int
  lv_obj_clear_flag(o,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
  return o;
 }
-static void scale(lv_obj_t *o,int s)
-{
- lv_obj_set_style_transform_pivot_x(o,0,0);lv_obj_set_style_transform_pivot_y(o,0,0);
- lv_obj_set_style_transform_scale_x(o,s,0);lv_obj_set_style_transform_scale_y(o,s,0);
-}
 static lv_obj_t *text(lv_obj_t *parent,const char *value,int x,int y,int w,uint32_t color,int size,int zoom)
 {
  lv_obj_t *o=lv_label_create(parent);
  unsigned px=aster_flux_font_pixels(size,zoom,value);
  const lv_font_t *native=aster_flux_font((unsigned)as((int)px),value);
- int z=native?256:as(zoom);
- lv_obj_set_pos(o,ax(x),ay(y));lv_obj_set_width(o,ax(w)*256/z);
+ lv_obj_set_pos(o,ax(x),ay(y));lv_obj_set_width(o,ax(w));
  lv_obj_set_style_text_font(o,native?native:aster_ui_font(size),0);
  lv_obj_set_user_data(o,(void *)(uintptr_t)((size<<24)|(zoom<<12)|w));
  lv_obj_set_style_text_color(o,lv_color_hex(color),0);
  lv_label_set_long_mode(o,LV_LABEL_LONG_DOT);lv_label_set_text(o,value);
  lv_obj_clear_flag(o,LV_OBJ_FLAG_CLICKABLE);
- if(!native) {aster_ui_font_warm(size,value);if(z!=256) scale(o,z);}
+ if(!native) aster_ui_font_warm(size,value);
  return o;
 }
 static void set_text(lv_obj_t *o,const char *value)
@@ -211,8 +225,9 @@ static void set_text(lv_obj_t *o,const char *value)
   uintptr_t spec=(uintptr_t)lv_obj_get_user_data(o);int size=spec>>24,zoom=(spec>>12)&4095,width=spec&4095;
   unsigned px=aster_flux_font_pixels(size,zoom,value);
   const lv_font_t *native=aster_flux_font((unsigned)as((int)px),value);
-  int new_zoom=native?256:as(zoom);
-  lv_obj_set_width(o,ax(width)*256/new_zoom);scale(o,new_zoom);
+  lv_obj_set_width(o,ax(width));
+  lv_obj_set_style_transform_scale_x(o,256,0);
+  lv_obj_set_style_transform_scale_y(o,256,0);
   lv_obj_set_style_text_font(o,native?native:aster_ui_font(size),0);
   if(!native) aster_ui_font_warm(size,value);
   lv_label_set_text(o,value);
@@ -221,10 +236,13 @@ static void set_text(lv_obj_t *o,const char *value)
 static lv_obj_t *icon(lv_obj_t *parent,int number,int x,int y,int size,uint32_t color)
 {
  lv_obj_t *o=lv_image_create(parent);
- unsigned face=0;
- for(unsigned i=0;i<ARRAY_SIZE(flux_icon_sizes);i++) if(flux_icon_sizes[i]==size) {face=i;break;}
+ unsigned face=0;int want=as(size),bestd=10000;
+ for(unsigned i=0;i<ARRAY_SIZE(flux_icon_sizes);i++) {
+  int d=flux_icon_sizes[i]-(unsigned)want;if(d<0) d=-d;
+  if(d<bestd) {bestd=d;face=i;}
+ }
  lv_image_set_src(o,&chrome[face][number]);lv_obj_set_pos(o,ax(x),ay(y));
- lv_image_set_scale(o,as(size)*256/flux_icon_sizes[face]);lv_image_set_pivot(o,0,0);
+ lv_image_set_scale(o,256);lv_image_set_pivot(o,0,0);
  lv_obj_set_style_image_recolor(o,lv_color_hex(color),0);
  lv_obj_set_style_image_recolor_opa(o,LV_OPA_COVER,0);
  return o;
@@ -275,13 +293,13 @@ static void save(void) {save_due=k_uptime_get()+750;}
 static void read_entries(void)
 {
  entry_n=0;
- /* Known names/order match the reference, but entries exist only when
-  * installed. Unknown package metadata retains its name and category. */
+ /* Known IDs retain theme ordering/colors; all application names and
+  * introductions belong to package metadata, including known IDs. */
  for(size_t k=0;k<ARRAY_SIZE(known);k++) {
   const aster_app_rec_t *r=aster_app_mgr_find(known[k].id);
   if(!r) continue;
   entry_t *e=&entries[entry_n++];memset(e,0,sizeof(*e));
-  snprintf(e->id,sizeof(e->id),"%s",r->id);snprintf(e->name,sizeof(e->name),"%s",known[k].name);
+  snprintf(e->id,sizeof(e->id),"%s",r->id);snprintf(e->name,sizeof(e->name),"%s",r->name);
   e->code=known[k].code;snprintf(e->description,sizeof(e->description),"%s",r->description);e->color=known[k].color;e->group=known[k].group;e->icon=ICON_BOX;
  }
  for(int i=0;i<aster_app_mgr_count() && entry_n<MAX_ENTRIES-4;i++) {
@@ -300,12 +318,34 @@ static void read_entries(void)
   {.id="clock",.name="时钟",.code="CLOCK",.description="留一点时间，给此刻。",.color=0xb0cbff,.group=3,.builtin=CLOCK,.icon=ICON_CLOCK},
  };
  for(size_t i=0;i<ARRAY_SIZE(builtin);i++) entries[entry_n++]=builtin[i];
+ /* Application names come from package metadata and use the generic
+  * SD face. Fixed system entries use existing UI fonts. Prewarm titles;
+  * introductions warm when selected to avoid evicting the visible text. */
+ for(int i=0;i<entry_n;i++)
+  if(!entries[i].builtin) aster_ui_font_warm(ASTER_FONT_UI_PX,entries[i].name);
+
 }
 static void filter_entries(void)
 {
  count=0;for(int i=0;i<entry_n;i++) if(!group || entries[i].group==group) ids[count++]=i;
  selected[group]=wrap(selected[group],count);phase=selected[group]*1000;
  animating=false;pull=0;
+}
+/* Prewarm the same five-entry window used by the ribbon cache. Dynamic
+ * captions and pull labels stay on the generic SD face; fetch them before
+ * interaction rather than on the first selection crossing. */
+static void warm_visible_text(void)
+{
+ if(!count) return;
+ for(int rel=-2;rel<=2;rel++) {
+  entry_t *e=&entries[ids[wrap(nearest(phase)+rel,count)]];
+  if(e->builtin) continue;
+  char buf[64];
+  aster_ui_font_warm(ASTER_FONT_UI_PX,e->name);
+  if(e->description[0]) aster_ui_font_warm(ASTER_FONT_CAPTION_PX,e->description);
+  snprintf(buf,sizeof(buf),"拉开%s",e->name);
+  aster_ui_font_warm(ASTER_FONT_CAPTION_PX,buf);
+ }
 }
 /* The baked ribbon is a 360x140 RGB565 image. It used to come out of the
  * LVGL pool via lv_snapshot_take(); five of them do not fit in the widget
@@ -385,6 +425,7 @@ static void bind_ribbon(int slot,int idx)
  /* Bake text, color and original icon once per entry/font arrival.
   * Move/rotate the resulting RGB565 image directly: no nested label
   * layers and no re-rasterizing a 360x140 object tree on every drag. */
+ design_px=1;
  lv_obj_t *o=box(stage,0,0,360,140,e->color,0);
  char meta[64],code[96];int number=0;
  for(int i=0;i<count;i++) if(ids[i]==idx) number=i+1;
@@ -392,36 +433,64 @@ static void bind_ribbon(int slot,int idx)
  text(o,meta,43,12,240,INK,16,128);
  if(!e->builtin && ((same && ribbons[slot].data) || load_icon(slot,e->id))) {
   lv_obj_t *img=lv_image_create(o);lv_image_set_src(img,&ribbons[slot].icon);
-  lv_image_set_pivot(img,0,0);lv_image_set_scale(img,as(56)*256/ribbons[slot].icon.header.w);
+  lv_image_set_pivot(img,0,0);lv_image_set_scale(img,56*256/ribbons[slot].icon.header.w);
   lv_obj_set_pos(img,ax(43),ay(43));
   if(ribbons[slot].icon.header.cf==LV_COLOR_FORMAT_A8) {
    lv_obj_set_style_image_recolor(img,lv_color_hex(INK),0);lv_obj_set_style_image_recolor_opa(img,LV_OPA_COVER,0);
   }
  } else icon(o,e->icon,51,51,40,INK);
- unsigned characters=0;
- for(const unsigned char *p=(const unsigned char *)e->name;*p;p++) if((*p&0xc0)!=0x80) characters++;
- int zoom=characters>6?256:384;
- /* Same face as the caption underneath. The packed name.a8 was drawn with a
-  * host font that has no CJK, so every character came out as a hollow box. */
- text(o,e->name,112,zoom==384?43:51,190,INK,20,zoom);
+ /* System titles use their UI font. Installed app titles are always
+  * package metadata rendered by the generic SD face; no app glyphs need
+  * to be added to, or compiled into, the firmware. */
+ if(e->builtin) text(o,e->name,112,43,190,INK,20,384);
+ else {
+  lv_obj_t *lab=lv_label_create(o);
+  aster_ui_font_warm(ASTER_FONT_UI_PX,e->name);
+  lv_obj_set_style_text_font(lab,aster_ui_font(ASTER_FONT_UI_PX),0);
+  lv_obj_set_style_text_color(lab,lv_color_hex(INK),0);
+  lv_label_set_long_mode(lab,LV_LABEL_LONG_DOT);
+  lv_obj_set_pos(lab,112,51);lv_obj_set_width(lab,190);
+  lv_label_set_text(lab,e->name);
+  lv_obj_clear_flag(lab,LV_OBJ_FLAG_CLICKABLE);
+ }
  icon(o,ICON_ARROW,306,56,21,INK);
  snprintf(code,sizeof(code),"ASTER / %s",e->id);
  for(char *p=code;*p;p++) if(*p>='a' && *p<='z') *p-=32;
  text(o,code,43,113,274,INK,16,128);
  box(o,310,0,1,140,0x504354,0);box(o,323,0,1,140,0x504354,0);
  ribbons[slot].art=ribbon_bake(o);
+ design_px=0;
  lv_obj_delete(o);
  if(ribbons[slot].art) {
   aster_flux_draw_prepare(ribbons[slot].art->data,ribbons[slot].art->header.stride);
   lv_image_set_src(ribbons[slot].obj,ribbons[slot].art);
  }
 }
+static void set_sd_text(lv_obj_t *o,uint8_t px,const char *utf8)
+{
+ if(!o || !utf8) return;
+ const lv_font_t *font=aster_ui_font(px);
+ if(!strcmp(lv_label_get_text(o),utf8) && lv_obj_get_style_text_font(o,0)==font) return;
+ aster_ui_font_warm(px,utf8);
+ lv_obj_set_style_text_font(o,font,0);lv_label_set_text(o,utf8);
+}
 static void caption(void)
 {
  entry_t *e=current();char buf[64];
- set_text(description,e?e->description:"这个频段还没有安装应用。");
+ const char *desc=e?e->description:"这个频段还没有安装应用。";
+ if(e && !e->builtin) set_sd_text(description,ASTER_FONT_CAPTION_PX,desc);
+ else set_text(description,desc);
  snprintf(buf,sizeof(buf),"%02d / %02d",count?selected[group]+1:0,count);set_text(position,buf);
- snprintf(buf,sizeof(buf),"拉开%s",e?e->name:"应用");set_text(pull_label,buf);
+ snprintf(buf,sizeof(buf),"拉开%s",e?e->name:"应用");
+ if(e && !e->builtin) set_sd_text(pull_label,ASTER_FONT_CAPTION_PX,buf);else set_text(pull_label,buf);
+ /* One-line captions fit the gap above the handle even on 240x320.
+  * AUTO height would wrap long package text over the launch controls. */
+ lv_obj_set_height(description,lv_font_get_line_height(lv_obj_get_style_text_font(description,0)));
+ lv_obj_set_height(pull_label,lv_font_get_line_height(lv_obj_get_style_text_font(pull_label,0)));
+ /* The track scales with the viewport, while APP captions keep their SD
+  * font size. Center after selecting the font instead of scaling a fixed y. */
+ if(IS_ENABLED(CONFIG_ASTER_HW_LCKFB_S3))
+  lv_obj_align(pull_label,LV_ALIGN_LEFT_MID,ax(65),0);
  set_text(filter_label,group_names[group]);
 }
 /* Keep entries that remain in the five-ribbon window. Crossing an index
@@ -435,6 +504,21 @@ static int cache_slot(const int resident[RIBBONS],const int *wanted,int n,int en
   if(!keep) return k;
  }
  return -1;
+}
+static void ribbon_order(const int index[RIBBONS])
+{
+ int order[RIBBONS],n=0;
+ /* Hidden/unused images stay behind the visible cards. Preserve the
+  * original far-to-near order and slot tie-break at selection crossings. */
+ for(int k=0;k<RIBBONS;k++)
+  if(index[k]<0 || abs(distance(index[k],phase,count))/1000>3) order[n++]=k;
+ for(int threshold=3;threshold>=0;threshold--) for(int k=0;k<RIBBONS;k++)
+  if(index[k]>=0 && abs(distance(index[k],phase,count))/1000==threshold) order[n++]=k;
+ /* Moving every image to the foreground invalidates the whole stage
+  * even when the final order is identical. Only move changed siblings.
+  * The FLUX watermark remains below the five ribbon objects. */
+ int base=(int)lv_obj_get_child_count(stage)-RIBBONS;
+ for(int i=0;i<n;i++) lv_obj_move_to_index(ribbons[order[i]].obj,base+i);
 }
 static void redraw(void)
 {
@@ -460,17 +544,27 @@ static void redraw(void)
   if(idx<0 || a>=2400 || !ribbons[k].art) {lv_obj_add_flag(o,LV_OBJ_FLAG_HIDDEN);continue;}
   lv_obj_clear_flag(o,LV_OBJ_FLAG_HIDDEN);
   int shift=idx==selected[group]?pull:0;
-  lv_obj_set_pos(o,ax(-20+a*9/1000+shift),ay(126+d*FLUX_RIBBON_PITCH/1000-70));
-  lv_image_set_pivot(o,ax(180),ay(70));
-  lv_image_set_rotation(o,wrap(-90+CLAMP(d*60/1000,-120,120),3600));
   int zoom=MAX(174,256-a*41/1000);
-  lv_image_set_scale(o,zoom);
+  int f=fit256();
+  lv_image_set_rotation(o,wrap(-90+CLAMP(d*60/1000,-120,120),3600));
+  if(f==256) {
+   lv_obj_set_pos(o,-20+a*9/1000+shift,126+d*FLUX_RIBBON_PITCH/1000-70);
+   lv_image_set_pivot(o,180,70);
+   lv_image_set_scale(o,zoom);
+  } else {
+   int design_x=-20+a*9/1000+shift;
+   int design_y=126+d*FLUX_RIBBON_PITCH/1000-70;
+   int sc=zoom*f/256; if(sc<1) sc=1;
+   lv_obj_set_pos(o,design_x*f/256-180+180*f/256,design_y*f/256-70+70*f/256);
+   lv_image_set_pivot(o,180,70);
+   lv_image_set_scale(o,(uint32_t)sc);
+  }
   lv_obj_set_style_image_opa(o,MAX(46,255-a*97/1000),0);
  }
- for(int threshold=3;threshold>=0;threshold--) for(int k=0;k<RIBBONS;k++)
-  if(index[k]>=0 && abs(distance(index[k],phase,count))/1000==threshold)
-   lv_obj_move_foreground(ribbons[k].obj);
+ ribbon_order(index);
  lv_obj_set_x(handle,ax(3+MIN(230,pull)));
+ last_draw=k_uptime_get();
+ aster_ui_lvgl_request_frame();
 }
 static void settle(int target)
 {
@@ -520,10 +614,16 @@ static void slider_card(int y,const char *name,const char *hint,uint32_t color,i
 }
 static void build_home(void)
 {
+ bool lckfb=IS_ENABLED(CONFIG_ASTER_HW_LCKFB_S3);
  text(body,"流光",16,0,110,FG,20,320);
- lv_obj_t *filter=button(body,NULL,250,8,53,25,0x22261f,ACT_FILTERS);
+ lv_obj_t *filter=button(body,NULL,lckfb?236:250,lckfb?0:8,lckfb?68:53,lckfb?36:25,0x22261f,ACT_FILTERS);
  lv_obj_set_style_border_width(filter,1,0);lv_obj_set_style_border_color(filter,lv_color_hex(0x394330),0);
- filter_label=text(filter,group_names[group],9,5,32,DIM,16,160);
+ filter_label=text(filter,group_names[group],9,5,lckfb?56:32,DIM,16,lckfb?288:160);
+ if(lckfb) {
+  lv_obj_set_style_text_align(filter_label,LV_TEXT_ALIGN_CENTER,0);
+  lv_obj_center(filter_label);
+  lv_obj_set_ext_click_area(filter,4);
+ }
  text(body,"SCROLL THE MOMENT",17,38,190,0x91a184,16,128);
  position=text(body,"",250,38,55,0x91a184,16,128);
  stage=box(body,0,53,320,280,BG,0);
@@ -531,6 +631,7 @@ static void build_home(void)
  for(int k=0;k<RIBBONS;k++) {
   ribbons[k].entry=-1;ribbons[k].obj=lv_image_create(stage);
   lv_obj_clear_flag(ribbons[k].obj,LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_radius(ribbons[k].obj,0,0);
   lv_image_set_antialias(ribbons[k].obj,true);
  }
  lv_obj_t *rail=box(body,4,164,4,13,ACCENT,2);lv_obj_move_foreground(rail);
@@ -669,8 +770,9 @@ static int ribbon_hit(int x,int y)
   lv_area_t area;lv_obj_get_coords(o,&area);
   int bw=ribbons[k].art->header.w,bh=ribbons[k].art->header.h;
   lv_point_t p={x-area.x1,y-area.y1},pivot={bw/2,bh/2};
-  int zoom=lv_image_get_scale_x(o);
-  lv_point_transform(&p,-lv_image_get_rotation(o),65536/zoom,65536/zoom,&pivot,false);
+  int zx=lv_image_get_scale_x(o),zy=lv_image_get_scale_y(o);
+  if(zx<1 || zy<1) continue;
+  lv_point_transform(&p,-lv_image_get_rotation(o),65536/zx,65536/zy,&pivot,false);
   if(p.x<0 || p.x>=bw || p.y<0 || p.y>=bh) continue;
   for(int i=0;i<count;i++) if(ids[i]==ribbons[k].entry) {
    int d=abs(distance(i,phase,count));
@@ -709,7 +811,9 @@ static void touch(const aster_touch_evt_t *raw)
   if(drag.axis==2) {
    flux_velocity_sample(&drag.track,e->y,k_uptime_get());
    phase=drag.base-dy*1000/FLUX_RIBBON_PITCH;
-   selected[group]=wrap(nearest(phase),count);caption();draw_pending=true;
+   {int sel=wrap(nearest(phase),count);
+    if(sel!=selected[group]) {selected[group]=sel;caption();}}
+   draw_pending=true;
   } else if(drag.axis==1 && pressed) {pull=CLAMP(dx,0,240);draw_pending=true;}
  }
  if(!pressed) {
@@ -786,7 +890,7 @@ void aster_launcher_show(void)
  if(view_h<1) view_h=480;
  lv_obj_clean(aster_ui_lvgl_screen());
  aster_ui_lvgl_pointer(0,0,0);lv_indev_reset(aster_ui_lvgl_indev(),NULL);
- read_entries();filter_entries();visible=true;dirty=false;launching=false;memset(&drag,0,sizeof(drag));
+ read_entries();filter_entries();warm_visible_text();visible=true;dirty=false;launching=false;memset(&drag,0,sizeof(drag));
  memset(&app_drag,0,sizeof(app_drag));
  root=box(aster_ui_lvgl_screen(),0,0,320,480,BG,0);
  lv_obj_t *bar=box(root,0,0,320,40,BG,0);
@@ -794,10 +898,21 @@ void aster_launcher_show(void)
  icon(back,ICON_LEFT,9,7,14,FG);
  text(back,"收回",29,6,40,FG,16,256);
  lv_obj_set_style_bg_opa(back,LV_OPA_TRANSP,0);
- text(bar,"aster",32,11,105,0xd4e6b2,16,192);
- icon(bar,ICON_ASTER,15,13,12,0xd4e6b2);
- bar_time=text(bar,"--:--",231,14,43,DIM,16,160);
- lv_obj_t *m=button(bar,NULL,276,5,29,29,BG,ACT_MIXER);icon(m,ICON_SETTINGS,6,6,17,0xc3cbb5);
+ bool lckfb=IS_ENABLED(CONFIG_ASTER_HW_LCKFB_S3);
+ lv_obj_t *brand_name=text(bar,"aster",lckfb?36:32,lckfb?0:11,105,0xd4e6b2,16,lckfb?288:192);
+ lv_obj_t *brand_mark=icon(bar,ICON_ASTER,15,lckfb?0:13,lckfb?18:12,0xd4e6b2);
+ if(lckfb) {
+  lv_obj_align(brand_name,LV_ALIGN_LEFT_MID,ax(36),0);
+  lv_obj_align(brand_mark,LV_ALIGN_LEFT_MID,ax(15),0);
+ }
+ bar_time=text(bar,"--:--",lckfb?205:231,lckfb?0:14,lckfb?60:43,DIM,16,lckfb?288:160);
+ lv_obj_t *m=button(bar,NULL,lckfb?272:276,lckfb?0:5,lckfb?48:29,lckfb?40:29,BG,ACT_MIXER);
+ lv_obj_t *settings_mark=icon(m,ICON_SETTINGS,6,6,lckfb?24:17,0xc3cbb5);
+ if(lckfb) {
+  lv_obj_align(bar_time,LV_ALIGN_LEFT_MID,ax(205),0);
+  lv_obj_center(settings_mark);
+  lv_obj_set_ext_click_area(m,6);
+ }
  body=NULL;show_page(HOME);tick_clock();
  aster_qpanel_restore_volume();brightness_pending=brightness;
  saved_volume=aster_plat_audio_get_volume();
@@ -829,7 +944,9 @@ void aster_launcher_pump_idle(void)
 {
  if(!aster_plat_display_count()) return;
  if(aster_ui_fonts_poll() && aster_ui_lvgl_screen()) {
-  if(stage && page==HOME) {
+  /* Rebaking during a flick is the hitch between cards. Glyphs that
+   * arrive mid-gesture wait until the ribbon has settled. */
+  if(stage && page==HOME && !drag.down && !animating && !launching) {
    for(int i=0;i<RIBBONS;i++) ribbons[i].dirty_art=true;
    redraw();
   }
@@ -837,7 +954,17 @@ void aster_launcher_pump_idle(void)
  }
  if(!visible && want_show) {
   uint64_t now=k_uptime_get();if(!hold_ms) hold_ms=now?now:1;
-  if(aster_font_sd_streaming() && now-hold_ms<12000) {aster_splash_boot();aster_splash_tick();return;}
+  /* Stay on the splash until the SD face can accept a warm, the installed
+   * names and descriptions have been queued, and those bitmaps have landed.
+   * Marking the catalog warm before the face is READY used to skip the
+   * animation entirely. */
+  if(!aster_font_sd_streaming() && aster_font_sd_get(ASTER_FONT_UI_PX) && !catalog_warmed) {
+   read_entries();catalog_warmed=1;
+  }
+  if((aster_font_sd_streaming() || !aster_font_sd_get(ASTER_FONT_UI_PX) ||
+      aster_font_sd_busy() || !catalog_warmed) && now-hold_ms<12000) {
+   aster_splash_boot();aster_splash_tick();return;
+  }
   aster_splash_off();aster_launcher_show();
  }
  if(!visible) return;
@@ -871,7 +998,7 @@ void aster_launcher_pump_idle(void)
   if(err) notify("卸载失败，请查看系统日志。");
  }
  if(want_page>=0) {int p=want_page;want_page=-1;show_page(p);}
- if(animating && now-last_draw>=33) {
+ if(animating && now-last_draw>=FLUX_FRAME_MS) {
   int ease=flux_scroll_ease(now-animation_ms,scroll_duration,coasting);
   phase=from_phase+(target_phase-from_phase)*ease/1000;pull=from_pull*(1000-ease)/1000;
   if(coasting) {
@@ -887,12 +1014,12 @@ void aster_launcher_pump_idle(void)
  if(!launching) sound_launch_started=false;
  if(launching && !sound_launch_started) {sound_pending=S_OPEN;sound_launch_started=true;}
  if(sound_pending>=0 && volume_pending<0) {sound_play(sound_pending,0);sound_pending=-1;}
- if(launching && page==HOME) {
+ if(launching && page==HOME && now-last_draw>=FLUX_FRAME_MS) {
   int t=motion?MIN(1000,(int)(now-animation_ms)*1000/350):1000;
   pull=from_pull+(370-from_pull)*t/1000;redraw();
   if(t==1000) {launching=false;pull=0;open_current();}
  }
- if(draw_pending) {redraw();last_draw=now;}
+ if(draw_pending) redraw();
  if(brightness_pending>=0) {(void)aster_plat_backlight_set(true,brightness_pending*255/100);brightness_pending=-1;}
  if(volume_pending>=0) {(void)aster_plat_audio_set_volume(volume_pending);volume_pending=-1;}
  if(volume_save) {

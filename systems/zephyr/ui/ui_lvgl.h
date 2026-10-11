@@ -8,6 +8,9 @@
 int  aster_ui_lvgl_init(void);
 void aster_ui_lvgl_pointer(uint32_t x, uint32_t y, int pressed);
 void aster_ui_lvgl_pump(void);
+/* UI worker only: render updated motion on the next pump, without waiting
+ * for a second, independently phased refresh interval. */
+void aster_ui_lvgl_request_frame(void);
 lv_obj_t *aster_ui_lvgl_screen(void);
 uint32_t aster_ui_lvgl_width(void);
 uint32_t aster_ui_lvgl_height(void);
