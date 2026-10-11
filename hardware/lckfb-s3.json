@@ -35,7 +35,7 @@
       "runtime_switch": true
     },
     "memory": {
-      "max_linear": 2097152
+      "max_linear": 7864320
     },
     "deployment": {
       "transport": "serial",

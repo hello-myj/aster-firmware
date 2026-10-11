@@ -46,6 +46,7 @@ static uint32_t s_frame_n, s_frame_max_us;
 
 void aster_ui_lvgl_assert(void)
 {
+	printk("lvgl assert ra=%p\n", __builtin_return_address(0));
 	LOG_ERR("lvgl assert");
 	k_oops();
 }
@@ -92,7 +93,7 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 	 * platform ships px_map straight to the SPI driver (no gather). */
 	uint32_t submit_start=k_cycle_get_32();
 	int err;
-#if IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX) && IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
+#if IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX)
  err=aster_plat_display_write_persistent_ui(px_map,w,h,pitch);
  if(err==ASTER_EINVAL)
 #endif
@@ -311,6 +312,11 @@ void aster_ui_lvgl_pointer(uint32_t x, uint32_t y, int pressed)
 	s_tpressed = pressed ? 1 : 0;
 }
 
+void aster_ui_lvgl_request_frame(void)
+{
+	if (s_ready && s_disp) lv_timer_ready(lv_display_get_refr_timer(s_disp));
+}
+
 void aster_ui_lvgl_pump(void)
 {
     if (!aster_plat_display_count()) return;
@@ -380,6 +386,16 @@ uint32_t aster_ui_lvgl_width(void)
 uint32_t aster_ui_lvgl_height(void)
 {
 	return s_h;
+}
+
+uint32_t aster_ui_lvgl_layout_width(void)
+{
+	return s_disp ? (uint32_t)lv_display_get_horizontal_resolution(s_disp) : s_w;
+}
+
+uint32_t aster_ui_lvgl_layout_height(void)
+{
+	return s_disp ? (uint32_t)lv_display_get_vertical_resolution(s_disp) : s_h;
 }
 
 lv_indev_t *aster_ui_lvgl_indev(void)

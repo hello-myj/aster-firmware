@@ -25,6 +25,9 @@ typedef struct {
 	 * pixels live in the platform's front buffer instead, in panel byte
 	 * order, drawn through the gfx engine (see aster_plat_display_canvas_*). */
 	bool     canvas;
+	/* ASTER_SURFACE_F_SCALE_FIT: the buffer's own width/height is the app
+	 * coordinate space, scaled onto the glass at present. */
+	bool     scale_fit;
 } aster_surface_t;
 
 typedef struct {

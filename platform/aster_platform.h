@@ -52,7 +52,7 @@ int  aster_plat_display_write_at(const uint8_t *buf, uint32_t x, uint32_t y,
 int  aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 				  uint32_t w, uint32_t h, uint32_t pitch,
 				  bool be_pixels_swapped);
-/* Internal native-UI frame: persistent BE full-panel double buffers only.
+/* Internal native-UI frame: persistent BE full-panel buffers only.
  * Serialize screenshots with drawing and wait for flush before buffer reuse.
  * Not available to APPs; short-lived buffers must use write_at_ex. */
 int aster_plat_display_write_persistent_ui(const uint8_t *buf,uint32_t w,uint32_t h,uint32_t pitch);
@@ -114,6 +114,13 @@ int  aster_plat_display_write_app_at(const uint8_t *buf, uint32_t x, uint32_t y,
 				   uint32_t w, uint32_t h, uint32_t pitch);
 int  aster_plat_display_app_present(const uint8_t *src_le, uint32_t w, uint32_t h,
 				  uint32_t pitch);
+/* Optional per-surface keep-aspect present. The source is the app's own
+ * RGB565 buffer (explicit width/height), not the panel. The result is
+ * centered on the logical glass with black margins. Arms the inverse touch
+ * map until scale_fit_disarm(). Independent of ASTER_APP_SPACE_DIV. */
+int  aster_plat_display_scale_fit_present(const uint8_t *src_le, uint32_t w,
+					uint32_t h, uint32_t pitch);
+void aster_plat_display_scale_fit_disarm(void);
 /* What the glass is showing: the last FULL-panel frame handed to the wire,
  * in panel byte order, and invalidated by any partial update.
  *

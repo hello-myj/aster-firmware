@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * Built-in native launcher: LVGL home + app drawer rendered by the
+ * Built-in native launcher: the FLUX ribbon home, rendered by the
  * firmware itself, not a guest app. Show/hide is a tree rebuild, so
  * returning home costs no app (re)start.
  *

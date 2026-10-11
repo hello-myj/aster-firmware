@@ -64,7 +64,7 @@ class Contract(unittest.TestCase):
                          "ASTER_BOOT_PORTRAIT")
         self.assertNotIn("ASTER_BOOT_LANDSCAPE", defaults.syms)
         for mode in ("PORTRAIT", "HEADLESS"):
-            config = firmware.load_kconfig()
+            config = firmware.load_kconfig(ROOT / "config/default.conf")
             config.syms["ASTER_BOOT_" + mode].set_value("y")
             self.assertEqual(config.named_choices["ASTER_BOOT_DISPLAY"].selection.name, "ASTER_BOOT_" + mode)
             self.assertEqual(config.named_choices["ASTER_HARDWARE_SELECT"].selection.name, "ASTER_HW_LCKFB_S3")

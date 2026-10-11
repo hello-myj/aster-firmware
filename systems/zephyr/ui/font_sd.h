@@ -48,6 +48,9 @@ int aster_font_sd_poll(void);
  * SD. Used to hold the launcher's very first paint until the baked fonts
  * can answer (UI thread only). */
 bool aster_font_sd_streaming(void);
+/* True while a glyph prefetch is queued or the SD worker is still reading
+ * bitmaps. The launcher holds the splash until names and descriptions land. */
+bool aster_font_sd_busy(void);
 
 /* Boot-splash progress 0..100 across all baked sizes (0 before discovery,
  * 100 when every slot is READY or DEAD). UI thread only. */

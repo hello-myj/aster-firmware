@@ -21,8 +21,10 @@ def check(target_id, build=None):
     actual = {name for name, key in FEATURES.items() if config.get("ASTER_HAS_" + key) == "y"}
     if not actual <= set(target["capabilities"]):
         raise ValueError(f"capability drift: configured={sorted(actual)} published={target['capabilities']}")
-    if config.get("ASTER_TARGET_ID") != json.dumps(target_id):
-        raise ValueError("firmware identity differs from selected target")
+    platform_ids = {"xtensa": "xtensa", "riscv32": "riscv", "riscv64": "riscv",
+                    "arm": "arm", "x86_64": "x86"}
+    if config.get("ASTER_TARGET_ID") != json.dumps(platform_ids[target["cpu"]]):
+        raise ValueError("firmware platform id differs from CPU arch")
     cpu_symbols = {"xtensa": "XTENSA", "riscv32": "RISCV", "riscv64": "RISCV",
                    "arm": "ARM", "x86_64": "X86"}
     if config.get("ASTER_CPU_ARCH_" + cpu_symbols[target["cpu"]]) != "y":

@@ -8,9 +8,15 @@
 int  aster_ui_lvgl_init(void);
 void aster_ui_lvgl_pointer(uint32_t x, uint32_t y, int pressed);
 void aster_ui_lvgl_pump(void);
+/* UI worker only: render updated motion on the next pump, without waiting
+ * for a second, independently phased refresh interval. */
+void aster_ui_lvgl_request_frame(void);
 lv_obj_t *aster_ui_lvgl_screen(void);
 uint32_t aster_ui_lvgl_width(void);
 uint32_t aster_ui_lvgl_height(void);
+/* LVGL's own resolution. FLUX keeps 320x480 here even when the glass is smaller. */
+uint32_t aster_ui_lvgl_layout_width(void);
+uint32_t aster_ui_lvgl_layout_height(void);
 
 /* Re-point the display at the window the panel is showing now, if it moved.
  * A no-op when it did not, so callers do not need to know whether anything

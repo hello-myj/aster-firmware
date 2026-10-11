@@ -1,12 +1,66 @@
 """Run actual FLUX gesture code with a clock and exercise circular flicks."""
 import unittest
 from test_waveshare import ROOT, run_c
-from test_touch_queue import STUBS, implementation
+
+STUBS = ''
+def implementation():
+    return r'''
+static aster_touch_evt_t injected[16];
+static int injected_n;
+void aster_plat_input_touch_inject(uint32_t x, uint32_t y, uint32_t action)
+{
+ if(injected_n<16) injected[injected_n++]=(aster_touch_evt_t){x,y,action};
+}
+int aster_plat_input_poll(aster_touch_evt_t *evt, int max)
+{
+ int n=injected_n<max?injected_n:max;
+ for(int i=0;i<n;i++) evt[i]=injected[i];
+ injected_n=0;
+ return n;
+}
+'''
 
 HEADER = '#include "' + str(ROOT / 'systems/zephyr/ui/launcher/flux_motion.h') + '"\n'
 
 
 class Motion(unittest.TestCase):
+    def test_frame_cadence_and_time_based_catchup(self):
+        source=(ROOT/'systems/zephyr/ui/launcher/flux.c').read_text()
+        cadence=source[source.index('#define FLUX_FRAME_MS'):source.index('\n',source.index('#define FLUX_FRAME_MS'))]
+        cyclic=source[source.index('static int nearest'):source.index('static entry_t *current')]
+        start=source.index(' if(animating && now-last_draw')
+        advance=source[start:source.index(' if(!launching) sound_launch_started',start)]
+        run_c(r'''
+#include <assert.h>
+''' +HEADER+cadence+r'''
+static int phase,from_phase,target_phase=8000,pull,from_pull,selected[4],group,count=13;
+static unsigned scroll_duration=1200;
+static uint64_t animation_ms,last_draw;
+static bool animating=true,coasting=true,draw_pending;
+static void caption(void) {}
+static void save(void) {}
+''' +cyclic+r'''
+static void step(uint64_t now) {
+''' +advance+r'''
+}
+int main(void) {
+ step(15);assert(!draw_pending && phase==0);
+ step(16);assert(draw_pending && phase>0);
+ int first=phase;draw_pending=false;last_draw=16;
+ step(31);assert(!draw_pending && phase==first);
+ step(32);assert(draw_pending && phase>first);
+ /* A slow renderer drops stale intermediate positions, then uses elapsed
+  * time rather than slowing the animation down with the frame count. */
+ draw_pending=false;last_draw=32;
+ step(117);assert(draw_pending);
+ assert(phase==8000*flux_scroll_ease(117,1200,true)/1000);
+ draw_pending=false;last_draw=117;
+ step(1300);assert(draw_pending && !animating && !coasting);
+ assert(phase==8000 && selected[0]==8 && !pull);
+ return 0;
+}
+''')
+
     def test_velocity_deceleration_and_loop_direction(self):
         run_c('#include <assert.h>\n' + HEADER + r'''
 int main(void) {
@@ -49,7 +103,7 @@ int main(void) {
         cyclic=source[source.index('static int nearest'):source.index('static entry_t *current')]
         start=source.index('static void settle(int target)\n{')
         settle=source[start:source.index('static void slider_changed',start)]
-        start=source.index('static void touch(const aster_touch_evt_t *e)')
+        start=source.index('static void touch(const aster_touch_evt_t *')
         touch=source[start:source.index('static void tick_clock',start)]
         run_c(r'''
 #include <assert.h>
@@ -70,6 +124,7 @@ static void aster_ui_lvgl_pointer(int x,int y,bool pressed) {(void)x;(void)y;(vo
 static int ribbon_hit(int x,int y) {(void)x;(void)y;return selected[group];}
 static void caption(void) {}
 static void save(void) {}
+static void to_design(uint32_t *x, uint32_t *y) {(void)x;(void)y;}
 ''' + drag + cyclic + settle + touch + STUBS + implementation() + r'''
 static void event(unsigned ms,unsigned y,unsigned type) {
  now=ms;aster_touch_evt_t e={155,y,type};touch(&e);
