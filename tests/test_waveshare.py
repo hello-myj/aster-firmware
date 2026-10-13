@@ -10,7 +10,7 @@ def run_c(code, timeout=5):
     with tempfile.TemporaryDirectory() as directory:
         executable=str(Path(directory)/'test')
         result=subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror',
-            '-Wno-unused-function','-x','c','-','-o',executable],
+            '-Wno-unused-function','-I'+str(ROOT/'platform'),'-I'+str(ROOT/'contract/include'),'-x','c','-','-o',executable],
             input=code,text=True,capture_output=True)
         if result.returncode:
             raise AssertionError(result.stderr)
@@ -158,6 +158,8 @@ static void display_get_capabilities(const void *dev,struct display_capabilities
 static int display_set_orientation(const void *dev,enum display_orientation orient) {
  (void)dev;(void)orient;return refusal;
 }
+static int display_generation;
+static void atomic_inc(int *p) {++*p;}
 static void glass_forget(void) {}
 static int aster_plat_display_rotation_set(int deg) {s_rot=deg;return 0;}
 ''' + implementation + r'''

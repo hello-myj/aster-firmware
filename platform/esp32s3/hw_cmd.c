@@ -127,6 +127,20 @@ static int cmd_disp_fill(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_ASTER_AXS_WINDOW_TEST)
+static int cmd_disp_windowtest(const struct shell *sh,size_t argc,char **argv)
+{
+ ARG_UNUSED(argc);ARG_UNUSED(argv);
+ aster_app_ctx_t *ctx=aster_app_current();
+ if(!ctx||!ctx->paused) {shell_error(sh,"pause the foreground APP first");return -EBUSY;}
+ uint32_t completed=0;int err=aster_plat_display_window_test(&completed);
+ shell_print(sh,"AXS WINDOWTEST result=%d baseline=307200 B completed_patch_bytes=%u",err,completed);
+ shell_print(sh,"Expected: RED 32x32 at (16,16), GREEN at (144,224), BLUE at (272,432)");
+ shell_print(sh,"Physical screen/photo required; software shadow contains baseline only");
+ return err;
+}
+#endif
+
 static int cmd_disp_colorbar(const struct shell *sh, size_t argc, char **argv)
 {
 	ARG_UNUSED(argc); ARG_UNUSED(argv);
@@ -253,6 +267,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_disp,
 	SHELL_CMD(clear, NULL, "fill black", cmd_disp_clear),
 	SHELL_CMD_ARG(fill, NULL, "fill <hex>", cmd_disp_fill, 2, 0),
 	SHELL_CMD(colorbar, NULL, "8-bar color test", cmd_disp_colorbar),
+#if IS_ENABLED(CONFIG_ASTER_AXS_WINDOW_TEST)
+    SHELL_CMD(windowtest,NULL,"raw CASET/RASET/RAMWR patches (paused APP)",cmd_disp_windowtest),
+#endif
 	/* These two read "get|set <...>" -- copied from a design where the verb
 	 * took an opcode the way `hw touch tap` does. It does not: the argument
 	 * is bare, and the advertised spelling died in the shell's own count

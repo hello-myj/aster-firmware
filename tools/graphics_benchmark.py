@@ -9,8 +9,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MODES = ('individual', 'batched', 'text', 'smallring', 'image', 'partial', 'frame')
-EQUIVALENT = (('individual', 'batched'), ('text', 'smallring'), ('text', 'frame'))
+MODES = ('individual', 'batched', 'text', 'smallring', 'image', 'partial', 'frame', 'dirty', 'dirtyframe', 'dirtycmd', 'dirtygrid', 'dirtylandscape')
+EQUIVALENT = (('individual', 'batched'), ('text', 'smallring'), ('text', 'frame'), ('partial', 'dirty'), ('dirty', 'dirtyframe'), ('dirty', 'dirtycmd'))
 
 
 def parse_done(reply, mode):
@@ -33,6 +33,7 @@ def parse_profiler(reply):
         'staged_samples': r'disp tim: n=64 avg_rect=(\d+) B staged gather=(\d+) us write=(\d+) us',
         'panel_bytes_per_flush': r'disp tim: n=64 avg_rect=(\d+) B avg_panel=(\d+) B staged gather=(\d+) us write=(\d+) us',
         'flip_samples': r'flip tim: acquire=(\d+) us copy\+sync=(\d+) us',
+        'damage_samples': r'damage tim: n=64 regions=(\d+) windows=(\d+) completed_bytes=(\d+) elapsed_us=(\d+)',
         'axs_transfer_samples': r'axs tim: n=64 avg_rect=(\d+) B avg_completed_panel=(\d+) B totals wait=(\d+) us gather=(\d+) us cache=(\d+) us write=(\d+) us errors=(\d+)',
     }
     result = {key: [[int(v) for v in row] for row in re.findall(pattern, reply)] for key, pattern in patterns.items()}

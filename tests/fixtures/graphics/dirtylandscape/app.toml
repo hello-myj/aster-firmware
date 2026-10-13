@@ -1,0 +1,16 @@
+[app]
+id = "test.p2.gfx.dirtylandscape"
+name = "GFX benchmark rotated damage"
+version = "1.0.0"
+abi = "3.7.0"
+abi_min = "3.7"
+aot = true
+orientation = "landscape"
+optimize = "Os"
+initial_memory = 524288
+max_memory = 2097152
+heap = 524288
+stack = 16384
+requires = ["display"]
+permissions = []
+sources = ["src/main.c"]

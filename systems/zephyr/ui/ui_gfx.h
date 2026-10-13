@@ -14,6 +14,7 @@
 #include <stddef.h>
 
 #include <aster/gfx.h>
+#include "aster_dirty.h"
 
 /* Draw n commands into buf565 (packed rows via pitch px). Optional dirty
  * rect output (may be NULL). Returns the number of commands executed.
@@ -65,6 +66,9 @@ void aster_gfx_timing_report(uint32_t raster_us, uint32_t flush_us,
 			     uint32_t raster_max_us, uint32_t flush_max_us,
 			     uint32_t cmds, uint32_t px);
 #endif
+
+/* Worker-local damage of the last successful raster batch. Copy before the next call. */
+void aster_gfx_last_dirty(aster_dirty_set_t *out);
 
 int aster_gfx_exec_unpublished_into(uint8_t *pixels,uint32_t w,uint32_t h,uint32_t pitch,
  const aster_gfx_cmd_t *cmds,uint32_t n,const uint8_t *arena,uint32_t arena_len,

@@ -212,6 +212,24 @@ config ASTER_DISP_TIMING
 	  k_malloc bounce). Shows which half actually caps fps. Prints
 	  "disp timing/64 rects" lines; leave off for normal use.
 
+config ASTER_AXS_WINDOW_TEST
+	bool "AXS15231B raw QSPI window-addressing diagnostic"
+	depends on ASTER_PANEL_AXS15231B
+	default n
+	help
+	  Adds hw display windowtest to send isolated CASET/RASET/RAMWR
+	  rectangles. Run over a paused APP so LVGL cannot repaint the pattern.
+	  Screenshots of the software shadow cannot validate physical placement.
+
+config ASTER_GFX_DIRTY_REGIONS
+	int "Maximum retained GFX dirty regions"
+	range 1 16
+	default 8
+	help
+	  Bounded per-command/per-frame damage collection. Capacity exhaustion
+	  merges the cheapest pair instead of dropping updates. Compare 8 and
+	  16 with sparse scenes before changing the default.
+
 config ASTER_GFX_TIMING
 	bool "Log gfx raster vs panel-flush split every 64 frames"
 	default n

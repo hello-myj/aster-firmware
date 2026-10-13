@@ -20,6 +20,14 @@ LOG_MODULE_REGISTER(aster_plat, LOG_LEVEL_INF);
 
 static const struct device *disp_dev;
 static atomic_t display_enabled = ATOMIC_INIT(1);
+static atomic_t display_generation;
+uint32_t aster_plat_display_generation(void) { return (uint32_t)atomic_get(&display_generation); }
+/* Written with disp_lock held, successful payloads only; failures may send
+ * an unknown prefix and still invalidate the retained-frame generation. */
+static uint64_t s_completed_bytes, s_completed_windows;
+/* Worker-only, scoped under disp_lock by write_app_regions (AXS only).
+ * Also suppresses the whole-frame async shortcut while gathering. */
+static bool s_damage_gather_only;
 static const struct device *bl_dev;
 static K_MUTEX_DEFINE(disp_lock);
 static uint16_t bl_last; /* led index within the LED device (single-backlight board -> 0) */
@@ -154,6 +162,8 @@ extern int aster_axs15231b_write_persistent(const struct device *dev,
  const struct display_buffer_descriptor *desc,const void *buffer);
 extern void aster_axs15231b_release_persistent(const struct device *dev);
 /* shadow_begin holds the driver lock until shadow_present. */
+extern void aster_axs15231b_shadow_end(const struct device *dev);
+extern size_t aster_axs15231b_last_tx_bytes(const struct device *dev);
 extern uint8_t *aster_axs15231b_shadow_begin(const struct device *dev, bool replacing_all);
 extern int aster_axs15231b_shadow_present(const struct device *dev,
 	uint16_t x, uint16_t y, uint16_t w, uint16_t h);
@@ -194,11 +204,20 @@ static int disp_direct_send(const struct aster_disp_job *job)
 #endif
 	k_mutex_lock(&disp_lock, K_FOREVER);
 	int err;
+ atomic_inc(&display_generation);
 #if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
  if(job->persistent_ui) err=aster_axs15231b_write_persistent(disp_dev,&job->desc,job->buf);
  else
 #endif
  err = display_write(disp_dev, job->px, job->py, &job->desc, job->buf);
+ if(!err) {
+#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
+  s_completed_bytes+=aster_axs15231b_last_tx_bytes(disp_dev);
+#else
+  s_completed_bytes+=(uint64_t)job->desc.width*job->desc.height*2u;
+#endif
+  s_completed_windows++;
+ }
 	k_mutex_unlock(&disp_lock);
 #if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
 	static uint32_t s_dtim_n, s_dtim_wr, s_dtim_bytes;
@@ -370,6 +389,7 @@ int aster_plat_display_set_enabled(bool enabled)
     }
     aster_plat_display_flush_drain();
     atomic_set(&display_enabled, enabled ? 1 : 0);
+    atomic_inc(&display_generation);
     if (bl_dev) { (void)aster_plat_backlight_set(enabled, 255); }
     return ASTER_OK;
 }
@@ -620,6 +640,7 @@ int aster_plat_display_rotation_set(int deg)
 		return ASTER_ENOTSUP;
 	}
 #endif
+	if(s_rot!=(uint16_t)deg) atomic_inc(&display_generation);
 	s_rot = (uint16_t)deg;
 	return ASTER_OK;
 }
@@ -723,6 +744,7 @@ int aster_plat_display_orientation_set(int orient)
 		return ASTER_OK; /* already showing it */
 	}
 
+	atomic_inc(&display_generation);
 	err = display_set_orientation(disp_dev, (enum display_orientation)req);
 	if (err == 0) {
 		/* The pixels on the glass just moved (the controller scans the
@@ -2273,10 +2295,107 @@ int aster_plat_display_write_app_at(const uint8_t *buf, uint32_t x, uint32_t y,
 	return aster_plat_display_write_at_ex(buf, x, y, w, h, pitch, false);
 }
 
+#if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
+static struct k_spinlock damage_timing_lock;
+static uint64_t damage_timing_snapshot[4];
+static void damage_timing_log(struct k_work *work)
+{
+ uint64_t v[4];ARG_UNUSED(work);
+ k_spinlock_key_t key=k_spin_lock(&damage_timing_lock);
+ memcpy(v,damage_timing_snapshot,sizeof(v));k_spin_unlock(&damage_timing_lock,key);
+ LOG_INF("damage tim: n=64 regions=%llu windows=%llu completed_bytes=%llu elapsed_us=%llu",
+  (unsigned long long)v[0],(unsigned long long)v[1],(unsigned long long)v[2],(unsigned long long)v[3]);
+}
+K_WORK_DEFINE(damage_timing_work,damage_timing_log);
+#endif
+int aster_plat_display_write_app_regions(const uint8_t *buf,uint32_t w,uint32_t h,
+ uint32_t pitch,const aster_dirty_set_t *regions)
+{
+ if(!buf||!regions||!w||!h||pitch<w||regions->count>ASTER_DIRTY_CAP) return ASTER_EINVAL;
+ /* Validate the whole batch before modifying the shadow or the panel. */
+ for(uint32_t i=0;i<regions->count;i++) {
+  aster_dirty_rect_t r=regions->rect[i];
+  if(!r.w||!r.h||r.x>w||r.w>w-r.x||r.y>h||r.h>h-r.y) return ASTER_EINVAL;
+ }
+ if(!regions->count) return ASTER_OK;
+ if(!aster_plat_display_count()) return ASTER_ENODEV;
+#if CONFIG_ASTER_APP_SPACE_DIV > 1
+ /* Density scaling has its own band staging. Retain full present until
+  * the deferred shadow gather also covers that path. */
+ if(s_app_scaled) return aster_plat_display_app_present(buf,w,h,pitch);
+#endif
+ aster_plat_display_flush_drain();
+#if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
+ uint32_t start=k_cycle_get_32();
+ k_mutex_lock(&disp_lock,K_FOREVER);
+ uint64_t before_bytes=s_completed_bytes,before_windows=s_completed_windows;
+ k_mutex_unlock(&disp_lock);
+#endif
+ int result=ASTER_OK;
+#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
+ /* Recursive mutex: each gather uses the same guarded staging path. LE
+  * inputs cannot enter the async swapped-buffer shortcut. */
+ k_mutex_lock(&disp_lock,K_FOREVER);s_damage_gather_only=true;
+#endif
+ for(uint32_t i=0;i<regions->count;i++) {
+  aster_dirty_rect_t r=regions->rect[i];
+  const uint8_t *src=buf+((size_t)r.y*pitch+r.x)*2u;
+  result=aster_plat_display_write_app_at(src,r.x,r.y,r.w,r.h,pitch);
+  if(result) break;
+ }
+#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)
+ s_damage_gather_only=false;
+ if(!result) {
+  uint32_t pw,ph;panel_geom(&pw,&ph);
+  uint8_t *shadow=aster_axs15231b_shadow_begin(disp_dev,false);
+  if(!shadow) result=ASTER_ENOMEM;
+  else {
+   size_t completed=0;sys_cache_data_flush_range(shadow,(size_t)pw*ph*2u);
+   atomic_inc(&display_generation);
+   int err=aster_axs15231b_shadow_present_counted(disp_dev,0,0,pw,ph,&completed);
+   if(!err) {s_completed_bytes+=completed;s_completed_windows++;}
+   result=err?ASTER_EIO:ASTER_OK;
+  }
+ }
+ k_mutex_unlock(&disp_lock);
+#endif
+ int completion=aster_plat_display_flush_drain_checked();
+ if(!result) result=completion;
+#if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
+ static uint32_t n;static uint64_t sum[4];
+ sum[0]+=regions->count;
+ k_mutex_lock(&disp_lock,K_FOREVER);
+ sum[1]+=s_completed_windows-before_windows;sum[2]+=s_completed_bytes-before_bytes;
+ k_mutex_unlock(&disp_lock);
+ sum[3]+=k_cyc_to_us_floor64((uint32_t)(k_cycle_get_32()-start));
+ if(++n==64) {
+  k_spinlock_key_t key=k_spin_lock(&damage_timing_lock);
+  memcpy(damage_timing_snapshot,sum,sizeof(sum));k_spin_unlock(&damage_timing_lock,key);
+  k_work_submit(&damage_timing_work);n=0;memset(sum,0,sizeof(sum));
+ }
+#endif
+ return result;
+}
+
 int aster_plat_display_write_at(const uint8_t *buf, uint32_t x, uint32_t y,
 			      uint32_t w, uint32_t h, uint32_t pitch)
 {
 	return aster_plat_display_write_at_ex(buf, x, y, w, h, pitch, false);
+}
+
+int aster_plat_display_window_test(uint32_t *completed)
+{
+#if IS_ENABLED(CONFIG_ASTER_AXS_WINDOW_TEST)
+ extern int aster_axs15231b_window_test(const struct device *,uint32_t *);
+ if(!completed||!aster_plat_display_count()||s_rot) return ASTER_ENOTSUP;
+ aster_plat_display_flush_drain();
+ k_mutex_lock(&disp_lock,K_FOREVER);atomic_inc(&display_generation);
+ int err=aster_axs15231b_window_test(disp_dev,completed);
+ glass_forget();k_mutex_unlock(&disp_lock);
+ return err?ASTER_EIO:ASTER_OK;
+#else
+ (void)completed;return ASTER_ENOTSUP;
+#endif
 }
 
 int aster_plat_display_write_persistent_ui(const uint8_t *buf,uint32_t w,uint32_t h,uint32_t pitch)
@@ -2398,7 +2517,7 @@ int aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 	 * This is the path that makes full-screen app frames asynchronous:
 	 * aster_plat_display_write_rgb565() and the engine's dirty-rect flush
 	 * both land here, so neither needs to know the flip exists. */
-	if (!be_pixels_swapped && s_rot == 0 && pitch == prw && prw == pw &&
+	if (!s_damage_gather_only && !be_pixels_swapped && s_rot == 0 && pitch == prw && prw == pw &&
 	    prh == ph) {
 		if (aster_plat_display_flip_rgb565(buf, w, h, pitch) == ASTER_OK) {
 			return ASTER_OK;
@@ -2490,6 +2609,11 @@ int aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 			}
 			}
 		}
+        if(s_damage_gather_only) {
+            aster_axs15231b_shadow_end(disp_dev);
+            k_mutex_unlock(&disp_lock);
+            return ASTER_OK;
+        }
 		/* The copy above touched only the dirty rows. AXS cannot open
 		 * the stream at an arbitrary row, so the glass always gets the
 		 * shadow from row 0 as one frame. */
@@ -2504,9 +2628,11 @@ int aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 #endif
 		{
 			size_t completed_bytes=0;
-			int err = aster_axs15231b_shadow_present_counted(disp_dev, 0, 0,
+			atomic_inc(&display_generation);
+            int err = aster_axs15231b_shadow_present_counted(disp_dev, 0, 0,
 								 (uint16_t)pw,
 								 (uint16_t)ph,&completed_bytes);
+            if(!err) {s_completed_windows++;s_completed_bytes+=completed_bytes;}
 #if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
 			/* The dirty rect is NOT the amount of wire here: the
 			 * glass gets a whole frame either way, so report the
@@ -2658,7 +2784,9 @@ int aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 			.height = rows,
 			.pitch = prw,
 		};
-		int err = display_write(disp_dev, px, py + base, &desc, swap_buf);
+		atomic_inc(&display_generation);
+        int err = display_write(disp_dev, px, py + base, &desc, swap_buf);
+        if(!err) {s_completed_windows++;s_completed_bytes+=band_bytes;}
 #if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
 		acc_wr += k_cycle_get_32() - t_wr0;
 		t_sw0 = k_cycle_get_32();

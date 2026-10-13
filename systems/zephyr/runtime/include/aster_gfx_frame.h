@@ -6,15 +6,28 @@
 #include <string.h>
 #include <aster/gfx.h>
 #include <aster/error.h>
+#include "aster_dirty.h"
 enum { ASTER_FRAME_FREE, ASTER_FRAME_DRAWING, ASTER_FRAME_QUEUED, ASTER_FRAME_IN_FLIGHT };
 typedef struct {
  uint8_t *pixels;
  uint32_t capacity, cache_surface, surface, id, sequence, w, h, batches, commands, arena;
  uint64_t deadline;
+ aster_dirty_set_t dirty;
+ uint32_t published_surface, published_generation;
  int32_t error;
  uint8_t state;
  bool canvas, initialized;
 } aster_frame_state_t;
+/* BEGIN captured Guest; commands only changed retained damage rectangles.
+ * Copy their rows after successful display completion. Guest row padding and
+ * unchanged pixels are not rewritten. No Guest direct writes inside a frame. */
+static inline void aster_frame_commit_guest(const aster_frame_state_t *f,uint8_t *guest,uint32_t pitch) {
+ for(uint32_t i=0;i<f->dirty.count;i++) {
+  aster_dirty_rect_t r=f->dirty.rect[i];
+  for(uint32_t y=r.y;y<r.y+r.h;y++)
+   memcpy(guest+((size_t)y*pitch+r.x)*2u,f->pixels+((size_t)y*f->w+r.x)*2u,(size_t)r.w*2u);
+ }
+}
 static inline int32_t aster_frame_fail(aster_frame_state_t *f,int32_t error) {
  if(f->state && !f->error) f->error=error;
  return f->state ? f->error : error;
@@ -30,7 +43,7 @@ static inline void aster_frame_abort(aster_frame_state_t *f) {
 static inline void aster_frame_release_cache(aster_frame_state_t *f,void (*release)(void *)) {
  aster_frame_abort(f);
  if(f->pixels) release(f->pixels);
- f->pixels=NULL;f->capacity=0;f->cache_surface=0;
+ f->pixels=NULL;f->capacity=0;f->cache_surface=0;f->published_surface=0;
 }
 static inline int32_t aster_frame_start(aster_frame_state_t *f,uint32_t surface,
  uint32_t w,uint32_t h,bool canvas,const uint8_t *source,uint32_t pitch,uint64_t now,
@@ -48,6 +61,7 @@ static inline int32_t aster_frame_start(aster_frame_state_t *f,uint32_t surface,
  else for(uint32_t y=0;y<h;y++) memcpy(f->pixels+y*w*2u,source+y*pitch*2u,w*2u);
  f->cache_surface=surface;f->surface=surface;f->w=w;f->h=h;f->canvas=canvas;f->initialized=!canvas;
  f->id=++f->sequence;f->deadline=now+ASTER_GFX_FRAME_TIMEOUT_MS;
+ f->dirty.count=0;
  f->batches=f->commands=f->arena=0;f->error=0;f->state=ASTER_FRAME_DRAWING;
  return 0;
 }

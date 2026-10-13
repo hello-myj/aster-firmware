@@ -11,6 +11,7 @@
 #include <aster/display.h>
 #include <aster/error.h>
 #include <aster/event.h>
+#include "aster_dirty.h"
 
 #define ASTER_PLAT_MAX_TOUCH 1
 #define ASTER_PLAT_MAX_KEYS  8
@@ -41,6 +42,14 @@ int  aster_plat_display_get_info(uint32_t index, aster_display_info_t *info);
  * Passing bytes/row makes the staging gather step twice as far per row as
  * the buffer holds and read off its end. */
 int  aster_plat_display_write_rgb565(const uint8_t *buf, uint32_t w, uint32_t h, uint32_t pitch);
+/* Internal worker-only LE surface damage submission. LCKFB sends separate
+ * windows; AXS gathers all regions into its shadow and sends once. */
+int aster_plat_display_write_app_regions(const uint8_t *buf,uint32_t w,uint32_t h,
+ uint32_t pitch,const aster_dirty_set_t *regions);
+/* Changes on every panel write attempt or geometry/display-mode change. */
+uint32_t aster_plat_display_generation(void);
+/* Diagnostic only; software snapshots do not represent the raw window test. */
+int aster_plat_display_window_test(uint32_t *completed);
 /* same, at a device offset (x,y) -- for band/scrolled paints and hw tests */
 int  aster_plat_display_write_at(const uint8_t *buf, uint32_t x, uint32_t y,
 			       uint32_t w, uint32_t h, uint32_t pitch);

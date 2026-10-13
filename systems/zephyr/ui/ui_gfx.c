@@ -48,6 +48,9 @@ LOG_MODULE_REGISTER(aster_gfx, LOG_LEVEL_INF);
 
 /* ---------------- target + bounds accumulation ---------------- */
 
+static aster_dirty_set_t s_last_dirty;
+void aster_gfx_last_dirty(aster_dirty_set_t *out) { *out=s_last_dirty; }
+
 typedef struct {
 	uint32_t x0, y0, x1, y1;
 	bool has;
@@ -1349,7 +1352,8 @@ int aster_gfx_exec_into(uint8_t *buf565, uint32_t w, uint32_t h, uint32_t pitch,
 	 * repaint every pixel it will show, because its front buffer holds
 	 * an older frame. */
 	ppg_target_t t = { .px = (uint16_t *)buf565, .w = w, .h = h, .pitch = pitch };
-	acc_t acc = { 0 };
+	acc_t total = { 0 };
+	s_last_dirty.count=0;
 
 	/* Validate resource references before any command changes pixels. */
 	for (uint32_t i=0;i<n;i++) {
@@ -1379,6 +1383,7 @@ int aster_gfx_exec_into(uint8_t *buf565, uint32_t w, uint32_t h, uint32_t pitch,
 
 	for (uint32_t i = 0; i < n; i++) {
 		const aster_gfx_cmd_t *c = &cmds[i];
+		acc_t acc={0};
 #if IS_ENABLED(CONFIG_ASTER_GFX_TIMING)
 		uint32_t t_op0 = k_cycle_get_32();
 		uint32_t bucket = ASTER_GFX_OP(c);
@@ -1418,11 +1423,16 @@ int aster_gfx_exec_into(uint8_t *buf565, uint32_t w, uint32_t h, uint32_t pitch,
 		default:
 			break;
 		}
+		if(acc.has) {
+			acc_merge(&total,acc.x0,acc.y0,acc.x1,acc.y1);
+			aster_dirty_add(&s_last_dirty,w,h,acc.x0,acc.y0,acc.x1-acc.x0,acc.y1-acc.y0);
+		}
 #if IS_ENABLED(CONFIG_ASTER_GFX_TIMING)
 		gfx_op_note(bucket, k_cycle_get_32() - t_op0);
 #endif
 	}
 
+	acc_t acc=total;
 	if (dirty_x) {
 		if (!acc.has) {
 			*dirty_x = *dirty_y = *dirty_w = *dirty_h = 0;

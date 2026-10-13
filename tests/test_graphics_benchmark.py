@@ -21,6 +21,14 @@ class GraphicsBenchmark(unittest.TestCase):
   self.assertEqual(bench.parse_profiler(line)['axs_transfer_samples'],[[128,0,10,20,30,40,64]])
   self.assertEqual(bench.parse_profiler('')['axs_transfer_samples'],[])
 
+ def test_damage_stats_keep_completed_payload_separate_from_regions(self):
+  line='damage tim: n=64 regions=512 windows=64 completed_bytes=19660800 elapsed_us=1287000'
+  self.assertEqual(bench.parse_profiler(line)['damage_samples'],[[512,64,19660800,1287000]])
+  rows=[{'mode':m,'screenshot_rgb565_sha256':'same'} for m in ('dirty','dirtycmd','dirtyframe')]
+  self.assertIn(['dirty','dirtycmd'],bench.verify_pixels(rows))
+  rows[1]['screenshot_rgb565_sha256']='different'
+  with self.assertRaises(ValueError):bench.verify_pixels(rows)
+
  def test_image_fixture_paths_resolve_to_bundled_assets(self):
   import re,tomllib
   root=Path(__file__).resolve().parents[1]/'tests/fixtures/graphics'

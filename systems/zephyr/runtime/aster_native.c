@@ -468,6 +468,7 @@ static int32_t n_surface_destroy(wasm_exec_env_t env, uint32_t h)
 	if (i < 0) {
 		return ASTER_EBADF;
 	}
+ if(ctx->gfx_frame.published_surface==h) ctx->gfx_frame.published_surface=0;
  if(ctx->gfx_frame.cache_surface==h) aster_frame_release_cache(&ctx->gfx_frame,aster_psram_free);
  if(ctx->gfx_published_surface==h) {
   ctx->gfx_published_surface=0;
@@ -741,7 +742,7 @@ void aster_native_frame_refresh(aster_app_ctx_t *ctx)
 
 void aster_native_frame_abort(aster_app_ctx_t *ctx)
 {
- if(ctx) aster_frame_abort(&ctx->gfx_frame);
+ if(ctx) {aster_frame_abort(&ctx->gfx_frame);ctx->gfx_frame.published_surface=0;}
 }
 void aster_native_frame_release(aster_app_ctx_t *ctx)
 {
@@ -820,15 +821,26 @@ static int32_t n_gfx_frame_control(wasm_exec_env_t env,uint32_t h,
  } else if(s->scale_fit) e=present_scale_fit(s,f->pixels);
  else {
   aster_plat_display_scale_fit_disarm();
-  e=aster_plat_display_app_present(f->pixels,f->w,f->h,f->w);
+  /* A retained damage frame is usable only while nobody else has written
+   * the panel. Overlay, orientation, legacy writes and I/O failure force a
+   * full restoration. The first END always publishes the complete surface. */
+  bool retained=f->published_surface==h &&
+   f->published_generation==aster_plat_display_generation();
+  bool full=aster_dirty_is_full(&f->dirty,f->w,f->h);
+  if(!retained||full) e=aster_plat_display_app_present(f->pixels,f->w,f->h,f->w);
+  else e=aster_plat_display_write_app_regions(f->pixels,f->w,f->h,f->w,&f->dirty);
  }
  int completion=aster_plat_display_flush_drain_checked();
  if(!e) e=completion;
- if(!e && guest) for(uint32_t y=0;y<f->h;y++) memcpy(guest+(size_t)y*s->pitch*2u,f->pixels+(size_t)y*f->w*2u,f->w*2u);
+ if(!e && guest) aster_frame_commit_guest(f,guest,s->pitch);
  if(!e) {
   ctx->gfx_published_surface=h;
+  f->published_surface=h;f->published_generation=aster_plat_display_generation();
   aster_gfx_note_committed_frame(committed,s->w,s->h,s->pitch,s->canvas);
  }
+ /* A failed END may have changed either the shadow or a physical prefix.
+  * Restore from Guest in full next time, even if no wire was attempted. */
+ if(e) f->published_surface=0;
  out->error=e;aster_frame_abort(f);return e;
 }
 
@@ -889,7 +901,10 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
   if(pw&&ph&&!clear) aster_gfx_set_clip(px,py,pw,ph);
   int ran=aster_gfx_exec_unpublished_into(frame->pixels,frame->w,frame->h,frame->w,cmds,n,arena,arena_len,&dx,&dy,&dw,&dh);
   aster_gfx_set_clip(0,0,0,0);
-  return ran<0 ? aster_frame_fail(frame,ran) : ran;
+  if(ran<0) return aster_frame_fail(frame,ran);
+  aster_dirty_set_t batch;aster_gfx_last_dirty(&batch);
+  aster_dirty_append(&frame->dirty,&batch,frame->w,frame->h);
+  return ran;
  }
  ctx->gfx_published_surface=0;
 	/* Where the engine draws. An ordinary surface lives in app linear
@@ -942,6 +957,7 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
 	if (ran < 0) {
 		return ASTER_EBADF;
 	}
+    aster_dirty_set_t regions;aster_gfx_last_dirty(&regions);
 	/* explicit present rect wins; else the accumulated dirty box */
 	if (pw && ph) {
 		/* same no-wrap form as n_surface_flush: px/pw are app u32s and
@@ -1001,7 +1017,8 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
 			} else {
 				err = aster_plat_display_canvas_present();
 			}
-		} else if (dx == 0 && dy == 0 && dw == s->w && dh == s->h) {
+		} else if (dx == 0 && dy == 0 && dw == s->w && dh == s->h &&
+                   ((pw&&ph)||aster_dirty_is_full(&regions,s->w,s->h))) {
 			/* Whole surface: the app-present entry, which gets the
 			 * double-buffered async flip (and, when the app's space is
 			 * not the panel's, the scale) for free. */
@@ -1012,8 +1029,10 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
 			 * agree and a scaled/offset rect when they do not. */
 			uint8_t *src = base + ((size_t)dy * s->pitch + dx) * 2u;
 
-			err = aster_plat_display_write_app_at(src, dx, dy, dw, dh,
-							    s->pitch);
+			if(pw&&ph) err=aster_plat_display_write_app_at(src,dx,dy,dw,dh,s->pitch);
+            else {
+             err=aster_plat_display_write_app_regions(base,s->w,s->h,s->pitch,&regions);
+            }
 		}
 #if IS_ENABLED(CONFIG_ASTER_GFX_TIMING)
 		acc_flush = k_cycle_get_32() - t_flush0;

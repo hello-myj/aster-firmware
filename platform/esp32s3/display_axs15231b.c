@@ -71,7 +71,7 @@ static int axs_blanking(const struct device *dev,bool blank)
 }
 static int axs_on(const struct device *dev) { return axs_blanking(dev,false); }
 static int axs_off(const struct device *dev) { return axs_blanking(dev,true); }
-/* QSPI glass does not support arbitrary row windows. RAMWR restarts at the
+/* Validated path avoids unverified arbitrary row windows. RAMWR restarts at the
  * top; RAMWRC continues the previous stream. Caller holds d->lock. `wire`
  * is already in panel byte order and is either the shadow or a borrowed
  * full frame. */
@@ -95,6 +95,58 @@ static int axs_tx_locked(const struct device *dev,uint16_t x,uint16_t y,
  axs_end(dev);
  return err;
 }
+#if defined(CONFIG_ASTER_AXS_WINDOW_TEST)
+/* Diagnostic only: a real rectangle stream, not a shadow-rect/full-frame
+ * fallback. Physical placement must be checked on the glass. */
+static int axs_tx_window_locked(const struct device *dev,uint16_t x,uint16_t y,
+ uint16_t w,uint16_t h,const uint8_t *wire)
+{
+ uint8_t window[4];
+ sys_put_be16(x,window);sys_put_be16(x+w-1u,window+2);
+ int err=axs_cmd(dev,0x2a,window,4);
+ sys_put_be16(y,window);sys_put_be16(y+h-1u,window+2);
+ if(!err) err=axs_cmd(dev,0x2b,window,4);
+ if(!err) err=axs_header(dev,0x32,0x2c);
+ if(!err) err=axs_write_bytes(dev,&((struct axs_data *)dev->data)->quad,wire,(size_t)w*h*2u);
+ axs_end(dev);return err;
+}
+int aster_axs15231b_window_test(const struct device *dev,uint32_t *completed)
+{
+ const struct axs_config *c=dev->config;struct axs_data *d=dev->data;
+ *completed=0;
+ if(c->width!=320||c->height!=480||!d->frame) return -EINVAL;
+ uint8_t *patch=k_malloc(32u*32u*2u);if(!patch) return -ENOMEM;
+ k_mutex_lock(&d->lock,K_FOREVER);
+ d->borrowed=NULL;d->next_row=0;
+ for(uint32_t y=0;y<c->height;y++)for(uint32_t x=0;x<c->width;x++) {
+  uint16_t col=0x1082;
+  if(x%80u==0||y%80u==0) col=0x4208;
+  if(x==0||x==319||y==0||y==479) col=0xffff;
+  sys_put_be16(col,d->frame+((size_t)y*c->width+x)*2u);
+ }
+ /* Start from the established full-frame route. Small tests follow, each
+  * starts RAMWR anew after BOTH window commands; no RAMWRC continuation. */
+ int err=axs_tx_locked(dev,0,0,c->width,c->height,d->frame);
+ const uint16_t xy[3][2]={{16,16},{144,224},{272,432}};
+ const uint16_t colors[3]={0xf800,0x07e0,0x001f};
+ for(uint32_t i=0;!err&&i<3;i++) {
+  for(uint32_t p=0;p<32u*32u;p++)sys_put_be16(colors[i],patch+p*2u);
+  err=axs_tx_window_locked(dev,xy[i][0],xy[i][1],32,32,patch);
+  if(!err) {*completed+=32u*32u*2u;d->tx_bytes_total+=32u*32u*2u;}
+ }
+ /* Restore addressing, but do not overwrite the diagnostic pixels. */
+ uint8_t window[4]={0,0,0,0};sys_put_be16(c->width-1,window+2);
+ int reset=axs_cmd(dev,0x2a,window,4);
+ sys_put_be16(c->height-1,window+2);
+ int reset_y=axs_cmd(dev,0x2b,window,4);
+ d->last_tx_bytes=0;d->next_row=0;
+ k_mutex_unlock(&d->lock);k_free(patch);
+ /* Software shadow intentionally contains only the baseline; never treat
+  * a screenshot of it as evidence that raw windows landed correctly. */
+ return err?err:reset?reset:reset_y;
+}
+#endif
+
 static int axs_write_frame(const struct device *dev,const uint16_t x,const uint16_t y,
                      const struct display_buffer_descriptor *desc,const void *buffer,bool persistent)
 {
@@ -132,6 +184,12 @@ uint8_t *aster_axs15231b_shadow_begin(const struct device *dev,bool replacing_al
   memcpy(d->frame,d->borrowed,(size_t)c->width*c->height*2u);
  d->borrowed=NULL;
  return d->frame;
+}
+/* End a CPU-only damage update; no pixel stream until the batch is ready. */
+void aster_axs15231b_shadow_end(const struct device *dev)
+{
+ struct axs_data *d=dev->data;
+ k_mutex_unlock(&d->lock);
 }
 int aster_axs15231b_shadow_present_counted(const struct device *dev,
                                    uint16_t x,uint16_t y,uint16_t w,uint16_t h,size_t *completed)
