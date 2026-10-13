@@ -468,6 +468,13 @@ static int32_t n_surface_destroy(wasm_exec_env_t env, uint32_t h)
 	if (i < 0) {
 		return ASTER_EBADF;
 	}
+ if(ctx->gfx_frame.cache_surface==h) aster_frame_release_cache(&ctx->gfx_frame,aster_psram_free);
+ if(ctx->gfx_published_surface==h) {
+  ctx->gfx_published_surface=0;
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+  aster_gfx_note_committed_frame(NULL,0,0,0,false);
+#endif
+ }
 	if (ctx->surfaces[i].used) {
 		/* The flip path snapshots into its own front buffers, but a
 		 * still-queued send could in principle refer to app memory on
@@ -560,6 +567,8 @@ static int32_t n_surface_present(wasm_exec_env_t env, uint32_t h)
 	if (!ctx) {
 		return ASTER_EBADF;
 	}
+ if(ctx->gfx_frame.state) return aster_frame_fail(&ctx->gfx_frame,ASTER_EBUSY);
+ ctx->gfx_published_surface=0;
 	int i = handle_index(h, ASTER_HTYPE_SURFACE, ASTER_SURFACE_MAX);
 	if (i < 0 || !ctx->surfaces[i].used) {
 		return ASTER_EBADF;
@@ -667,6 +676,8 @@ static int32_t n_surface_flush(wasm_exec_env_t env, uint32_t h, uint32_t src_off
 	if (!ctx) {
 		return ASTER_EBADF;
 	}
+ if(ctx->gfx_frame.state) return aster_frame_fail(&ctx->gfx_frame,ASTER_EBUSY);
+ ctx->gfx_published_surface=0;
 	int i = handle_index(h, ASTER_HTYPE_SURFACE, ASTER_SURFACE_MAX);
 	if (i < 0 || !ctx->surfaces[i].used) {
 		return ASTER_EBADF;
@@ -711,6 +722,35 @@ static int32_t n_surface_flush(wasm_exec_env_t env, uint32_t h, uint32_t src_off
 	return aster_plat_display_write_app_at(src, x, y, w, hh, src_pitch);
 }
 
+/* Guest memory growth may relocate an ordinary surface. Resolve the LAST
+ * committed surface on the worker before screenshots; never expose staging. */
+void aster_native_frame_refresh(aster_app_ctx_t *ctx)
+{
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+ if(!ctx||!ctx->module_inst||!ctx->gfx_published_surface) return;
+ int i=handle_index(ctx->gfx_published_surface,ASTER_HTYPE_SURFACE,ASTER_SURFACE_MAX);
+ if(i<0||!ctx->surfaces[i].used) return;
+ aster_surface_t *s=&ctx->surfaces[i];
+ if(s->canvas) return;
+ const uint8_t *pixels=wasm_runtime_addr_app_to_native(ctx->module_inst,s->app_offset);
+ aster_gfx_note_committed_frame(pixels,s->w,s->h,s->pitch,false);
+#else
+ (void)ctx;
+#endif
+}
+
+void aster_native_frame_abort(aster_app_ctx_t *ctx)
+{
+ if(ctx) aster_frame_abort(&ctx->gfx_frame);
+}
+void aster_native_frame_release(aster_app_ctx_t *ctx)
+{
+ if(!ctx) return;
+ aster_native_frame_abort(ctx);
+ ctx->gfx_published_surface=0;
+ aster_frame_release_cache(&ctx->gfx_frame,aster_psram_free);
+}
+
 /* ============ gfx command engine (ABI 2.2) ============ */
 #if IS_ENABLED(CONFIG_ASTER_LVGL)
 
@@ -733,6 +773,65 @@ static int32_t gfx_surface(wasm_exec_env_t env, uint32_t h, aster_surface_t **ou
 	return ASTER_OK;
 }
 
+static int32_t n_gfx_frame_control(wasm_exec_env_t env,uint32_t h,
+ aster_surface_t *s,uint32_t off,uint32_t len)
+{
+ aster_app_ctx_t *ctx=ctx_of(env);aster_frame_state_t *f=&ctx->gfx_frame;
+ if(!off||(off&3u)||len!=sizeof(aster_gfx_frame_control_t)) return ASTER_EINVAL;
+ aster_gfx_frame_control_t *out=(aster_gfx_frame_control_t *)buf(env,off,len);
+ if(!out) return ASTER_EINVAL;
+ aster_gfx_frame_control_t c=*out;
+ if(c.size!=sizeof(c)||c.version!=1||c.flags||c.error) return ASTER_EINVAL;
+ if(c.action==ASTER_GFX_FRAME_QUERY) {
+  if(c.frame_id) return ASTER_EINVAL;
+  out->flags=ASTER_GFX_FRAME_SUPPORTED;return 0;
+ }
+ if(c.action==ASTER_GFX_FRAME_BEGIN) {
+  if(c.frame_id) return ASTER_EINVAL;
+  if(ctx->paused||glass_is_frozen()) return ASTER_EBUSY;
+  const uint8_t *base=s->canvas ? NULL : wasm_runtime_addr_app_to_native(ctx->module_inst,s->app_offset);
+  int e=aster_frame_start(f,h,s->w,s->h,s->canvas,base,s->pitch,k_uptime_get(),aster_psram_alloc,aster_psram_free);
+  if(e) return e;
+  (void)aster_plat_display_flush_drain_checked();
+  out->frame_id=f->id;return 0;
+ }
+ if(f->state!=ASTER_FRAME_DRAWING||f->surface!=h||c.frame_id!=f->id) return ASTER_ESTATE;
+ if(c.action==ASTER_GFX_FRAME_CANCEL) {aster_frame_abort(f);return 0;}
+ if(c.action!=ASTER_GFX_FRAME_END) return ASTER_EINVAL;
+ int e=aster_frame_check(f,k_uptime_get());
+ if(!e && !f->initialized) e=ASTER_ESTATE;
+ if(!e && (ctx->paused||glass_is_frozen())) e=ASTER_EBUSY;
+ if(e) {out->error=e;aster_frame_abort(f);return e;}
+ /* Guest memory may have grown after BEGIN. Resolve it again at END. */
+ uint8_t *guest=s->canvas ? NULL : wasm_runtime_addr_app_to_native(ctx->module_inst,s->app_offset);
+ if(!s->canvas&&!guest) {aster_frame_abort(f);return ASTER_EBADF;}
+ f->state=ASTER_FRAME_QUEUED;
+ aster_plat_display_flush_drain();
+ f->state=ASTER_FRAME_IN_FLIGHT;
+ uint8_t *committed=guest;
+ if(s->canvas) {
+  uint8_t *back=aster_plat_display_canvas_back();
+  committed=back;
+  if(!back) e=ASTER_ENOTSUP;
+  else {
+   for(uint32_t i=0;i<f->w*f->h;i++) {back[i*2u]=f->pixels[i*2u+1];back[i*2u+1]=f->pixels[i*2u];}
+   e=aster_plat_display_canvas_present();
+  }
+ } else if(s->scale_fit) e=present_scale_fit(s,f->pixels);
+ else {
+  aster_plat_display_scale_fit_disarm();
+  e=aster_plat_display_app_present(f->pixels,f->w,f->h,f->w);
+ }
+ int completion=aster_plat_display_flush_drain_checked();
+ if(!e) e=completion;
+ if(!e && guest) for(uint32_t y=0;y<f->h;y++) memcpy(guest+(size_t)y*s->pitch*2u,f->pixels+(size_t)y*f->w*2u,f->w*2u);
+ if(!e) {
+  ctx->gfx_published_surface=h;
+  aster_gfx_note_committed_frame(committed,s->w,s->h,s->pitch,s->canvas);
+ }
+ out->error=e;aster_frame_abort(f);return e;
+}
+
 static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
 			  uint32_t n, uint32_t arena_off, uint32_t arena_len,
 			  uint32_t px, uint32_t py, uint32_t pw, uint32_t ph)
@@ -742,10 +841,25 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
 	int32_t e = gfx_surface(env, h, &s);
 
 	if (e != ASTER_OK) {
-		return e;
+		return ctx ? aster_frame_fail(&ctx->gfx_frame,e) : e;
 	}
+ if(n==ASTER_GFX_FRAME_CONTROL && cmds_off==0 && px==ASTER_GFX_FRAME_MAGIC && py==ASTER_GFX_FRAME_VERSION && pw==0 && ph==0)
+  return n_gfx_frame_control(env,h,s,arena_off,arena_len);
+ aster_frame_state_t *frame=&ctx->gfx_frame;
+ bool frame_batch=py==ASTER_GFX_FRAME_MAGIC && pw==0 && ph==0;
+ if(frame_batch && !frame->state) return ASTER_ESTATE;
+ if(frame_batch && n && (cmds_off&3u)) return aster_frame_fail(frame,ASTER_EINVAL);
+ if(frame->state) {
+  if(!frame_batch||px!=frame->id) return aster_frame_fail(frame,ASTER_ESTATE);
+
+  e=aster_frame_check(frame,k_uptime_get());if(e) return e;
+  if(frame->surface!=h) return aster_frame_fail(frame,ASTER_EBUSY);
+ }
+	/* Reject invalid explicit rectangles before touching Guest pixels. */
+	if ((pw != 0u) != (ph != 0u) || (pw && (px > s->w || pw > s->w-px || py > s->h || ph > s->h-py)))
+		return aster_frame_fail(&ctx->gfx_frame,ASTER_EINVAL);
 	if (n > 4096u || (uint64_t)n * sizeof(aster_gfx_cmd_t) > UINT32_MAX) {
-		return ASTER_EINVAL;
+		return aster_frame_fail(&ctx->gfx_frame,ASTER_EINVAL);
 	}
 	const aster_gfx_cmd_t *cmds = NULL;
 
@@ -753,20 +867,31 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
 		cmds = (const aster_gfx_cmd_t *)buf(env, cmds_off,
 						  n * sizeof(aster_gfx_cmd_t));
 		if (!cmds) {
-			return ASTER_EINVAL;
+			return aster_frame_fail(&ctx->gfx_frame,ASTER_EINVAL);
 		}
 	}
 	const uint8_t *arena = NULL;
 
 	if (arena_len) {
 		if (arena_off == 0u) {
-			return ASTER_EINVAL;
+			return aster_frame_fail(&ctx->gfx_frame,ASTER_EINVAL);
 		}
 		arena = buf(env, arena_off, arena_len);
 		if (!arena) {
-			return ASTER_EINVAL;
+			return aster_frame_fail(&ctx->gfx_frame,ASTER_EINVAL);
 		}
 	}
+ if(frame->state) {
+  e=aster_frame_batch(frame,h,cmds,n,arena_len,k_uptime_get());if(e) return e;
+  uint32_t dx=0,dy=0,dw=0,dh=0;
+  bool clear=false;
+  for(uint32_t i=0;i<n;i++) if(ASTER_GFX_OP(&cmds[i])==ASTER_GFX_CLEAR) clear=true;
+  if(pw&&ph&&!clear) aster_gfx_set_clip(px,py,pw,ph);
+  int ran=aster_gfx_exec_unpublished_into(frame->pixels,frame->w,frame->h,frame->w,cmds,n,arena,arena_len,&dx,&dy,&dw,&dh);
+  aster_gfx_set_clip(0,0,0,0);
+  return ran<0 ? aster_frame_fail(frame,ran) : ran;
+ }
+ ctx->gfx_published_surface=0;
 	/* Where the engine draws. An ordinary surface lives in app linear
 	 * memory and holds ABI-order words; a panel canvas lives in the
 	 * platform's front buffer, already in the byte order the glass wants,
@@ -822,7 +947,7 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
 		/* same no-wrap form as n_surface_flush: px/pw are app u32s and
 		 * px + pw would wrap straight past the surface bounds */
 		if (px > s->w || pw > s->w - px || py > s->h || ph > s->h - py) {
-			return ASTER_EINVAL;
+			return aster_frame_fail(&ctx->gfx_frame,ASTER_EINVAL);
 		}
 		dx = px;
 		dy = py;

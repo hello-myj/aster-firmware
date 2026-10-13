@@ -157,6 +157,26 @@ extern void aster_axs15231b_release_persistent(const struct device *dev);
 extern uint8_t *aster_axs15231b_shadow_begin(const struct device *dev, bool replacing_all);
 extern int aster_axs15231b_shadow_present(const struct device *dev,
 	uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+/* Wire ground truth for the timing lines below: the byte count the last
+ * pixel stream actually sent (never inferred from the dirty rect). */
+extern int aster_axs15231b_shadow_present_counted(const struct device *dev,
+ uint16_t x,uint16_t y,uint16_t w,uint16_t h,size_t *completed);
+#endif
+#if IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B) && IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
+/* Bounded snapshots: no console output while holding the display mutex. */
+static struct k_spinlock axs_timing_lock;
+static uint32_t axs_timing_snapshot[7];
+static void axs_timing_log(struct k_work *work)
+{
+ uint32_t v[7];
+ ARG_UNUSED(work);
+ k_spinlock_key_t key = k_spin_lock(&axs_timing_lock);
+ memcpy(v, axs_timing_snapshot, sizeof(v));
+ k_spin_unlock(&axs_timing_lock, key);
+ LOG_INF("axs tim: n=64 avg_rect=%u B avg_completed_panel=%u B totals wait=%u us gather=%u us cache=%u us write=%u us errors=%u",
+         v[0],v[1],v[2],v[3],v[4],v[5],v[6]);
+}
+K_WORK_DEFINE(axs_timing_work, axs_timing_log);
 #endif
 struct aster_disp_job {
 	const uint8_t *buf;
@@ -220,6 +240,7 @@ static int disp_direct_send(const struct aster_disp_job *job)
 /* flip front buffer 1 == ASTER_DISP_FLIP_SLOT0 + 1 == slots - 1 */
 struct aster_disp_slot {
 	struct aster_disp_job job;
+	int result;
 	struct k_sem free;   /* taken: a send for this slot is in flight */
 };
 static struct aster_disp_slot s_slots[ASTER_DISP_JOB_SLOTS];
@@ -241,7 +262,7 @@ static void disp_worker_fn(void *p1, void *p2, void *p3)
 		uint8_t slot = s_armed[s_arm_tail];
 
 		s_arm_tail = (uint8_t)((s_arm_tail + 1) % ASTER_DISP_JOB_SLOTS);
-		(void)disp_direct_send(&s_slots[slot].job); /* no error channel at wait time */
+		s_slots[slot].result = disp_direct_send(&s_slots[slot].job);
 		k_sem_give(&s_slots[slot].free);
 	}
 }
@@ -284,6 +305,7 @@ static void disp_slot_acquire(uint8_t slot)
 
 static void disp_slot_arm(uint8_t slot)
 {
+	s_slots[slot].result = 0;
 	s_armed[s_arm_head] = slot;
 	s_arm_head = (uint8_t)((s_arm_head + 1) % ASTER_DISP_JOB_SLOTS);
 	k_sem_give(&s_job_ready);
@@ -312,6 +334,23 @@ void aster_plat_display_flush_drain(void)
 		k_sem_give(&s_slots[i].free);
 	}
 #endif
+}
+
+/* Transaction END keeps its source immutable until these completions. The
+ * legacy void drain preserves its existing semantics and does not consume
+ * errors; BEGIN clears earlier completions before arming a new frame. */
+int aster_plat_display_flush_drain_checked(void)
+{
+ int result=0;
+#if IS_ENABLED(CONFIG_ASTER_DISP_ASYNC)
+ for(int i=0;i<ASTER_DISP_JOB_SLOTS;i++) {
+  k_sem_take(&s_slots[i].free,K_FOREVER);
+  if(s_slots[i].result && !result) result=ASTER_EIO;
+  s_slots[i].result=0;
+  k_sem_give(&s_slots[i].free);
+ }
+#endif
+ return result;
 }
 
 int aster_plat_display_count(void)
@@ -1282,6 +1321,11 @@ void aster_plat_display_flip_release(void)
 #endif
 	for (int i = 0; i < ASTER_DISP_FRONT_N; i++) {
 		if (s_front[i]) {
+#if IS_ENABLED(CONFIG_ASTER_SCREENSHOT)
+            /* A completed canvas frame can be the screenshot alias. Do
+             * not retain a pointer after the last owner releases it. */
+            if(s_glass==s_front[i]) glass_forget();
+#endif
 			shared_multi_heap_free(s_front[i]);
 			s_front[i] = NULL;
 		}
@@ -2372,11 +2416,22 @@ int aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 	 * not come through here. */
 	{
 		const bool replacing_all = px == 0 && py == 0 && prw == pw && prh == ph;
+#if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
+		/* Split the AXS shadow path the same way the staging path is
+		 * split: `sw` is the CPU gather into the shadow, `wr` is the
+		 * QSPI stream. Before this branch had no DISP_TIMING at all,
+		 * so its entire cost hid inside the engine's flush number. */
+		uint32_t t_sw0 = k_cycle_get_32(), acc_sw = 0, acc_wr = 0, acc_wait = 0, acc_cache = 0;
+#endif
 
 #if IS_ENABLED(CONFIG_ASTER_DISP_ASYNC)
 		aster_plat_display_flush_drain();
 #endif
 		k_mutex_lock(&disp_lock, K_FOREVER);
+#if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
+		acc_wait = k_cycle_get_32() - t_sw0;
+		t_sw0 = k_cycle_get_32();
+#endif
 		uint8_t *shadow = aster_axs15231b_shadow_begin(disp_dev, replacing_all);
 
 		if (!shadow) {
@@ -2438,11 +2493,44 @@ int aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 		/* The copy above touched only the dirty rows. AXS cannot open
 		 * the stream at an arbitrary row, so the glass always gets the
 		 * shadow from row 0 as one frame. */
+#if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
+		acc_sw = k_cycle_get_32() - t_sw0;
+		t_sw0 = k_cycle_get_32();
+#endif
 		sys_cache_data_flush_range(shadow, (size_t)pw * ph * 2u);
+#if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
+		acc_cache = k_cycle_get_32() - t_sw0;
+		t_sw0 = k_cycle_get_32();
+#endif
 		{
-			int err = aster_axs15231b_shadow_present(disp_dev, 0, 0,
+			size_t completed_bytes=0;
+			int err = aster_axs15231b_shadow_present_counted(disp_dev, 0, 0,
 								 (uint16_t)pw,
-								 (uint16_t)ph);
+								 (uint16_t)ph,&completed_bytes);
+#if IS_ENABLED(CONFIG_ASTER_DISP_TIMING)
+			/* The dirty rect is NOT the amount of wire here: the
+			 * glass gets a whole frame either way, so report the
+			 * driver's real stream length, not prw*prh*2. */
+			uint32_t tx_bytes = (uint32_t)completed_bytes;
+			static uint32_t count, errors;
+            static uint64_t sum_wait, sum_gather, sum_cache, sum_write, sum_bytes, sum_rect;
+            acc_wr = k_cycle_get_32() - t_sw0;
+            count++;errors += err != 0;
+            sum_wait += k_cyc_to_us_floor32(acc_wait);
+            sum_gather += k_cyc_to_us_floor32(acc_sw);
+            sum_cache += k_cyc_to_us_floor32(acc_cache);
+            sum_write += k_cyc_to_us_floor32(acc_wr);
+            sum_bytes += tx_bytes;sum_rect += (uint64_t)prw * prh * 2u;
+            if (count == 64) {
+                uint32_t v[7]={(uint32_t)(sum_rect/count),(uint32_t)(sum_bytes/count),
+                    (uint32_t)sum_wait,(uint32_t)sum_gather,(uint32_t)sum_cache,(uint32_t)sum_write,errors};
+                k_spinlock_key_t key=k_spin_lock(&axs_timing_lock);
+                memcpy(axs_timing_snapshot,v,sizeof(v));
+                k_spin_unlock(&axs_timing_lock,key);
+                k_work_submit(&axs_timing_work);
+                count=errors=0;sum_wait=sum_gather=sum_cache=sum_write=sum_bytes=sum_rect=0;
+            }
+#endif
 
 			k_mutex_unlock(&disp_lock);
 			return err ? ASTER_EIO : ASTER_OK;

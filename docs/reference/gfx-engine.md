@@ -147,7 +147,7 @@ int32_t aster_gfx_bmp_free(uint32_t handle);
   会推进两级流水（不自行泵管道的 app 否则会把已取回的位图滞留在暂存区），
   不阻塞、无错误返回，流水线一静止立即变 0，所以可以直接拿它当重绘条件。
   持续重绘的 app（`gfxshow`、`snake` 这类每帧全画布的）不需要它。
-- `bmp_load`：解码进固件 PSRAM 精灵缓存（LRU，6 槽，单张 ≤160×160），
+- `bmp_load`：解码进固件 PSRAM 图片资源（6 个持有槽，单张 ≤160×160；耗尽时返回错误，须显式释放），
   句柄 1..6。槽满自动逐出最久未用；app 退出时 `aster_gfx_drop_all()`
   统一释放（runtime `ctx_cleanup` 钩子）。重载成本低，一般无需手动 free。
 
@@ -172,10 +172,11 @@ aster_ge_text(&ge, x, baseline, 16, fg, ASTER_GFX_NOBG, "混排 OK");
 aster_ge_present(&ge);          /* = aster_gfx_exec + 复位环/arena */
 ```
 
-- `aster_ge_room(g)` 环满返回 NULL，该命令静默丢弃（帧不会崩）；
-- `aster_ge_arena(g,p,len)` 满同样丢弃；`ASTER_GFX_NOBG=0xFFFF`（bg==NOBG 时 w5 清零）；
+- `aster_ge_room(g)` 正常环满会自动提交当前批次；无有效存储或已有错误时返回 NULL，不写入新命令；
+- 文字通过联合预留命令槽与 arena 空间避免 payload 丢失；超长文字或提交失败会记录错误；`ASTER_GFX_NOBG=0xFFFF`（bg==NOBG 时 w5 清零）；
 - 手写像素后调 `aster_ge_touch(g,x,y,w,h)` 并入 present 矩形；
-- 环形缓冲溢出后**不换帧重放**——单帧命令数请按 `ring_n` 预算。
+- `aster_ge_present()` 返回并清除本帧首个错误，失败时丢弃尚未提交的命令；`aster_ge_error()` 只查询错误。已经自动提交的旧批次不能回滚。
+- panel canvas 仍要求一次完整重绘；命令和文字预算必须避免中途提交，完整帧事务另行设计。
 
 ### 申请 panel canvas（每个应用自己选一次）
 
@@ -443,3 +444,12 @@ python3 firmware/ui/hostpreview/gfx_device_check.py shot.png
 - `disp tim:` 有两种来源、格式曾经一样：staging gather 循环与
   `disp_direct_send()`（异步 worker）。后者 `gather` 恒为 0，曾被误读成
   「每帧多发了两次整屏」。现在后者带 `direct send (no gather)` 字样。
+
+
+## 可协商完整帧协议 v1（本地开发中）
+
+旧 `aster_gfx_exec` 导入及 draw opcode 保持不变；不复用保留 op 8。控制包使用 n=UINT32_MAX、cmds=NULL、arena 指向 24 字节且 4 字节对齐的 `aster_gfx_frame_control_t`、present_x=0x47465231、present_y=1、w=h=0。QUERY 返回支持标志；旧 Host 的 EINVAL 映射为不支持。BEGIN 返回 frame_id，END/CANCEL 必须回显。绘制批次以 present_x=frame_id、present_y=magic、w=h=0 标识，撤销后的旧批次不走旧的即时发布路径。
+
+每 APP 单一活动事务，RGB565 私有 PSRAM 暂存，普通表面在 BEGIN 拷贝 Guest 像素，canvas 首批首条 CLEAR。私有栅格调用恢复截图的既有来源，未发布帧不会进入截图记录。表面直接 present/flush 会拒绝并令事务失败。错误锁存、批数/命令/arena/像素上限及绘制期限见公开 gfx.h；END 前输入错误或取消没有面板发送。状态为 FREE → DRAWING → QUEUED → IN_FLIGHT → FREE，首版 END 等待现有队列完成，缓存暂存待下帧复用。显示 slot 记录实际发送结果，checked drain 消费错误；旧 void drain 不改行为。
+
+END 成功后更新 Guest 缓冲；失败批次、取消、暂停不更新 Guest 或发布帧。物理 I/O 故障可能已经改变 LCD 的部分内容，协议不保证光学回滚或垂直同步。底层发送/等待仍依赖现有驱动完成机制，不通过取消 DMA 等待提高速度。队列替换与异步流水线留待下一阶段。

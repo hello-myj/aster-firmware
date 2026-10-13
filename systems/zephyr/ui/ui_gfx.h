@@ -66,4 +66,8 @@ void aster_gfx_timing_report(uint32_t raster_us, uint32_t flush_us,
 			     uint32_t cmds, uint32_t px);
 #endif
 
+int aster_gfx_exec_unpublished_into(uint8_t *pixels,uint32_t w,uint32_t h,uint32_t pitch,
+ const aster_gfx_cmd_t *cmds,uint32_t n,const uint8_t *arena,uint32_t arena_len,
+ uint32_t *dx,uint32_t *dy,uint32_t *dw,uint32_t *dh);
+void aster_gfx_note_committed_frame(const uint8_t *pixels,uint32_t w,uint32_t h,uint32_t pitch,bool be);
 #endif /* ASTER_UI_GFX_H */

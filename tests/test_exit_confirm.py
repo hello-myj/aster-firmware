@@ -62,6 +62,7 @@ static bool aster_ui_fonts_advance(void) {return false;}
 static void *aster_ui_lvgl_screen(void) {return 0;}
 static void lv_obj_invalidate(void *p) {(void)p;}
 static void aster_qpanel_tick(void) {}
+static void aster_native_frame_refresh(aster_app_ctx_t *ctx){(void)ctx;}
 static void aster_ui_lvgl_pump(void) {pumps++;}
 static bool aster_qpanel_take_exit_confirmed(void) {bool c=confirmed;confirmed=false;return c;}
 ''' + code + r'''

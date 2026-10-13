@@ -58,6 +58,8 @@ int main(void) {
  const uint8_t pixels[]={0xf8,0,0x07,0xe0,0,0x1f,0xff,0xff};
  assert(axs_write(&dev,318,478,&desc,pixels)==0);
  assert(calls==4 && deselects==2 && !locks);
+ assert(aster_axs15231b_last_tx_bytes(&dev)==sizeof(frame));
+ uint64_t completed=aster_axs15231b_tx_bytes_total(&dev);
  assert(!memcmp(bytes[0],(uint8_t[]){2,0,0x2a,0},4));
  assert(!memcmp(bytes[1],(uint8_t[]){0,0,1,63},4));
  assert(!memcmp(bytes[2],(uint8_t[]){0x32,0,0x2c,0},4));
@@ -89,6 +91,11 @@ int main(void) {
  calls=0;deselects=0;fail_call=2;
  assert(axs_write(&dev,0,0,&desc,band)==-EIO);
  assert(calls==2 && deselects==2 && !locks && state.next_row==0);
+ assert(aster_axs15231b_last_tx_bytes(&dev)==0);
+ assert(aster_axs15231b_tx_bytes_total(&dev)>=completed);
+ completed=aster_axs15231b_tx_bytes_total(&dev);
+ calls=0;fail_call=4;assert(axs_write(&dev,0,0,&desc,band)==-EIO);
+ assert(aster_axs15231b_last_tx_bytes(&dev)==0 && aster_axs15231b_tx_bytes_total(&dev)==completed);
  /* Persistent UI frames bypass the shadow copy; a later ordinary partial
   * write materializes it before replacing only its own rectangle. */
  static uint8_t ui[320*480*2];memset(ui,0x39,sizeof(ui));memset(frame,0xab,sizeof(frame));
@@ -112,6 +119,15 @@ int main(void) {
  aster_axs15231b_release_persistent(&dev);
  assert(state.borrowed==NULL && !locks && !memcmp(frame,ui,sizeof(frame)));
  ui[0]=0x77;assert(frame[0]==0x88);
+ calls=0;fail_call=0;
+ assert(aster_axs15231b_shadow_begin(&dev,true)==frame && locks==1);
+ size_t completed_bytes=0;
+ assert(aster_axs15231b_shadow_present_counted(&dev,0,0,320,480,&completed_bytes)==0);
+ assert(completed_bytes==sizeof(frame) && !locks);
+ calls=0;fail_call=4;
+ assert(aster_axs15231b_shadow_begin(&dev,true)==frame);
+ assert(aster_axs15231b_shadow_present_counted(&dev,0,0,320,480,&completed_bytes)==-EIO);
+ assert(completed_bytes==0 && !locks);
  return 0;
 }
 ''')

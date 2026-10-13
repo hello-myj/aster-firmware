@@ -14,5 +14,8 @@ void aster_runtime_terminate(void);
 
 /* defined in aster_native.c: close host fs handles a stopping app left open */
 void aster_native_release_files(aster_app_ctx_t *ctx);
+void aster_native_frame_refresh(aster_app_ctx_t *ctx);
+void aster_native_frame_abort(aster_app_ctx_t *ctx);
+void aster_native_frame_release(aster_app_ctx_t *ctx);
 
 #endif

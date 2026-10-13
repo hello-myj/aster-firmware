@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "aster_app_mgr.h"
+#include "aster_gfx_frame.h"
 
 #define ASTER_SURFACE_MAX 4
 #define ASTER_TIMER_MAX   8
@@ -60,6 +61,8 @@ typedef struct aster_app_ctx {
 
 	/* resources owned by this app */
 	aster_surface_t surfaces[ASTER_SURFACE_MAX];
+	aster_frame_state_t gfx_frame;
+	uint32_t gfx_published_surface;
 	aster_timer_t   timers[ASTER_TIMER_MAX];
 	aster_file_t    files[ASTER_FILE_MAX];
 

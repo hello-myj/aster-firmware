@@ -153,6 +153,7 @@ void aster_plat_display_glass_drop(void);
  * observe an ordered panel state calls it before touching the display.
  * No-op when the async pipeline is compiled out. */
 void aster_plat_display_flush_drain(void);
+int aster_plat_display_flush_drain_checked(void);
 /* Platform-owned logical rotation (see Kconfig ASTER_DISPLAY_ROTATION): all
  * coords above and in get_info() are LOGICAL; the port maps them to the
  * panel-native window internally. Helpers exposed for input mapping + shell: */

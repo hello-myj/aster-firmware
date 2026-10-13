@@ -737,6 +737,7 @@ static void ui_service(aster_app_ctx_t *ctx)
 	 * the screenshot poll (the shell blocks on it) and drains async flush
 	 * waits. The screen tree holds the sheet and nothing else, so no
 	 * launcher pixels leak from this pump. */
+	aster_native_frame_refresh(ctx);
 	aster_ui_lvgl_pump();
  if(aster_qpanel_take_exit_confirmed()) {
   ctx->exit_clean=true;ctx->quit=true;
@@ -786,6 +787,7 @@ static void app_event_loop(aster_app_ctx_t *ctx)
 		/* lifecycle callbacks (pause/resume) run here, not on shell thread */
 		switch (ctx->pending_ctrl) {
 		case ASTER_CTRL_PAUSE:
+			aster_native_frame_abort(ctx);
 			call_fn(ctx, ctx->f_pause, 0, NULL);
 			ctx->pending_ctrl = ASTER_CTRL_NONE;
 			ctx->paused = true;
@@ -897,6 +899,7 @@ static void ctx_cleanup(aster_app_ctx_t *ctx)
 #if IS_ENABLED(CONFIG_ASTER_LVGL)
 	aster_gfx_drop_all(); /* free sprite-cache slots held by this app */
 #endif
+	aster_native_frame_release(ctx);
 	aster_native_release_files(ctx);
 
 	if (ctx->exec_env) {

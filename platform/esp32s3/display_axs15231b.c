@@ -25,6 +25,12 @@ struct axs_data {
  uint8_t *frame;
  const uint8_t *borrowed; /* Persistent UI frame; ordinary writes always copy. */
  uint16_t next_row;
+ /* Ground truth for CONFIG_ASTER_DISP_TIMING: the byte count the last
+  * pixel stream actually put on the wire, and a cumulative total. The
+  * QSPI glass has no row-window shortcut (see axs_tx_locked), so callers
+  * must not infer wire cost from the rect they asked to update. */
+ size_t last_tx_bytes;
+ uint64_t tx_bytes_total;
 };
 static int axs_write_bytes(const struct device *dev, const struct spi_config *cfg,
                           const void *buf, size_t size)
@@ -82,7 +88,9 @@ static int axs_tx_locked(const struct device *dev,uint16_t x,uint16_t y,
  if(!err) err=axs_header(dev,0x32,continuation?0x3c:0x2c);
  size_t offset=band?(size_t)y*c->width*2u:0;
  size_t size=(size_t)c->width*(band?height:c->height)*2u;
+ d->last_tx_bytes=0; /* Only successfully completed payloads are counted. */
  if(!err) err=axs_write_bytes(dev,&d->quad,(const uint8_t *)wire+offset,size);
+ if(!err) {d->last_tx_bytes=size;d->tx_bytes_total+=size;}
  d->next_row=err?0:(band?y+height:c->height);
  axs_end(dev);
  return err;
@@ -125,13 +133,34 @@ uint8_t *aster_axs15231b_shadow_begin(const struct device *dev,bool replacing_al
  d->borrowed=NULL;
  return d->frame;
 }
-int aster_axs15231b_shadow_present(const struct device *dev,
-                                   uint16_t x,uint16_t y,uint16_t w,uint16_t h)
+int aster_axs15231b_shadow_present_counted(const struct device *dev,
+                                   uint16_t x,uint16_t y,uint16_t w,uint16_t h,size_t *completed)
 {
  struct axs_data *d=dev->data;
  int err=axs_tx_locked(dev,x,y,w,h,d->frame);
+ if(completed) *completed=d->last_tx_bytes;
  k_mutex_unlock(&d->lock);
  return err;
+}
+int aster_axs15231b_shadow_present(const struct device *dev,
+                                   uint16_t x,uint16_t y,uint16_t w,uint16_t h)
+{
+ return aster_axs15231b_shadow_present_counted(dev,x,y,w,h,NULL);
+}
+/* Diagnostics only: successfully completed pixel bytes of the most recent transfer, and the total
+ * completed since boot. Failed transfers may have sent an unknown prefix. Read after shadow_present()/write() has returned,
+ * from non-ISR context. */
+size_t aster_axs15231b_last_tx_bytes(const struct device *dev)
+{
+ struct axs_data *d=dev->data;
+ k_mutex_lock(&d->lock,K_FOREVER);size_t value=d->last_tx_bytes;
+ k_mutex_unlock(&d->lock);return value;
+}
+uint64_t aster_axs15231b_tx_bytes_total(const struct device *dev)
+{
+ struct axs_data *d=dev->data;
+ k_mutex_lock(&d->lock,K_FOREVER);uint64_t value=d->tx_bytes_total;
+ k_mutex_unlock(&d->lock);return value;
 }
 static int axs_write(const struct device *dev,const uint16_t x,const uint16_t y,
                      const struct display_buffer_descriptor *desc,const void *buffer)

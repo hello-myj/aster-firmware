@@ -12,8 +12,9 @@
  * word fills. Cheap primitives (set_pixel, tight rect fills) stay inline
  * in the app header -- both roads paint the SAME buffer, mix freely.
  *
- * Surfaces stay owned by aster_surface_*: this module adds drawing, not a
- * second framebuffer. Commands only apply to ASTER_PIXEL_RGB565 surfaces.
+ * Surfaces stay owned by aster_surface_*. Legacy drawing adds no extra
+ * framebuffer; negotiated transactions use bounded private PSRAM staging.
+ * Commands only apply to ASTER_PIXEL_RGB565 surfaces.
  */
 #ifndef ASTER_GFX_ENGINE_ABI_H
 #define ASTER_GFX_ENGINE_ABI_H
@@ -98,6 +99,41 @@ ASTER_I("aster_gfx_exec") int32_t aster_gfx_exec(aster_handle_t surface,
 					   uint32_t present_x, uint32_t present_y,
 					   uint32_t present_w, uint32_t present_h);
 
+/* Negotiated frame protocol v1 over the EXISTING gfx_exec import. Old hosts
+ * reject n=UINT32_MAX with EINVAL: query first, map that to ENOTSUP. No
+ * reserved draw opcode or previously ignored flag bit is reused.
+ * Control: cmds=NULL, n=CONTROL, arena=&control, arena_len=24,
+ * present_x=MAGIC, present_y=1, present_w=present_h=0.
+ * Query/begin use frame_id=0; begin returns a nonzero ID in the descriptor.
+ * End/cancel must echo that ID. Flags/error are output only (input zero).
+ * DRAW uses regular n with present_x=frame_id, present_y=MAGIC and w=h=0.
+ * Stale/untagged batches cannot publish after cancel, pause or destroy.
+ * While active, tagged gfx_exec batches draw privately; direct surface
+ * present/flush is BUSY. Only successful END publishes, once, synchronously.
+ * Canvas frames must START with CLEAR. No direct Guest pixel writes inside
+ * the transaction. Failed/cancelled DRAW never modifies Guest or panel.
+ * Physical I/O failure during END may partly update the LCD (no hardware
+ * page flip); EIO is reported, never claimed to be an optical rollback.
+ * v1 bounds: one active frame/APP, <=153600 pixels, 256 batches,
+ * 8192 commands, 131072 arena bytes, 1000 ms from begin. */
+#define ASTER_GFX_FRAME_CONTROL UINT32_MAX
+#define ASTER_GFX_FRAME_MAGIC 0x47465231u
+#define ASTER_GFX_FRAME_VERSION 1u
+#define ASTER_GFX_FRAME_MAX_PIXELS 153600u
+#define ASTER_GFX_FRAME_MAX_BATCHES 256u
+#define ASTER_GFX_FRAME_MAX_COMMANDS 8192u
+#define ASTER_GFX_FRAME_MAX_ARENA 131072u
+#define ASTER_GFX_FRAME_TIMEOUT_MS 1000u
+#define ASTER_GFX_FRAME_SUPPORTED 1u
+#define ASTER_GFX_FRAME_QUERY 0u
+#define ASTER_GFX_FRAME_BEGIN 1u
+#define ASTER_GFX_FRAME_END 2u
+#define ASTER_GFX_FRAME_CANCEL 3u
+typedef struct {
+ uint32_t size, version, action, frame_id, flags;
+ int32_t error;
+} aster_gfx_frame_control_t;
+
 /* [3.1] "Should I repaint?" -- for event-driven apps that only redraw when
  * something happens.
  *
@@ -125,8 +161,8 @@ ASTER_I("aster_gfx_text_w") int32_t aster_gfx_text_w(uint32_t px, const char *ut
 /* Load an image file (BMP/PNG/JPEG, fs-sandboxed path like aster_img_render)
  * into the firmware's sprite cache as packed RGB565, downscaled to fit
  * cap_w x cap_h. Returns ASTER_OK + *out_handle for ASTER_GFX_BMP*, or a
- * negative error. Small LRU budget: re-loading is cheap, so apps rarely
- * need to free. */
+ * negative error. Handles own a bounded resource until free or APP exit.
+ * Resource exhaustion returns an error; live handles are never evicted. */
 ASTER_I("aster_gfx_bmp_load") int32_t aster_gfx_bmp_load(const char *path, uint32_t path_len,
 						   uint32_t cap_w, uint32_t cap_h,
 						   uint32_t *out_handle,

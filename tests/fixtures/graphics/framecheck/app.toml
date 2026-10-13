@@ -1,0 +1,12 @@
+[app]
+id = "test.p2.gfx.framecheck"
+name = "Frame Transaction Check"
+version = "1.0.0"
+abi = "3.7"
+entry = "aster_app_init"
+aot = true
+requires = ["display"]
+initial_memory = 524288
+max_memory = 2097152
+heap = 524288
+stack = 16384
