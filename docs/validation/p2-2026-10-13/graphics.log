@@ -1,0 +1,879 @@
+> aster sys info
+aster sys info
+ASTER 0.1.0
+platform=zephyr board=aster.esp32s3.waveshare35b soc=esp32s3 arch=xtensa abi=3.7.0
+cpu=240000000 hz cores=2
+ram int=327680 ext=8388608 flash=16777216
+sd_mounted=yes apps=15
+sigpolicy=allow-unsigned
+aster:~$
+> aster app list
+aster app list
+ID                           NAME             VER      STATE
+aster.apitest                API Test         1.0.0    STOPPED [AOT]
+aster.chess                  Chess            1.0.1    STOPPED [AOT]
+aster.gallery                相册           1.0.1    STOPPED [AOT]
+aster.game.2048              2048             1.3.0    STOPPED [AOT]
+aster.gfxshow                Gfx Show         0.1.0    STOPPED [AOT]
+aster.hello                  Hello Aster      1.0.0    STOPPED [AOT]
+aster.imucube                IMU 立方体    1.0.0    STOPPED [AOT]
+aster.permdeny               Perm Deny Test   1.0.0    STOPPED [AOT]
+aster.player                 Player           1.0.0    STOPPED [AOT]
+aster.reader                 Reader           1.0.0    STOPPED [AOT]
+aster.snake                  Snake            1.2.1    STOPPED [AOT]
+aster.trap                   Trap Test        1.0.0    STOPPED [AOT]
+com.example.breakout         打砖块        1.0.3    STOPPED [AOT]
+test.p2.gfx.individual       GFX benchmark individual 1.0.0    RUNNING [AOT]
+test.p2.gfx.batched          GFX benchmark batched 1.0.0    STOPPED [AOT]
+aster:~$
+> aster app stop test.p2.gfx.individual
+aster app stop test.p2.gfx.individual
+[00:03:40.452,000] <inf> aster_fontsd: cpfont cache: released 48528 B
+[00:03:40.453,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:03:40.464,000] <inf> aster_rt: app stopped: test.p2.gfx.individual
+ok
+aster:~$ [00:03:40.475,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:03:40.476,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$
+> aster app stop test.p2.gfx.batched
+aster app stop test.p2.gfx.batched
+failed: -6 (not the running app)
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15276 free=33660
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster app start test.p2.gfx.individual
+aster app start test.p2.gfx.individual
+[00:03:41.665,000] <inf> aster_fontsd: cpfont cache: 48px allocated 57672 B
+[00:03:42.114,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:03:42.114,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:03:42.220,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:03:42.220,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:03:42.221,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:03:42.602,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc60 exec=0x4221fc60 size=5316
+[00:03:42.750,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:03:42.781,000] <inf> aster_native: [app:test.p2.gfx.individual] GFXBENCH mode=individual display=320x480
+[00:03:42.781,000] <inf> aster_rt: app started: test.p2.gfx.individual (GFX benchmark individual, 7 KB, AOT)
+started test.p2.gfx.individual
+aster:~$
+aster app start test.p2.gfx.individual
+[00:03:41.665,000] <inf> aster_fontsd: cpfont cache: 48px allocated 57672 B
+[00:03:42.114,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:03:42.114,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:03:42.220,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:03:42.220,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:03:42.221,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:03:42.602,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc60 exec=0x4221fc60 size=5316
+[00:03:42.750,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:03:42.781,000] <inf> aster_native: [app:test.p2.gfx.individual] GFXBENCH mode=individual display=320x480
+[00:03:42.781,000] <inf> aster_rt: app started: test.p2.gfx.individual (GFX benchmark individual, 7 KB, AOT)
+started test.p2.gfx.individual
+aster:~$ [9D[J[00:03:44.162,000] [0m<inf> aster_gfx: gfx tim: raster=515 us flush=20834 us sum=21349 us (max 6500/34346) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:03:44.163,000] [0m<inf> aster_gfx: gfx op: CLEAR      372 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:44.164,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:45.536,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20834 us sum=21337 us (max 5863/33978) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:03:45.537,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:45.538,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:46.911,000] [0m<inf> aster_gfx: gfx tim: raster=507 us flush=20839 us sum=21346 us (max 5861/34122) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:03:46.912,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  71%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:46.913,000] [0m<inf> aster_gfx: gfx op: RECT_F     142 us/frame  28%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:48.285,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20833 us sum=21335 us (max 5779/33967) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:03:48.286,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:48.287,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:49.638,000] [0m<inf> aster_gfx: gfx tim: raster=418 us flush=20610 us sum=21028 us (max 5868/33964) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:03:49.639,000] [0m<inf> aster_gfx: gfx op: CLEAR      273 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:49.640,000] [0m<inf> aster_gfx: gfx op: RECT_F     143 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:51.011,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20826 us sum=21328 us (max 5780/33968) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:03:51.012,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:51.013,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:52.385,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20828 us sum=21333 us (max 5869/33964) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:03:52.386,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:52.387,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:53.759,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20835 us sum=21338 us (max 5823/33945) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:03:53.760,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:53.761,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:55.112,000] [0m<inf> aster_gfx: gfx tim: raster=416 us flush=20610 us sum=21026 us (max 5858/33984) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:03:55.113,000] [0m<inf> aster_gfx: gfx op: CLEAR      271 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:55.114,000] [0m<inf> aster_gfx: gfx op: RECT_F     142 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:56.486,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20828 us sum=21331 us (max 5819/33928) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:03:56.487,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:56.487,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:57.860,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20831 us sum=21336 us (max 5873/34006) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:03:57.861,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:57.862,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:59.235,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20838 us sum=21341 us (max 5774/34032) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:03:59.236,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  71%  n=0[0m
+[1;32master:~$ [m[9D[J[00:03:59.236,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  28%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:00.588,000] [0m<inf> aster_gfx: gfx tim: raster=456 us flush=20614 us sum=21070 us (max 5873/33938) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:04:00.589,000] [0m<inf> aster_gfx: gfx op: CLEAR      273 us/frame  60%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:00.590,000] [0m<inf> aster_gfx: gfx op: RECT_F     180 us/frame  39%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:01.962,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20827 us sum=21330 us (max 5780/34019) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:01.963,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  71%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:01.963,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  28%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:03.335,000] [0m<inf> aster_gfx: gfx tim: raster=506 us flush=20823 us sum=21329 us (max 5870/33917) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:03.336,000] [0m<inf> aster_gfx: gfx op: CLEAR      364 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:03.337,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:04.709,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20832 us sum=21334 us (max 5786/33961) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:04.710,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:04.711,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:05.317,000] [1;33m<wrn> aster_time: SNTP ntp.aliyun.com failed: -11[0m
+[1;32master:~$ [m[9D[J[00:04:05.318,000] [1;33m<wrn> aster_time: SNTP time.cloudflare.com failed: -11[0m
+[1;32master:~$ [m[9D[J[00:04:05.319,000] [1;33m<wrn> aster_time: wall clock sync failed: -11; retrying[0m
+[1;32master:~$ [m[9D[J[00:04:06.063,000] [0m<inf> aster_gfx: gfx tim: raster=417 us flush=20615 us sum=21032 us (max 5883/33994) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:04:06.064,000] [0m<inf> aster_gfx: gfx op: CLEAR      271 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:06.064,000] [0m<inf> aster_gfx: gfx op: RECT_F     142 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:07.437,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20830 us sum=21334 us (max 5879/34043) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:07.438,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:07.438,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:08.811,000] [0m<inf> aster_gfx: gfx tim: raster=506 us flush=20832 us sum=21338 us (max 5856/34002) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:08.812,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:08.813,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:10.185,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20831 us sum=21334 us (max 5821/34003) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:10.186,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:10.187,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:11.560,000] [0m<inf> aster_gfx: gfx tim: raster=507 us flush=20838 us sum=21345 us (max 5930/33919) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:11.561,000] [0m<inf> aster_gfx: gfx op: CLEAR      364 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:11.561,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:12.912,000] [0m<inf> aster_gfx: gfx tim: raster=414 us flush=20608 us sum=21022 us (max 5781/33926) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:04:12.914,000] [0m<inf> aster_gfx: gfx op: CLEAR      270 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:12.914,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:14.286,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20828 us sum=21333 us (max 5864/33907) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:14.287,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:14.288,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:15.661,000] [0m<inf> aster_gfx: gfx tim: raster=508 us flush=20839 us sum=21347 us (max 5923/34017) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:15.662,000] [0m<inf> aster_gfx: gfx op: CLEAR      364 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:15.663,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:17.036,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20838 us sum=21342 us (max 5800/34074) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:17.037,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  71%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:17.037,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  28%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:18.389,000] [0m<inf> aster_gfx: gfx tim: raster=417 us flush=20614 us sum=21031 us (max 5867/34056) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:04:18.390,000] [0m<inf> aster_gfx: gfx op: CLEAR      272 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:18.391,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:19.763,000] [0m<inf> aster_gfx: gfx tim: raster=506 us flush=20830 us sum=21336 us (max 5859/34041) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:19.764,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:19.765,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:21.137,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20829 us sum=21332 us (max 5861/33967) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:21.138,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:21.139,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:22.511,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20865 us sum=21370 us (max 5867/33916) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:22.512,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:22.513,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:23.864,000] [0m<inf> aster_gfx: gfx tim: raster=414 us flush=20612 us sum=21026 us (max 5786/33959) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:04:23.865,000] [0m<inf> aster_gfx: gfx op: CLEAR      270 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:23.866,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:25.238,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20829 us sum=21333 us (max 5858/33909) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:25.239,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:25.239,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:26.612,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20826 us sum=21331 us (max 5912/33972) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:26.613,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:26.613,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:27.986,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20835 us sum=21339 us (max 5851/34018) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:27.987,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:27.988,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:29.339,000] [0m<inf> aster_gfx: gfx tim: raster=417 us flush=20614 us sum=21031 us (max 5898/34024) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:04:29.340,000] [0m<inf> aster_gfx: gfx op: CLEAR      272 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:29.341,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:29.342,000] [0m<inf> aster_native: [app:test.p2.gfx.individual] GFXBENCH DONE mode=individual frames=128 draw_total_ms=46388 draw_max_ms=365 interval_total_ms=46187 intervals=127 gfx_calls=2176 errors=0[0m
+[1;32master:~$ [m
+> aster app stats test.p2.gfx.individual
+aster app stats test.p2.gfx.individual
+id=test.p2.gfx.individual state=RUNNING
+mem: initial=524288 max=2097152 stack=16384 heap=524288 peak=55
+frames=190 fps=60 uptime=47573ms
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15912 free=33016
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster app stop test.p2.gfx.individual
+aster app stop test.p2.gfx.individual
+[00:04:32.498,000] <inf> aster_fontsd: cpfont cache: released 48528 B
+[00:04:32.499,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:04:32.510,000] <inf> aster_rt: app stopped: test.p2.gfx.individual
+ok
+aster:~$ [00:04:32.521,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:04:32.521,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15792 free=33140
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15792 free=33140
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$ [00:04:33.613,000] <inf> aster_fontsd: cpfont cache: 24px allocated 36168 B
+aster:~$ [00:04:33.636,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aster:~$ [00:04:33.710,000] <inf> aster_fontsd: cpfont cache: 48px allocated 57672 B
+aster:~$
+> aster app start test.p2.gfx.batched
+aster app start test.p2.gfx.batched
+[00:04:34.160,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:04:34.161,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:04:34.266,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:04:34.267,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:04:34.268,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:04:34.648,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc00 exec=0x4221fc00 size=5240
+[00:04:34.779,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:04:34.811,000] <inf> aster_native: [app:test.p2.gfx.batched] GFXBENCH mode=batched display=320x480
+[00:04:34.811,000] <inf> aster_rt: app started: test.p2.gfx.batched (GFX benchmark batched, 7 KB, AOT)
+started test.p2.gfx.batched
+aster:~$
+aster app start test.p2.gfx.batched
+[00:04:34.160,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:04:34.161,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:04:34.266,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:04:34.267,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:04:34.268,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:04:34.648,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc00 exec=0x4221fc00 size=5240
+[00:04:34.779,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:04:34.811,000] <inf> aster_native: [app:test.p2.gfx.batched] GFXBENCH mode=batched display=320x480
+[00:04:34.811,000] <inf> aster_rt: app started: test.p2.gfx.batched (GFX benchmark batched, 7 KB, AOT)
+started test.p2.gfx.batched
+aster:~$ [9D[J[00:04:37.610,000] [0m<inf> aster_gfx: gfx tim: raster=8501 us flush=33878 us sum=42379 us (max 9103/34428) cmds=17 flushed=153600 px[0m
+[1;32master:~$ [m[9D[J[00:04:37.611,000] [0m<inf> aster_gfx: gfx op: CLEAR     5805 us/frame  68%  n=1[0m
+[1;32master:~$ [m[9D[J[00:04:37.612,000] [0m<inf> aster_gfx: gfx op: RECT_F    2686 us/frame  31%  n=16[0m
+[1;32master:~$ [m[9D[J[00:04:40.402,000] [0m<inf> aster_gfx: gfx tim: raster=8486 us flush=33875 us sum=42361 us (max 8580/34072) cmds=17 flushed=153600 px[0m
+[1;32master:~$ [m[9D[J[00:04:40.403,000] [0m<inf> aster_gfx: gfx op: CLEAR     5791 us/frame  68%  n=1[0m
+[1;32master:~$ [m[9D[J[00:04:40.404,000] [0m<inf> aster_gfx: gfx op: RECT_F    2686 us/frame  31%  n=16[0m
+[1;32master:~$ [m[9D[J[00:04:40.405,000] [0m<inf> aster_native: [app:test.p2.gfx.batched] GFXBENCH DONE mode=batched frames=128 draw_total_ms=5434 draw_max_ms=45 interval_total_ms=5540 intervals=127 gfx_calls=128 errors=0[0m
+[1;32master:~$ [m
+> aster app stats test.p2.gfx.batched
+aster app stats test.p2.gfx.batched
+id=test.p2.gfx.batched state=RUNNING
+mem: initial=524288 max=2097152 stack=16384 heap=524288 peak=55
+frames=178 fps=60 uptime=6416ms
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15912 free=33020
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster app stop test.p2.gfx.batched
+aster app stop test.p2.gfx.batched
+[00:04:43.363,000] <inf> aster_fontsd: cpfont cache: released 48528 B
+[00:04:43.364,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:04:43.375,000] <inf> aster_rt: app stopped: test.p2.gfx.batched
+ok
+aster:~$ [00:04:43.386,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:04:43.387,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15276 free=33660
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster sys mem
+[00:04:44.478,000] <inf> aster_fontsd: cpfont cache: 24px allocated 36168 B
+aster:~$ aster sys mem
+dram heap:  size=49152 peak=41764 used=15792 free=33140
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$ [00:04:44.502,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aster:~$ [00:04:44.576,000] <inf> aster_fontsd: cpfont cache: 48px allocated 57672 B
+aster:~$
+> aster app start test.p2.gfx.individual
+aster app start test.p2.gfx.individual
+[00:04:45.026,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:04:45.026,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:04:45.132,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:04:45.132,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:04:45.133,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:04:45.514,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc60 exec=0x4221fc60 size=5316
+[00:04:45.662,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:04:45.693,000] <inf> aster_native: [app:test.p2.gfx.individual] GFXBENCH mode=individual display=320x480
+[00:04:45.694,000] <inf> aster_rt: app started: test.p2.gfx.individual (GFX benchmark individual, 7 KB, AOT)
+started test.p2.gfx.individual
+aster:~$
+aster app start test.p2.gfx.individual
+[00:04:45.026,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:04:45.026,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:04:45.132,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:04:45.132,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:04:45.133,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:04:45.514,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc60 exec=0x4221fc60 size=5316
+[00:04:45.662,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:04:45.693,000] <inf> aster_native: [app:test.p2.gfx.individual] GFXBENCH mode=individual display=320x480
+[00:04:45.694,000] <inf> aster_rt: app started: test.p2.gfx.individual (GFX benchmark individual, 7 KB, AOT)
+started test.p2.gfx.individual
+aster:~$ [9D[J[00:04:47.075,000] [0m<inf> aster_gfx: gfx tim: raster=518 us flush=20830 us sum=21348 us (max 6522/34322) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:47.076,000] [0m<inf> aster_gfx: gfx op: CLEAR      375 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:47.076,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:48.448,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20866 us sum=21368 us (max 5775/34008) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:48.449,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:48.449,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:49.822,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20832 us sum=21336 us (max 5872/33979) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:49.823,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:49.823,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:51.196,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20833 us sum=21335 us (max 5867/33958) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:51.197,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:51.197,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:52.549,000] [0m<inf> aster_gfx: gfx tim: raster=418 us flush=20606 us sum=21024 us (max 5871/33889) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:04:52.550,000] [0m<inf> aster_gfx: gfx op: CLEAR      273 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:52.550,000] [0m<inf> aster_gfx: gfx op: RECT_F     143 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:53.922,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20831 us sum=21333 us (max 5774/33988) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:53.923,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:53.924,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:55.296,000] [0m<inf> aster_gfx: gfx tim: raster=506 us flush=20829 us sum=21335 us (max 5868/33902) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:55.297,000] [0m<inf> aster_gfx: gfx op: CLEAR      364 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:55.298,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:56.670,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20832 us sum=21335 us (max 5787/33954) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:56.671,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:56.672,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:58.023,000] [0m<inf> aster_gfx: gfx tim: raster=416 us flush=20613 us sum=21029 us (max 5863/33973) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:04:58.024,000] [0m<inf> aster_gfx: gfx op: CLEAR      271 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:58.025,000] [0m<inf> aster_gfx: gfx op: RECT_F     142 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:59.397,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20827 us sum=21331 us (max 5853/33959) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:04:59.398,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:04:59.399,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:00.771,000] [0m<inf> aster_gfx: gfx tim: raster=506 us flush=20832 us sum=21338 us (max 5870/33986) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:00.772,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:00.773,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:02.145,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20830 us sum=21333 us (max 5795/33941) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:02.146,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:02.147,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:03.498,000] [0m<inf> aster_gfx: gfx tim: raster=418 us flush=20650 us sum=21068 us (max 5935/33944) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:05:03.499,000] [0m<inf> aster_gfx: gfx op: CLEAR      274 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:03.500,000] [0m<inf> aster_gfx: gfx op: RECT_F     142 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:04.872,000] [0m<inf> aster_gfx: gfx tim: raster=501 us flush=20826 us sum=21327 us (max 5780/33974) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:04.873,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:04.873,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:05.320,000] [1;33m<wrn> aster_time: SNTP ntp.aliyun.com failed: -11[0m
+[1;32master:~$ [m[9D[J[00:05:05.321,000] [1;33m<wrn> aster_time: SNTP time.cloudflare.com failed: -11[0m
+[1;32master:~$ [m[9D[J[00:05:05.322,000] [1;33m<wrn> aster_time: wall clock sync failed: -11; retrying[0m
+[1;32master:~$ [m[9D[J[00:05:06.246,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20831 us sum=21336 us (max 5868/34077) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:06.247,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:06.248,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:07.620,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20828 us sum=21332 us (max 5865/33960) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:07.621,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:07.622,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:08.973,000] [0m<inf> aster_gfx: gfx tim: raster=416 us flush=20611 us sum=21027 us (max 5853/33962) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:05:08.974,000] [0m<inf> aster_gfx: gfx op: CLEAR      271 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:08.975,000] [0m<inf> aster_gfx: gfx op: RECT_F     142 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:10.346,000] [0m<inf> aster_gfx: gfx tim: raster=501 us flush=20819 us sum=21320 us (max 5793/33987) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:10.347,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:10.348,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:11.720,000] [0m<inf> aster_gfx: gfx tim: raster=507 us flush=20825 us sum=21332 us (max 5874/33974) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:11.721,000] [0m<inf> aster_gfx: gfx op: CLEAR      364 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:11.721,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:13.093,000] [0m<inf> aster_gfx: gfx tim: raster=501 us flush=20831 us sum=21332 us (max 5777/33994) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:13.094,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:13.095,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:14.467,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20831 us sum=21335 us (max 5871/33949) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:14.469,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:14.469,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:15.820,000] [0m<inf> aster_gfx: gfx tim: raster=414 us flush=20607 us sum=21021 us (max 5816/33878) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:05:15.821,000] [0m<inf> aster_gfx: gfx op: CLEAR      271 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:15.822,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:17.193,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20824 us sum=21327 us (max 5873/34004) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:17.194,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:17.195,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:18.567,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20824 us sum=21329 us (max 5880/33937) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:18.568,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:18.569,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:19.941,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20830 us sum=21334 us (max 5818/33966) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:19.942,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:19.942,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:21.294,000] [0m<inf> aster_gfx: gfx tim: raster=415 us flush=20610 us sum=21025 us (max 5871/33982) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:05:21.295,000] [0m<inf> aster_gfx: gfx op: CLEAR      272 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:21.295,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:22.667,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20827 us sum=21329 us (max 5817/33924) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:22.668,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:22.669,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:24.041,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20825 us sum=21330 us (max 5864/33994) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:24.042,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:24.042,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:25.415,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20834 us sum=21336 us (max 5795/33998) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:25.416,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:25.416,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:26.768,000] [0m<inf> aster_gfx: gfx tim: raster=415 us flush=20612 us sum=21027 us (max 5847/33983) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:05:26.769,000] [0m<inf> aster_gfx: gfx op: CLEAR      272 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:26.769,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:28.141,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20821 us sum=21326 us (max 5873/33937) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:28.142,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:28.143,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:29.515,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20832 us sum=21337 us (max 5817/34004) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:29.516,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  71%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:29.517,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  28%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:30.889,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20830 us sum=21335 us (max 5880/33931) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:30.890,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:30.891,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:32.242,000] [0m<inf> aster_gfx: gfx tim: raster=414 us flush=20610 us sum=21024 us (max 5791/33939) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:05:32.243,000] [0m<inf> aster_gfx: gfx op: CLEAR      270 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:32.244,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:32.244,000] [0m<inf> aster_native: [app:test.p2.gfx.individual] GFXBENCH DONE mode=individual frames=128 draw_total_ms=46386 draw_max_ms=365 interval_total_ms=46178 intervals=127 gfx_calls=2176 errors=0[0m
+[1;32master:~$ [m
+> aster app stats test.p2.gfx.individual
+aster app stats test.p2.gfx.individual
+id=test.p2.gfx.individual state=RUNNING
+mem: initial=524288 max=2097152 stack=16384 heap=524288 peak=55
+frames=185 fps=60 uptime=47481ms
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15912 free=33020
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster app stop test.p2.gfx.individual
+aster app stop test.p2.gfx.individual
+[00:05:35.309,000] <inf> aster_fontsd: cpfont cache: released 48528 B
+[00:05:35.310,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:05:35.321,000] <inf> aster_rt: app stopped: test.p2.gfx.individual
+ok
+aster:~$ [00:05:35.331,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:05:35.332,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15792 free=33140
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster sys mem
+[00:05:36.424,000] <inf> aster_fontsd: cpfont cache: 24px allocated 36168 B
+aster:~$ aster sys mem
+dram heap:  size=49152 peak=41764 used=15792 free=33140
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$ [00:05:36.447,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aster:~$ [00:05:36.522,000] <inf> aster_fontsd: cpfont cache: 48px allocated 57672 B
+aster:~$
+> aster app start test.p2.gfx.batched
+aster app start test.p2.gfx.batched
+[00:05:36.976,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:05:36.977,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:05:37.083,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:05:37.084,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:05:37.085,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:05:37.465,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc00 exec=0x4221fc00 size=5240
+[00:05:37.596,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:05:37.627,000] <inf> aster_native: [app:test.p2.gfx.batched] GFXBENCH mode=batched display=320x480
+[00:05:37.628,000] <inf> aster_rt: app started: test.p2.gfx.batched (GFX benchmark batched, 7 KB, AOT)
+started test.p2.gfx.batched
+aster:~$
+aster app start test.p2.gfx.batched
+[00:05:36.976,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:05:36.977,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:05:37.083,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:05:37.084,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:05:37.085,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:05:37.465,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc00 exec=0x4221fc00 size=5240
+[00:05:37.596,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:05:37.627,000] <inf> aster_native: [app:test.p2.gfx.batched] GFXBENCH mode=batched display=320x480
+[00:05:37.628,000] <inf> aster_rt: app started: test.p2.gfx.batched (GFX benchmark batched, 7 KB, AOT)
+started test.p2.gfx.batched
+aster:~$ [9D[J[00:05:40.427,000] [0m<inf> aster_gfx: gfx tim: raster=8501 us flush=33880 us sum=42381 us (max 9108/34468) cmds=17 flushed=153600 px[0m
+[1;32master:~$ [m[9D[J[00:05:40.428,000] [0m<inf> aster_gfx: gfx op: CLEAR     5803 us/frame  68%  n=1[0m
+[1;32master:~$ [m[9D[J[00:05:40.429,000] [0m<inf> aster_gfx: gfx op: RECT_F    2688 us/frame  31%  n=16[0m
+[1;32master:~$ [m[9D[J[00:05:43.217,000] [0m<inf> aster_gfx: gfx tim: raster=8486 us flush=33861 us sum=42347 us (max 8580/34028) cmds=17 flushed=153600 px[0m
+[1;32master:~$ [m[9D[J[00:05:43.218,000] [0m<inf> aster_gfx: gfx op: CLEAR     5792 us/frame  68%  n=1[0m
+[1;32master:~$ [m[9D[J[00:05:43.218,000] [0m<inf> aster_gfx: gfx op: RECT_F    2686 us/frame  31%  n=16[0m
+[1;32master:~$ [m[9D[J[00:05:43.219,000] [0m<inf> aster_native: [app:test.p2.gfx.batched] GFXBENCH DONE mode=batched frames=128 draw_total_ms=5429 draw_max_ms=45 interval_total_ms=5537 intervals=127 gfx_calls=128 errors=0[0m
+[1;32master:~$ [m
+> aster app stats test.p2.gfx.batched
+aster app stats test.p2.gfx.batched
+id=test.p2.gfx.batched state=RUNNING
+mem: initial=524288 max=2097152 stack=16384 heap=524288 peak=55
+frames=178 fps=60 uptime=6421ms
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15912 free=33020
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster app stop test.p2.gfx.batched
+aster app stop test.p2.gfx.batched
+[00:05:46.182,000] <inf> aster_fontsd: cpfont cache: released 48528 B
+[00:05:46.183,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:05:46.194,000] <inf> aster_rt: app stopped: test.p2.gfx.batched
+ok
+aster:~$ [00:05:46.205,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:05:46.206,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15276 free=33660
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster sys mem
+[00:05:47.297,000] <inf> aster_fontsd: cpfont cache: 24px allocated 36168 B
+aster:~$ aster sys mem
+dram heap:  size=49152 peak=41764 used=15792 free=33140
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$ [00:05:47.320,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aster:~$ [00:05:47.395,000] <inf> aster_fontsd: cpfont cache: 48px allocated 57672 B
+aster:~$
+> aster app start test.p2.gfx.individual
+aster app start test.p2.gfx.individual
+[00:05:47.850,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:05:47.851,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:05:47.957,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:05:47.958,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:05:47.958,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:05:48.339,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc60 exec=0x4221fc60 size=5316
+[00:05:48.487,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:05:48.518,000] <inf> aster_native: [app:test.p2.gfx.individual] GFXBENCH mode=individual display=320x480
+[00:05:48.519,000] <inf> aster_rt: app started: test.p2.gfx.individual (GFX benchmark individual, 7 KB, AOT)
+started test.p2.gfx.individual
+aster:~$
+aster app start test.p2.gfx.individual
+[00:05:47.850,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:05:47.851,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:05:47.957,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:05:47.958,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:05:47.958,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:05:48.339,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc60 exec=0x4221fc60 size=5316
+[00:05:48.487,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:05:48.518,000] <inf> aster_native: [app:test.p2.gfx.individual] GFXBENCH mode=individual display=320x480
+[00:05:48.519,000] <inf> aster_rt: app started: test.p2.gfx.individual (GFX benchmark individual, 7 KB, AOT)
+started test.p2.gfx.individual
+aster:~$ [9D[J[00:05:49.899,000] [0m<inf> aster_gfx: gfx tim: raster=515 us flush=20826 us sum=21341 us (max 6412/34421) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:49.900,000] [0m<inf> aster_gfx: gfx op: CLEAR      372 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:49.901,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:51.273,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20830 us sum=21334 us (max 5869/33984) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:51.274,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:51.274,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:52.647,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20829 us sum=21334 us (max 5878/33932) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:52.648,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:52.648,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:54.021,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20835 us sum=21339 us (max 5830/34006) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:54.022,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:54.023,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:55.374,000] [0m<inf> aster_gfx: gfx tim: raster=417 us flush=20605 us sum=21022 us (max 5867/33982) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:05:55.375,000] [0m<inf> aster_gfx: gfx op: CLEAR      272 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:55.375,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:56.747,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20821 us sum=21324 us (max 5885/33959) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:56.748,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:56.748,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:58.121,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20829 us sum=21334 us (max 5877/33979) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:58.122,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:58.122,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:59.495,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20828 us sum=21332 us (max 5844/33957) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:05:59.496,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:05:59.496,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:00.847,000] [0m<inf> aster_gfx: gfx tim: raster=414 us flush=20610 us sum=21024 us (max 5843/33965) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:06:00.849,000] [0m<inf> aster_gfx: gfx op: CLEAR      272 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:00.849,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:02.221,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20820 us sum=21324 us (max 5861/33935) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:02.222,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:02.222,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:03.594,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20827 us sum=21329 us (max 5820/33941) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:03.595,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:03.596,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:04.968,000] [0m<inf> aster_gfx: gfx tim: raster=506 us flush=20832 us sum=21338 us (max 5875/33889) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:04.969,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:04.970,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:05.323,000] [1;33m<wrn> aster_time: SNTP ntp.aliyun.com failed: -11[0m
+[1;32master:~$ [m[9D[J[00:06:05.324,000] [1;33m<wrn> aster_time: SNTP time.cloudflare.com failed: -11[0m
+[1;32master:~$ [m[9D[J[00:06:05.325,000] [1;33m<wrn> aster_time: wall clock sync failed: -11; retrying[0m
+[1;32master:~$ [m[9D[J[00:06:06.322,000] [0m<inf> aster_gfx: gfx tim: raster=414 us flush=20614 us sum=21028 us (max 5796/33978) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:06:06.323,000] [0m<inf> aster_gfx: gfx op: CLEAR      270 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:06.323,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:07.696,000] [0m<inf> aster_gfx: gfx tim: raster=506 us flush=20822 us sum=21328 us (max 5862/33921) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:07.697,000] [0m<inf> aster_gfx: gfx op: CLEAR      364 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:07.697,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:09.069,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20866 us sum=21369 us (max 5780/33935) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:09.070,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:09.071,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:10.443,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20827 us sum=21332 us (max 5876/33946) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:10.444,000] [0m<inf> aster_gfx: gfx op: CLEAR      364 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:10.445,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:11.796,000] [0m<inf> aster_gfx: gfx tim: raster=415 us flush=20616 us sum=21031 us (max 5865/33971) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:06:11.797,000] [0m<inf> aster_gfx: gfx op: CLEAR      271 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:11.798,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:13.170,000] [0m<inf> aster_gfx: gfx tim: raster=506 us flush=20826 us sum=21332 us (max 5865/34053) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:13.171,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:13.172,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:14.543,000] [0m<inf> aster_gfx: gfx tim: raster=501 us flush=20823 us sum=21324 us (max 5791/33986) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:14.544,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:14.545,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:15.917,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20827 us sum=21332 us (max 5946/33923) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:15.918,000] [0m<inf> aster_gfx: gfx op: CLEAR      365 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:15.918,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:17.291,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20838 us sum=21341 us (max 5793/33947) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:17.292,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:17.293,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:18.645,000] [0m<inf> aster_gfx: gfx tim: raster=416 us flush=20611 us sum=21027 us (max 5865/33944) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:06:18.646,000] [0m<inf> aster_gfx: gfx op: CLEAR      272 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:18.646,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:20.018,000] [0m<inf> aster_gfx: gfx tim: raster=504 us flush=20826 us sum=21330 us (max 5853/33917) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:20.019,000] [0m<inf> aster_gfx: gfx op: CLEAR      362 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:20.020,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:21.392,000] [0m<inf> aster_gfx: gfx tim: raster=507 us flush=20828 us sum=21335 us (max 5881/33935) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:21.393,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:21.394,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:22.767,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20834 us sum=21336 us (max 5790/33982) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:22.768,000] [0m<inf> aster_gfx: gfx op: CLEAR      360 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:22.768,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:24.119,000] [0m<inf> aster_gfx: gfx tim: raster=418 us flush=20643 us sum=21061 us (max 5872/33921) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:06:24.120,000] [0m<inf> aster_gfx: gfx op: CLEAR      273 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:24.121,000] [0m<inf> aster_gfx: gfx op: RECT_F     141 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:25.493,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20825 us sum=21327 us (max 5789/33947) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:25.494,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:25.494,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:26.866,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20826 us sum=21331 us (max 5887/33908) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:26.867,000] [0m<inf> aster_gfx: gfx op: CLEAR      364 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:26.868,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:28.241,000] [0m<inf> aster_gfx: gfx tim: raster=505 us flush=20836 us sum=21341 us (max 5865/33970) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:28.242,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:28.242,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:29.594,000] [0m<inf> aster_gfx: gfx tim: raster=416 us flush=20615 us sum=21031 us (max 5871/33981) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:06:29.595,000] [0m<inf> aster_gfx: gfx op: CLEAR      272 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:29.596,000] [0m<inf> aster_gfx: gfx op: RECT_F     142 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:30.968,000] [0m<inf> aster_gfx: gfx tim: raster=503 us flush=20828 us sum=21331 us (max 5843/33950) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:30.969,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:30.969,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:32.342,000] [0m<inf> aster_gfx: gfx tim: raster=506 us flush=20830 us sum=21336 us (max 5870/33988) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:32.343,000] [0m<inf> aster_gfx: gfx op: CLEAR      363 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:32.343,000] [0m<inf> aster_gfx: gfx op: RECT_F     139 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:33.715,000] [0m<inf> aster_gfx: gfx tim: raster=502 us flush=20828 us sum=21330 us (max 5791/33985) cmds=1 flushed=12480 px[0m
+[1;32master:~$ [m[9D[J[00:06:33.716,000] [0m<inf> aster_gfx: gfx op: CLEAR      361 us/frame  72%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:33.717,000] [0m<inf> aster_gfx: gfx op: RECT_F     138 us/frame  27%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:35.069,000] [0m<inf> aster_gfx: gfx tim: raster=415 us flush=20613 us sum=21028 us (max 5873/33941) cmds=1 flushed=10128 px[0m
+[1;32master:~$ [m[9D[J[00:06:35.070,000] [0m<inf> aster_gfx: gfx op: CLEAR      272 us/frame  65%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:35.070,000] [0m<inf> aster_gfx: gfx op: RECT_F     140 us/frame  34%  n=0[0m
+[1;32master:~$ [m[9D[J[00:06:35.071,000] [0m<inf> aster_native: [app:test.p2.gfx.individual] GFXBENCH DONE mode=individual frames=128 draw_total_ms=46379 draw_max_ms=365 interval_total_ms=46179 intervals=127 gfx_calls=2176 errors=0[0m
+[1;32master:~$ [m
+> aster app stats test.p2.gfx.individual
+aster app stats test.p2.gfx.individual
+id=test.p2.gfx.individual state=RUNNING
+mem: initial=524288 max=2097152 stack=16384 heap=524288 peak=55
+frames=184 fps=60 uptime=47476ms
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15912 free=33020
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster app stop test.p2.gfx.individual
+aster app stop test.p2.gfx.individual
+[00:06:38.122,000] <inf> aster_fontsd: cpfont cache: released 48528 B
+[00:06:38.123,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:06:38.134,000] <inf> aster_rt: app stopped: test.p2.gfx.individual
+ok
+aster:~$ [00:06:38.145,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:06:38.145,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15792 free=33140
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster sys mem
+[00:06:39.237,000] <inf> aster_fontsd: cpfont cache: 24px allocated 36168 B
+aster:~$ aster sys mem
+dram heap:  size=49152 peak=41764 used=15792 free=33140
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$ [00:06:39.260,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aster:~$ [00:06:39.335,000] <inf> aster_fontsd: cpfont cache: 48px allocated 57672 B
+aster:~$
+> aster app start test.p2.gfx.batched
+aster app start test.p2.gfx.batched
+[00:06:39.790,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:06:39.790,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:06:39.896,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:06:39.897,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:06:39.898,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:06:40.278,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc00 exec=0x4221fc00 size=5240
+[00:06:40.409,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:06:40.440,000] <inf> aster_native: [app:test.p2.gfx.batched] GFXBENCH mode=batched display=320x480
+[00:06:40.441,000] <inf> aster_rt: app started: test.p2.gfx.batched (GFX benchmark batched, 7 KB, AOT)
+started test.p2.gfx.batched
+aster:~$
+aster app start test.p2.gfx.batched
+[00:06:39.790,000] <inf> aster_qpanel: qpanel: volume 0 restored
+[00:06:39.790,000] <inf> aster_flux: FLUX Rev.04: 320x480, 19 entries (15 installed)
+[00:06:39.896,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:06:39.897,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:06:39.898,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:06:40.278,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c21fc00 exec=0x4221fc00 size=5240
+[00:06:40.409,000] <inf> aster_rt: guest linear cap 96 pages (512 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:06:40.440,000] <inf> aster_native: [app:test.p2.gfx.batched] GFXBENCH mode=batched display=320x480
+[00:06:40.441,000] <inf> aster_rt: app started: test.p2.gfx.batched (GFX benchmark batched, 7 KB, AOT)
+started test.p2.gfx.batched
+aster:~$ [9D[J[00:06:43.240,000] [0m<inf> aster_gfx: gfx tim: raster=8501 us flush=33873 us sum=42374 us (max 9112/34464) cmds=17 flushed=153600 px[0m
+[1;32master:~$ [m[9D[J[00:06:43.241,000] [0m<inf> aster_gfx: gfx op: CLEAR     5805 us/frame  68%  n=1[0m
+[1;32master:~$ [m[9D[J[00:06:43.241,000] [0m<inf> aster_gfx: gfx op: RECT_F    2687 us/frame  31%  n=16[0m
+[1;32master:~$ [m[9D[J[00:06:46.032,000] [0m<inf> aster_gfx: gfx tim: raster=8485 us flush=33875 us sum=42360 us (max 8556/34013) cmds=17 flushed=153600 px[0m
+[1;32master:~$ [m[9D[J[00:06:46.033,000] [0m<inf> aster_gfx: gfx op: CLEAR     5790 us/frame  68%  n=1[0m
+[1;32master:~$ [m[9D[J[00:06:46.034,000] [0m<inf> aster_gfx: gfx op: RECT_F    2686 us/frame  31%  n=16[0m
+[1;32master:~$ [m[9D[J[00:06:46.035,000] [0m<inf> aster_native: [app:test.p2.gfx.batched] GFXBENCH DONE mode=batched frames=128 draw_total_ms=5424 draw_max_ms=45 interval_total_ms=5540 intervals=127 gfx_calls=128 errors=0[0m
+[1;32master:~$ [m
+> aster app stats test.p2.gfx.batched
+aster app stats test.p2.gfx.batched
+id=test.p2.gfx.batched state=RUNNING
+mem: initial=524288 max=2097152 stack=16384 heap=524288 peak=55
+frames=178 fps=60 uptime=6423ms
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15912 free=33020
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster app stop test.p2.gfx.batched
+aster app stop test.p2.gfx.batched
+[00:06:48.995,000] <inf> aster_fontsd: cpfont cache: released 48528 B
+[00:06:48.996,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:06:49.007,000] <inf> aster_rt: app stopped: test.p2.gfx.batched
+ok
+aster:~$ [00:06:49.017,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:06:49.018,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=41764 used=15792 free=33140
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$
+> aster app uninstall test.p2.gfx.individual
+aster app uninstall test.p2.gfx.individual
+[00:06:50.125,000] <inf> aster_fontsd: cpfont cache: 24px allocated 36168 B
+[00:06:50.576,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+[00:06:50.697,000] <inf> aster_app_mgr: uninstalled test.p2.gfx.individual
+uninstalled
+aster:~$
+> aster fs rm /SD:/test.p2.gfx.individual.ast
+aster fs rm /SD:/test.p2.gfx.individual.ast
+removed
+aster:~$
+> aster app uninstall test.p2.gfx.batched
+aster app uninstall test.p2.gfx.batched
+[00:06:51.875,000] <inf> aster_app_mgr: uninstalled test.p2.gfx.batched
+uninstalled
+aster:~$
+> aster fs rm /SD:/test.p2.gfx.batched.ast
+aster fs rm /SD:/test.p2.gfx.batched.ast
+removed
+aster:~$

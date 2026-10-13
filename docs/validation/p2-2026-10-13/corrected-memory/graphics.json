@@ -1,0 +1,387 @@
+{
+  "package_sha256": {
+    "individual": "cab6192490fd9b1e66e18706a1c31b4b21593bce4b545f29c37bea294b2e8217",
+    "batched": "e82cdfa5fdafe343810635d222439256f915302778869f1d44a14d9315e3640b"
+  },
+  "config_sha256": "952563d85b4159676798df213130ebfc11bb3ae1f0cd8270a3271c79dcbbb284",
+  "firmware_sha256": "ad0c331cb8496d1a60adc7308726186d700db294e1d3a6ec5656c2c72a43848d",
+  "scenario": "RGB565 full clear + sixteen fixed rectangles; ordinary surface; 128 frames",
+  "runs": [
+    {
+      "run": 0,
+      "mode": "individual",
+      "frames": 128,
+      "draw_mean_ms": 362.515625,
+      "draw_max_ms": 365,
+      "interval_mean_ms": 363.748031496063,
+      "gfx_calls": 2176,
+      "errors": 0,
+      "screenshot_rgb565_sha256": "28ca5ff300660f52f880e73294cdefc3ef3f290f4bb63688f6b36aaa84fc5291",
+      "resolution": [
+        320,
+        480
+      ],
+      "native_per_call_samples": [
+        [
+          513,
+          20837,
+          21350,
+          6409,
+          34384,
+          1,
+          12480
+        ],
+        [
+          505,
+          20827,
+          21332,
+          5890,
+          33959,
+          1,
+          12480
+        ],
+        [
+          504,
+          20833,
+          21337,
+          5806,
+          33984,
+          1,
+          12480
+        ],
+        [
+          505,
+          20832,
+          21337,
+          5873,
+          34064,
+          1,
+          12480
+        ],
+        [
+          416,
+          20616,
+          21032,
+          5810,
+          34020,
+          1,
+          10128
+        ],
+        [
+          507,
+          20826,
+          21333,
+          5882,
+          33972,
+          1,
+          12480
+        ],
+        [
+          503,
+          20835,
+          21338,
+          5841,
+          33995,
+          1,
+          12480
+        ],
+        [
+          506,
+          20832,
+          21338,
+          5893,
+          33995,
+          1,
+          12480
+        ],
+        [
+          417,
+          20608,
+          21025,
+          5869,
+          34063,
+          1,
+          10128
+        ],
+        [
+          506,
+          20826,
+          21332,
+          5883,
+          33989,
+          1,
+          12480
+        ],
+        [
+          506,
+          20835,
+          21341,
+          5873,
+          33990,
+          1,
+          12480
+        ],
+        [
+          504,
+          20837,
+          21341,
+          5794,
+          34111,
+          1,
+          12480
+        ],
+        [
+          416,
+          20618,
+          21034,
+          5874,
+          34017,
+          1,
+          10128
+        ],
+        [
+          506,
+          20830,
+          21336,
+          5873,
+          34034,
+          1,
+          12480
+        ],
+        [
+          506,
+          20830,
+          21336,
+          5864,
+          34007,
+          1,
+          12480
+        ],
+        [
+          504,
+          20835,
+          21339,
+          5834,
+          33932,
+          1,
+          12480
+        ],
+        [
+          416,
+          20615,
+          21031,
+          5864,
+          34076,
+          1,
+          10128
+        ],
+        [
+          503,
+          20831,
+          21334,
+          5822,
+          34013,
+          1,
+          12480
+        ],
+        [
+          506,
+          20827,
+          21333,
+          5860,
+          34055,
+          1,
+          12480
+        ],
+        [
+          502,
+          20843,
+          21345,
+          5787,
+          34091,
+          1,
+          12480
+        ],
+        [
+          506,
+          20832,
+          21338,
+          5879,
+          33936,
+          1,
+          12480
+        ],
+        [
+          415,
+          20613,
+          21028,
+          5795,
+          34105,
+          1,
+          10128
+        ],
+        [
+          506,
+          20829,
+          21335,
+          5870,
+          33986,
+          1,
+          12480
+        ],
+        [
+          506,
+          20834,
+          21340,
+          5869,
+          34018,
+          1,
+          12480
+        ],
+        [
+          505,
+          20839,
+          21344,
+          5802,
+          34047,
+          1,
+          12480
+        ],
+        [
+          417,
+          20651,
+          21068,
+          5884,
+          33938,
+          1,
+          10128
+        ],
+        [
+          502,
+          20829,
+          21331,
+          5788,
+          34004,
+          1,
+          12480
+        ],
+        [
+          507,
+          20829,
+          21336,
+          5868,
+          34028,
+          1,
+          12480
+        ],
+        [
+          504,
+          20834,
+          21338,
+          5798,
+          33989,
+          1,
+          12480
+        ],
+        [
+          415,
+          20618,
+          21033,
+          5866,
+          34138,
+          1,
+          10128
+        ],
+        [
+          503,
+          20830,
+          21333,
+          5789,
+          34043,
+          1,
+          12480
+        ],
+        [
+          506,
+          20830,
+          21336,
+          5867,
+          34015,
+          1,
+          12480
+        ],
+        [
+          503,
+          20844,
+          21347,
+          5787,
+          34058,
+          1,
+          12480
+        ],
+        [
+          417,
+          20616,
+          21033,
+          5864,
+          33963,
+          1,
+          10128
+        ]
+      ],
+      "memory_before": "aster sys mem\r\ndram heap:  size=49152 peak=41764 used=31664 free=17268\r\n            (AOT text is a PSRAM alloc; this heap is DMA/stacks)\r\next ram:    8388608 total, wamr_cap=7864320\r\npsram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)\r\next heap:   largest free block >= 6291456 B\r\next heap:   8 x 150 KB blocks fit at once\r\nstacks:     see `kernel thread stacks`\r\nstatic dram: build-time; `west build` prints dram0_0_seg\r\naster:~$ ",
+      "memory_active": "aster sys mem\r\ndram heap:  size=49152 peak=41764 used=15912 free=33020\r\n            (AOT text is a PSRAM alloc; this heap is DMA/stacks)\r\next ram:    8388608 total, wamr_cap=7864320\r\npsram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)\r\next heap:   largest free block >= 6291456 B\r\next heap:   8 x 150 KB blocks fit at once\r\nstacks:     see `kernel thread stacks`\r\nstatic dram: build-time; `west build` prints dram0_0_seg\r\naster:~$ ",
+      "memory_after": "aster sys mem\r\ndram heap:  size=49152 peak=41764 used=15276 free=33660\r\n            (AOT text is a PSRAM alloc; this heap is DMA/stacks)\r\next ram:    8388608 total, wamr_cap=7864320\r\npsram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)\r\next heap:   largest free block >= 6291456 B\r\next heap:   8 x 150 KB blocks fit at once\r\nstacks:     see `kernel thread stacks`\r\nstatic dram: build-time; `west build` prints dram0_0_seg\r\naster:~$ ",
+      "app_stats": "aster app stats test.p2.gfx.individual\r\nid=test.p2.gfx.individual state=RUNNING\r\nmem: initial=524288 max=2097152 stack=16384 heap=524288 peak=544768\r\nframes=185 fps=60 uptime=47507ms\r\naster:~$ ",
+      "steady_frame_abi_calls": 2432,
+      "steady_frame_abi_scope": "gfx_exec + two time_now_ms per frame; excludes init/log/stop",
+      "guest_linear_peak_bytes": 544768
+    },
+    {
+      "run": 0,
+      "mode": "batched",
+      "frames": 128,
+      "draw_mean_ms": 42.484375,
+      "draw_max_ms": 45,
+      "interval_mean_ms": 43.67716535433071,
+      "gfx_calls": 128,
+      "errors": 0,
+      "screenshot_rgb565_sha256": "28ca5ff300660f52f880e73294cdefc3ef3f290f4bb63688f6b36aaa84fc5291",
+      "resolution": [
+        320,
+        480
+      ],
+      "native_per_call_samples": [
+        [
+          8513,
+          33917,
+          42430,
+          9102,
+          34420,
+          17,
+          153600
+        ],
+        [
+          8499,
+          33902,
+          42401,
+          8577,
+          34046,
+          17,
+          153600
+        ]
+      ],
+      "memory_before": "[00:01:41.124,000] <inf> aster_fontsd: cpfont cache: 24px allocated 36168 B\r\naster:~$ aster sys mem\r\ndram heap:  size=49152 peak=41764 used=15792 free=33140\r\n            (AOT text is a PSRAM alloc; this heap is DMA/stacks)\r\next ram:    8388608 total, wamr_cap=7864320\r\npsram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)\r\next heap:   largest free block >= 6291456 B\r\next heap:   8 x 150 KB blocks fit at once\r\nstacks:     see `kernel thread stacks`\r\nstatic dram: build-time; `west build` prints dram0_0_seg\r\naster:~$ [00:01:41.148,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B\r\naster:~$ [00:01:41.222,000] <inf> aster_fontsd: cpfont cache: 48px allocated 57672 B\r\naster:~$ ",
+      "memory_active": "aster sys mem\r\ndram heap:  size=49152 peak=41764 used=15912 free=33020\r\n            (AOT text is a PSRAM alloc; this heap is DMA/stacks)\r\next ram:    8388608 total, wamr_cap=7864320\r\npsram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)\r\next heap:   largest free block >= 6291456 B\r\next heap:   8 x 150 KB blocks fit at once\r\nstacks:     see `kernel thread stacks`\r\nstatic dram: build-time; `west build` prints dram0_0_seg\r\naster:~$ ",
+      "memory_after": "aster sys mem\r\ndram heap:  size=49152 peak=41764 used=15792 free=33140\r\n            (AOT text is a PSRAM alloc; this heap is DMA/stacks)\r\next ram:    8388608 total, wamr_cap=7864320\r\npsram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)\r\next heap:   largest free block >= 6291456 B\r\next heap:   8 x 150 KB blocks fit at once\r\nstacks:     see `kernel thread stacks`\r\nstatic dram: build-time; `west build` prints dram0_0_seg\r\naster:~$ ",
+      "app_stats": "aster app stats test.p2.gfx.batched\r\nid=test.p2.gfx.batched state=RUNNING\r\nmem: initial=524288 max=2097152 stack=16384 heap=524288 peak=544768\r\nframes=178 fps=60 uptime=6427ms\r\naster:~$ ",
+      "steady_frame_abi_calls": 384,
+      "steady_frame_abi_scope": "gfx_exec + two time_now_ms per frame; excludes init/log/stop",
+      "guest_linear_peak_bytes": 544768
+    }
+  ],
+  "device": "aster sys info\r\nASTER 0.1.0\r\nplatform=zephyr board=aster.esp32s3.waveshare35b soc=esp32s3 arch=xtensa abi=3.7.0\r\ncpu=240000000 hz cores=2\r\nram int=327680 ext=8388608 flash=16777216\r\nsd_mounted=yes apps=13\r\nsigpolicy=allow-unsigned\r\naster:~$ ",
+  "identical_pixels": true,
+  "test_apps_removed": true,
+  "status": "passed"
+}

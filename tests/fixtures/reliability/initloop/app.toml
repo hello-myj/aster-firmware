@@ -1,0 +1,19 @@
+[app]
+id="test.p0.initloop"
+name="P0 initloop"
+version="2.0.0"
+abi="3.7.0"
+abi_min="3.7"
+aot=true
+orientation="portrait"
+initial_memory=262144
+max_memory=1048576
+heap=262144
+stack=16384
+sources=["src/main.c"]
+assets=["version.txt","fx.wav"]
+icon="icon.bin"
+permissions=["fs"]
+requires=["display"]
+[sdk]
+target="xtensa"

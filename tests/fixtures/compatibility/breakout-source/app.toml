@@ -1,0 +1,22 @@
+[app]
+id = "com.example.breakout"
+name = "打砖块"
+description = "左右拖动挡板，接球消除砖块"
+version = "1.0.3"
+abi = "3.7.0"
+abi_min = "3.7"
+aot = true
+optimize = "Os"
+orientation = "portrait"
+category = "game"
+stack = 16384
+initial_memory = 2097152
+max_memory = 4194304
+heap = 1048576
+requires = ["display", "touch"]
+permissions = ["kv"]
+icon = "icon.bin"
+sources = ["src/main.c"]
+
+[sdk]
+target = "xtensa"

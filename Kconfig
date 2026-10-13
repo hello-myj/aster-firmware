@@ -29,6 +29,31 @@ config ASTER_APP_MAX
 	range 1 4
 	depends on ASTER_WAMR
 
+config ASTER_APP_WATCHDOG
+	bool "Recover from expired APP callbacks by resetting the system"
+	default y
+	select REBOOT
+	help
+	  A separate higher-priority thread monitors guest callback deadlines.
+	  Ordinary Xtensa AOT loops have no reliable asynchronous interruption
+	  points: an expired callback recovers through whole-system reset.
+	  This is recovery policy, not a strong untrusted-APP termination guarantee.
+
+config ASTER_APP_INIT_TIMEOUT_MS
+	int "APP init/start callback deadline (ms)"
+	default 15000
+	range 100 60000
+
+config ASTER_APP_EVENT_TIMEOUT_MS
+	int "APP event/pause/resume callback deadline (ms)"
+	default 5000
+	range 100 60000
+
+config ASTER_APP_STOP_TIMEOUT_MS
+	int "APP stop/destroy callback deadline (ms)"
+	default 3000
+	range 100 60000
+
 config ASTER_APP_STACK_SIZE
 	int "Per-app host thread stack size"
 	default 32768
@@ -695,6 +720,15 @@ config ASTER_LVGL_MEM_KB
 	range 64 2048
 
 endmenu
+
+config ASTER_PKG_FAULT_INJECTION
+	bool "Diagnostic package-install fault injection (test.p0.* only)"
+	select REBOOT
+	default n
+	help
+	  Temporary board verification only. Allows one-shot I/O failure or
+	  reset injection while installing explicitly named test.p0.* APPs.
+	  Keep disabled in normal firmware releases.
 
 menu "Package security"
 

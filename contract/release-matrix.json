@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "sdk": {
+    "repository": "hello-myj/aster-sdk",
+    "revision": "b7b90704bed332e9177119ef847279297557619e"
+  },
+  "simulator": {
+    "repository": "hello-myj/aster-sim",
+    "revision": "e14ac57471b7940e2a8bade858c15adb321b9a10"
+  },
+  "toolchain_profile": "esp32s3-wamr-2.4.3-v6",
+  "toolchain_catalog_sha256": "3ef0c0870e7b37d5b87905a51ede18bc010ab8eebdee4ab0b9bd7b332988be7a",
+  "required_packages": {
+    "ASTER_SIM_2048_AST": "aster.game.2048.ast",
+    "ASTER_SIM_IMUCUBE_AST": "aster.imucube.ast",
+    "ASTER_SIM_BREAKOUT_AST": "com.example.breakout.ast"
+  }
+}

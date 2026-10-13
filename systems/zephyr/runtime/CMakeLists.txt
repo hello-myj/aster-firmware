@@ -42,6 +42,7 @@ set(WAMR_INC
 
 target_sources(app PRIVATE
   aster_runtime.c
+  aster_watchdog.c
   aster_native.c
   ${WAMR_RUNTIME_LIB_SOURCE}
 )

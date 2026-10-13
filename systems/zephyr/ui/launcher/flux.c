@@ -391,10 +391,11 @@ static void release_icon(int i)
   aster_psram_free(ribbons[i].data);ribbons[i].data=NULL;
  }
 }
-static bool load_icon(int i,const char *id)
+static bool load_icon_locked(int i,const char *id)
 {
  char dir[192],path[224];struct fs_dirent st;struct fs_file_t f;
- aster_storage_app_dir(dir,sizeof(dir),id);snprintf(path,sizeof(path),"%s/icon.bin",dir);
+ if(aster_storage_app_code_dir(dir,sizeof(dir),id))return false;
+ snprintf(path,sizeof(path),"%s/icon.bin",dir);
  if(fs_stat(path,&st) || st.size<ASTER_ICON_HDR_SIZE || st.size>65536) return false;
  uint8_t *data=aster_psram_alloc(st.size);if(!data) return false;
  fs_file_t_init(&f);int err=fs_open(&f,path,FS_O_READ);
@@ -411,6 +412,16 @@ static bool load_icon(int i,const char *id)
  ribbons[i].icon=(lv_image_dsc_t){.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=format,.w=h.w,.h=h.h,.stride=h.w*(h.cf==ASTER_ICON_CF_A8?1:2)},.data_size=h.data_size,.data=data+ASTER_ICON_HDR_SIZE};
  return true;
 }
+static bool load_icon(int i,const char *id)
+{
+ /* Keep an icon read on the generation selected by the registry, including
+  * the short interval in which an installer publishes and rescans. */
+ aster_app_mgr_files_lock();
+ bool loaded=load_icon_locked(i,id);
+ aster_app_mgr_files_unlock();
+ return loaded;
+}
+
 static void bind_ribbon(int slot,int idx)
 {
  bool same=ribbons[slot].entry==idx;

@@ -3,7 +3,9 @@
 #include "aster_app_mgr.h"
 #include "aster_perms.h"
 #include "aster_storage.h"
+#include "aster_versions.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -12,6 +14,10 @@
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(aster_app_mgr, LOG_LEVEL_INF);
+
+static K_MUTEX_DEFINE(files_lock);
+void aster_app_mgr_files_lock(void) { k_mutex_lock(&files_lock, K_FOREVER); }
+void aster_app_mgr_files_unlock(void) { k_mutex_unlock(&files_lock); }
 
 static aster_app_rec_t recs[ASTER_APP_MAX_RECS] __attribute__((section(".ext_ram.bss.app_recs")));
 static int nrecs;
@@ -50,35 +56,59 @@ static aster_app_rec_t *find_mut(const char *id)
 	return NULL;
 }
 
+bool aster_app_mgr_is_live(const char *id)
+{
+	k_mutex_lock(&reg_lock, K_FOREVER);
+	bool live = false;
+	for (int i = 0; i < nrecs; i++) {
+		if ((!id || strcmp(recs[i].id, id) == 0) &&
+		    (recs[i].state == ASTER_APP_STATE_RUNNING || recs[i].state == ASTER_APP_STATE_PAUSED)) {
+			live = true;
+			break;
+		}
+	}
+	k_mutex_unlock(&reg_lock);
+	return live;
+}
+
+bool aster_app_mgr_code_slot(const char *id, int *slot)
+{
+	k_mutex_lock(&reg_lock, K_FOREVER);
+	aster_app_rec_t *r = find_mut(id);
+	bool found = r != NULL;
+	if (found) { *slot = r->code_slot; }
+	k_mutex_unlock(&reg_lock);
+	return found;
+}
+
 int aster_app_mgr_init(void)
 {
 	nrecs = 0;
 	return aster_app_mgr_scan();
 }
 
-static int read_manifest_for(const char *id, char *buf, size_t n)
+static int read_manifest_at(const char *dir, char *buf, size_t n)
 {
 	char path[160];
-	snprintf(path, sizeof(path), "%s/%s/manifest.json", ASTER_APPS_DIR, id);
-
 	struct fs_dirent st;
+	if (snprintf(path, sizeof(path), "%s/manifest.json", dir) >= (int)sizeof(path)) { return -1; }
 	int err = fs_stat(path, &st);
-	if (err || st.size >= n) {
-		return -1;
-	}
+	if (err || st.size == 0 || st.size >= n) { return -1; }
 	struct fs_file_t f;
 	fs_file_t_init(&f);
 	err = fs_open(&f, path, FS_O_READ);
-	if (err) {
-		return -1;
-	}
+	if (err) { return -1; }
 	err = fs_read(&f, buf, st.size);
-	fs_close(&f);
-	if (err < 0 || (size_t)err >= n) {
-		return -1;
-	}
+	int close = fs_close(&f);
+	if (err < 0 || (size_t)err != st.size || close) { return -1; }
 	buf[err] = 0;
 	return 0;
+}
+static int read_manifest_for(const char *id, char *buf, size_t n)
+{
+	char dir[128];
+	int err = aster_storage_app_code_dir(dir, sizeof(dir), id);
+	return err ? -1 : read_manifest_at(dir, buf, n);
 }
 
 /* Record fields the runtime owns: it is the only writer of state /
@@ -92,6 +122,7 @@ struct live_snap {
 	uint32_t        start_count;
 	uint64_t        started_at;
 	uint32_t        peak_mem;
+	int             code_slot;
 };
 
 static void snap_take(struct live_snap *s, const aster_app_rec_t *r)
@@ -109,6 +140,7 @@ static void snap_take(struct live_snap *s, const aster_app_rec_t *r)
 	s->start_count = r->start_count;
 	s->started_at = r->started_at;
 	s->peak_mem = r->peak_mem;
+	s->code_slot = r->code_slot;
 }
 
 static void snap_apply(const struct live_snap *s, aster_app_rec_t *r)
@@ -118,10 +150,12 @@ static void snap_apply(const struct live_snap *s, aster_app_rec_t *r)
 	r->start_count = s->start_count;
 	r->started_at = s->started_at;
 	r->peak_mem = s->peak_mem;
+	r->code_slot = s->code_slot;
 }
 
 int aster_app_mgr_scan(void)
 {
+	aster_app_mgr_files_lock();
 	struct fs_dir_t dir;
 	fs_dir_t_init(&dir);
 
@@ -132,6 +166,7 @@ int aster_app_mgr_scan(void)
 		/* keep the previous list: a transient FS error must not make
 		 * the running app vanish from the registry */
 		k_mutex_unlock(&reg_lock);
+		aster_app_mgr_files_unlock();
 		return err;
 	}
 
@@ -164,7 +199,18 @@ int aster_app_mgr_scan(void)
 		if (ent.type != FS_DIR_ENTRY_DIR) {
 			continue;
 		}
-		if (read_manifest_for(ent.name, jbuf, sizeof(jbuf)) != 0) {
+		char base[128], code_dir[128];
+		struct aster_version selected;
+		aster_storage_app_dir(base, sizeof(base), ent.name);
+		int select_error;
+		if (have_snap && strcmp(ent.name, snap.id) == 0) {
+			selected.slot = snap.code_slot;
+			select_error = 0;
+		} else {
+			select_error = aster_versions_find(base, &selected);
+		}
+		if (select_error || aster_versions_dir(code_dir, sizeof(code_dir), base, selected.slot) ||
+		    read_manifest_at(code_dir, jbuf, sizeof(jbuf)) != 0) {
 			/* Not an app as far as we can tell -- but "unreadable
 			 * manifest" and "was never an app" are different things, and
 			 * the install path is the only writer. A manifest too large
@@ -178,6 +224,7 @@ int aster_app_mgr_scan(void)
 		aster_app_rec_t *r = &recs[nrecs++];
 		memset(r, 0, sizeof(*r));
 		r->state = ASTER_APP_STATE_STOPPED;
+		r->code_slot = selected.slot;
 		/* Explicit, because 0 is ASTER_ORIENT_PORTRAIT: the memset above
 		 * would otherwise make every app in the list ask for portrait. */
 		r->want_orientation = ASTER_ORIENT_ANY;
@@ -217,11 +264,11 @@ int aster_app_mgr_scan(void)
 		char path[192];
 		int have = 0;
 		if (r->has_aot && IS_ENABLED(CONFIG_ASTER_AOT)) {
-			snprintf(path, sizeof(path), "%s/%s/app.aot", ASTER_APPS_DIR, r->id);
+			snprintf(path, sizeof(path), "%s/app.aot", code_dir);
 			have = fs_stat(path, &ent) == 0;
 		}
 		if (!have) {
-			snprintf(path, sizeof(path), "%s/%s/app.wasm", ASTER_APPS_DIR, r->id);
+			snprintf(path, sizeof(path), "%s/app.wasm", code_dir);
 			have = fs_stat(path, &ent) == 0;
 			if (have) {
 				r->has_aot = false; /* fall back to wasm image */
@@ -241,7 +288,7 @@ int aster_app_mgr_scan(void)
 					 sizeof(orient)) >= 0) {
 				r->want_orientation = aster_pkg_norm_orientation(orient);
 			}
-			snprintf(path, sizeof(path), "%s/%s/icon.bin", ASTER_APPS_DIR, r->id);
+			snprintf(path, sizeof(path), "%s/icon.bin", code_dir);
 			r->has_icon = fs_stat(path, &st) == 0 &&
 				      st.type == FS_DIR_ENTRY_FILE && st.size >= 16;
 		}
@@ -258,6 +305,8 @@ int aster_app_mgr_scan(void)
 	int n = nrecs;
 	void (*cb)(void) = s_change_cb;
 	k_mutex_unlock(&reg_lock);
+
+	aster_app_mgr_files_unlock();
 
 	/* fire the hook unlocked: it must not re-enter (see the header) and a
 	 * lock held here would make any such call a self-deadlock */
@@ -298,10 +347,19 @@ const aster_app_rec_t *aster_app_mgr_find(const char *id)
 
 int aster_app_mgr_install(const char *src_path)
 {
+	/* Keep version selection and the cached registry metadata coherent with
+	 * launch. A failed commit may still leave a complete, readable new record
+	 * (e.g. close failed after write), so refresh on failure as well. */
+	aster_app_mgr_files_lock();
 	int err = aster_pkg_install_file(src_path);
-	if (err == ASTER_OK) {
-		aster_app_mgr_scan();
+	if (!aster_app_mgr_is_live(NULL)) {
+		int scanned = aster_app_mgr_scan();
+		if (scanned < 0) {
+			LOG_ERR("install: stage=commit operation=registry-scan result=%d", scanned);
+			if (!err) { err = ASTER_EIO; }
+		}
 	}
+	aster_app_mgr_files_unlock();
 	return err;
 }
 
@@ -335,7 +393,7 @@ static int rmrf(const char *path)
 	return fs_unlink(path);
 }
 
-int aster_app_mgr_uninstall(const char *id)
+static int app_uninstall_locked(const char *id)
 {
 	k_mutex_lock(&reg_lock, K_FOREVER);
 
@@ -384,6 +442,14 @@ int aster_app_mgr_uninstall(const char *id)
 		cb();
 	}
 	return ASTER_OK;
+}
+
+int aster_app_mgr_uninstall(const char *id)
+{
+	aster_app_mgr_files_lock();
+	int err = app_uninstall_locked(id);
+	aster_app_mgr_files_unlock();
+	return err;
 }
 
 int aster_app_mgr_read_manifest(const char *id, aster_manifest_t *m)

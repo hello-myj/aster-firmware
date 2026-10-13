@@ -1,0 +1,28 @@
+{
+  "firmware_sha256": "a17c3e245b8212eae04c9a6a1edcce42c325c5cd28aecabc7f996142d464e293",
+  "cases": [
+    {
+      "id": "aster.hello",
+      "sha256": "a8cdd949783a7c5073e4e14d8056b9650d9c4d220c8af7aac291a82caaf2d1d4",
+      "aot_started": true,
+      "state": "aster app state aster.hello\r\naster.hello: STOPPED (err=0 starts=1)\r\naster:~$ "
+    },
+    {
+      "id": "aster.game.2048",
+      "sha256": "38339e30e1ec726475f1acdbacf82acf2595399528a022b2dbf17e8e05860d58",
+      "aot_started": true,
+      "state": "aster app state aster.game.2048\r\naster.game.2048: RUNNING (err=0 starts=1)\r\naster:~$ "
+    },
+    {
+      "id": "test.quickstart",
+      "sha256": "1f938432d28a9af5856a68021f8ec19e171edc6deb12b72b5c69de2ce4d5ff86",
+      "aot_started": true,
+      "state": "aster app state test.quickstart\r\ntest.quickstart: RUNNING (err=0 starts=1)\r\naster:~$ "
+    }
+  ],
+  "device": "aster sys info\r\nASTER 0.1.0\r\nplatform=zephyr board=aster.esp32s3.waveshare35b soc=esp32s3 arch=xtensa abi=3.7.0\r\ncpu=240000000 hz cores=2\r\nram int=327680 ext=8388608 flash=16777216\r\nsd_mounted=yes apps=13\r\nsigpolicy=allow-unsigned\r\naster:~$ ",
+  "test_app_removed": true,
+  "original_app_listing": "aster app list\r\nID                           NAME             VER      STATE\r\naster.apitest                API Test         1.0.0    STOPPED [AOT]\r\naster.chess                  Chess            1.0.1    STOPPED [AOT]\r\naster.gallery                \u76f8\u518c           1.0.1    STOPPED [AOT]\r\naster.game.2048              2048             1.3.0    STOPPED [AOT]\r\naster.gfxshow                Gfx Show         0.1.0    STOPPED [AOT]\r\naster.hello                  Hello Aster      1.0.0    STOPPED [AOT]\r\naster.imucube                IMU \u7acb\u65b9\u4f53    1.0.0    STOPPED [AOT]\r\naster.permdeny               Perm Deny Test   1.0.0    STOPPED [AOT]\r\naster.player                 Player           1.0.0    STOPPED [AOT]\r\naster.reader                 Reader           1.0.0    STOPPED [AOT]\r\naster.snake                  Snake            1.2.1    STOPPED [AOT]\r\naster.trap                   Trap Test        1.0.0    STOPPED [AOT]\r\ncom.example.breakout         \u6253\u7816\u5757        1.0.3    STOPPED [AOT]\r\naster:~$ ",
+  "status": "passed",
+  "firmware_hash_source": "Last image flashed and verified by this session; not read back during P1 test"
+}

@@ -1,0 +1,91 @@
+{
+  "type": "done",
+  "code": 0,
+  "frames": 22,
+  "presents": 2,
+  "diagnostics": {
+    "appId": "aster.game.2048",
+    "appVersion": "1.3.0",
+    "abiTarget": "3.4.0",
+    "phase": "aster_app_event",
+    "trap": null,
+    "frame": 22,
+    "paused": false,
+    "virtualMs": 782,
+    "presents": 2,
+    "guestBytes": 262144,
+    "guestPeakBytes": 262144,
+    "hostAllocatedBytes": 64,
+    "hostAllocationPeakBytes": 64,
+    "handles": {
+      "surface": 1,
+      "effect": 4
+    },
+    "handlePeak": 5,
+    "abiCalls": {
+      "aster_app_set_framerate": 1,
+      "aster_surface_create": 1,
+      "aster_surface_acquire": 1,
+      "aster_time_now_ms": 2,
+      "aster_kv_get": 3,
+      "aster_system_has_feature": 1,
+      "strlen": 27,
+      "aster_audio_effect_load": 4,
+      "aster_audio_start_file": 1,
+      "aster_log": 2,
+      "aster_audio_get_state": 22,
+      "aster_gfx_text_w": 9,
+      "aster_gfx_exec": 2,
+      "strcmp": 1,
+      "aster_audio_effect_play": 1,
+      "aster_audio_pause": 1,
+      "aster_audio_resume": 1
+    },
+    "frameTiming": {
+      "samples": 22,
+      "meanMs": 0.6455835909090876,
+      "maxMs": 7.999312000000032,
+      "p95RecentMs": 4.966950999999995,
+      "recentSamples": 22
+    }
+  },
+  "state": {
+    "memorySha256": "7fbeadc5c79a8bdfe3579cb686fd1b7bb4b1c9984c24466b44cf506d207e58e4",
+    "pixelSha256": "93da14c00601dfefa262f3c6924e26e019878b8bdcf889a52d8a727f411f1c0e",
+    "storage": [],
+    "frame": 22,
+    "presents": 2,
+    "exitCode": null,
+    "paused": false,
+    "virtualMs": 782
+  },
+  "replay": {
+    "steps": 24,
+    "seed": 2048,
+    "stepMs": 34
+  },
+  "simulator": "0.2.0",
+  "sdk": "1b7a944cc01802ab6621cd4e3459d3638dfc9c09",
+  "abi": "3.7.0",
+  "nodeVersion": "v22.20.0",
+  "platform": "linux",
+  "arch": "x64",
+  "dependencyLockSha256": "ee94b2ba5e63f6b0537de41725af4c3686b337bfa570bab671a299bfe444306c",
+  "sources": {
+    "cli.js": "db4dd95c5886c1c9aec1b3f947b795e5945b6bec7ab12022fe162f1f8ec3d327",
+    "graphics.js": "16e3b2126745025c02257329e2eeaf1c68b18a78422832e52aa99b26b93910ec",
+    "host.js": "5e24712898b5852907a8564a9fd737e194cf4e2e7172fc3ffca7fc2780a20aae",
+    "libc.js": "b65b81c6cd9aa470447f7788a4f362572a84382491502cc549ebda9cc96c8e00",
+    "memory-fs.js": "22a7364f9a8ac152f16ac99362cb529caf996a9644f05688e09ef6a002efcc8d",
+    "package.js": "f1682e6aa844b1c63c1e44f1c790145f5a370488a485de830e780e90da844e61",
+    "peripherals.js": "3180082c553370f2e1a28301f3196637ea6260dfda5c772c0286e06afe13033a",
+    "replay.js": "472e691972395c31a1560f978b8021e6c4882b711d0b52d1ea9ca5a73c202b00",
+    "storage.js": "ba627f56adf0ced7d8fb8a233a64381cb1fc9d696cbc5e14f087e9d3ebcb608d",
+    "worker.js": "fef4c91ebb1a2304ce35bb0b53d4d20e09353a4c36030c8ecd346ed1865e2387"
+  },
+  "packages": {
+    "/home/myj/zephyrproject/aster/aster-sdk/dist/xtensa/aster.game.2048.ast": "38339e30e1ec726475f1acdbacf82acf2595399528a022b2dbf17e8e05860d58"
+  },
+  "scenarioSha256": "9012f7200abec6be71e2134e58188ee9b8ccd13c23a4b6948a8be0a3bb3fb506",
+  "peripheralInputs": {}
+}

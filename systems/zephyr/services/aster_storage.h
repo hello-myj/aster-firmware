@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: MIT
  * Storage: SD mount + ASTER directory conventions (design doc sec.74).
  *
- * /SD:/aster/apps/<id>/package.ast|app.wasm|app.aot|manifest.json|data|assets
+ * /SD:/aster/apps/<id>/{data,cache,.v0,.v1,.active0,.active1}
+ * Legacy flat code/assets are still readable. See docs/package-installation.md.
  * /SD:/aster/install/   (drop directory for .ast files)
  * /SD:/aster/system/kv  (per-app kv files: <id>.<key>)
  */
@@ -25,8 +26,11 @@ int  aster_storage_init(void);      /* mount FAT, create dirs */
 bool aster_storage_mounted(void);
 /* /SD:/aster/apps/<id> */
 void aster_storage_app_dir(char *buf, size_t n, const char *id);
+/* Selected immutable code/assets directory (legacy root or .v0/.v1). */
+int aster_storage_app_code_dir(char *buf, size_t n, const char *id);
 /* sandbox path mapping:
- *   /data /cache /assets → /SD:/aster/apps/<id>/…
+ *   /data /cache → stable /SD:/aster/apps/<id>/…
+ *   /assets → selected immutable code slot (or legacy flat assets)
  *   /music               → /SD:/music (shared, read-only for apps)
  *   /sd                  → /SD:  (requires ASTER_PERM_SD; still no "..")
  * `perm` is the app's ASTER_PERM_* mask. */

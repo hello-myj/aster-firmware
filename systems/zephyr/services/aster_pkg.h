@@ -22,6 +22,8 @@
  * drops the app from the launcher, a short read_manifest buffer reports an app
  * that IS listed as ASTER_ENOENT. Fix overflow here, never at a call site. */
 #define ASTER_MANIFEST_MAX 1152
+/* Directories with this durable marker are never treated as installed APPs. */
+#define ASTER_INSTALL_MARKER ".installing"
 /* Optional launcher introduction, at most 127 UTF-8 bytes plus NUL. */
 #define ASTER_APP_DESCRIPTION_MAX 128
 
@@ -89,6 +91,12 @@ int aster_pkg_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 
 /* Install a package file into /SD:/aster/apps/<id>. Validates ABI + caps. */
 int aster_pkg_install_file(const char *src_path);
+
+#ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
+int aster_pkg_fault_arm(const char *id, const char *stage, const char *operation,
+                        unsigned action);
+void aster_pkg_fault_clear(void);
+#endif
 
 /* Minimal JSON helpers (objects are flat-ish; nested one level allowed) */
 int aster_json_str(const char *json, const char *key, char *out, size_t n);

@@ -1,0 +1,88 @@
+{
+  "magic": "ASTP",
+  "version": 1,
+  "endian": "little",
+  "header_sizes": [
+    64,
+    72
+  ],
+  "alignment": 4,
+  "fields": {
+    "version": [
+      4,
+      16
+    ],
+    "header_size": [
+      6,
+      16
+    ],
+    "flags": [
+      8,
+      32
+    ],
+    "manifest_offset": [
+      12,
+      32
+    ],
+    "manifest_bytes": [
+      16,
+      32
+    ],
+    "wasm_offset": [
+      20,
+      32
+    ],
+    "wasm_bytes": [
+      24,
+      32
+    ],
+    "aot_offset": [
+      28,
+      32
+    ],
+    "aot_bytes": [
+      32,
+      32
+    ],
+    "aot_target": [
+      36,
+      32
+    ],
+    "icon_offset": [
+      40,
+      32
+    ],
+    "icon_bytes": [
+      44,
+      32
+    ],
+    "icon_width": [
+      52,
+      16
+    ],
+    "icon_height": [
+      54,
+      16
+    ],
+    "assets_offset": [
+      64,
+      32
+    ],
+    "assets_bytes": [
+      68,
+      32
+    ]
+  },
+  "flags": {
+    "signed": 1,
+    "assets": 4
+  },
+  "aot_targets": {
+    "none": 0,
+    "xtensa": 1,
+    "riscv": 2,
+    "thumbv7": 3,
+    "cortex_m": 4,
+    "x86_64": 5
+  }
+}

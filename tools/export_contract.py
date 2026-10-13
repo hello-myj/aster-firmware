@@ -56,6 +56,8 @@ def main():
     parser.add_argument("--output", type=Path,
                         default=ROOT / f"dist/aster-contract-{abi_version()}.zip")
     args = parser.parse_args()
+    from check_docs import check
+    check(ROOT)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(args.output, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, data in sorted(bundle_files().items()):

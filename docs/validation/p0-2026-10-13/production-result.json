@@ -1,0 +1,8 @@
+{
+  "diagnostic_commands_absent": true,
+  "normal_aot_and_saved_data": true,
+  "test_apps_removed": true,
+  "original_13_apps_preserved": true,
+  "audio_idle": true,
+  "heap": "aster sys mem\r\ndram heap:  size=49152 peak=41764 used=31664 free=17268\r\n            (AOT text is a PSRAM alloc; this heap is DMA/stacks)\r\next ram:    8388608 total, wamr_cap=7864320\r\npsram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)\r\next heap:   largest free block >= 6291456 B\r\next heap:   8 x 150 KB blocks fit at once\r\nstacks:     see `kernel thread stacks`\r\nstatic dram: build-time; `west build` prints dram0_0_seg\r\naster:~$ "
+}

@@ -316,6 +316,23 @@ static int cmd_app_list(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+#ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
+static int cmd_app_fault(const struct shell *sh, size_t argc, char **argv)
+{
+	if (argc == 2 && !strcmp(argv[1], "clear")) {
+		aster_pkg_fault_clear(); shell_print(sh, "fault cleared"); return 0;
+	}
+	if (argc != 5 || (strcmp(argv[4], "error") && strcmp(argv[4], "reboot") && strcmp(argv[4], "hold"))) {
+		shell_error(sh, "fault <test.p0.ID> <stage> <open|write|sync|close|verify> <error|reboot|hold>");
+		return -EINVAL;
+	}
+	unsigned action = !strcmp(argv[4], "hold") ? 2u : !strcmp(argv[4], "reboot") ? 1u : 0u;
+	int err = aster_pkg_fault_arm(argv[1], argv[2], argv[3], action);
+	shell_print(sh, err ? "fault refused: %d" : "fault armed: %d", err);
+	return 0;
+}
+#endif
+
 static int cmd_app_install(const struct shell *sh, size_t argc, char **argv)
 {
 	if (argc < 2) {
@@ -903,6 +920,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_sys,
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_app,
 	SHELL_CMD(list, NULL, "installed apps", cmd_app_list),
+#ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
+	SHELL_CMD(fault, NULL, "one-shot test.p0.* install fault (diagnostic build)", cmd_app_fault),
+#endif
 	SHELL_CMD_ARG(install, NULL, "install <path.ast>", cmd_app_install, 2, 0),
 	SHELL_CMD_ARG(uninstall, NULL, "uninstall <id>", cmd_app_uninstall, 2, 0),
 	SHELL_CMD_ARG(start, NULL, "start <id>", cmd_app_start, 2, 0),

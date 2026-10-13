@@ -1,0 +1,75 @@
+> aster sys info
+aster sys info
+ASTER 0.1.0
+platform=zephyr board=aster.esp32s3.waveshare35b soc=esp32s3 arch=xtensa abi=3.7.0
+cpu=240000000 hz cores=2
+ram int=327680 ext=8388608 flash=16777216
+sd_mounted=yes apps=13
+sigpolicy=allow-unsigned
+aster:~$
+> aster app list
+aster app list
+ID                           NAME             VER      STATE
+aster.apitest                API Test         1.0.0    STOPPED [AOT]
+aster.chess                  Chess            1.0.1    STOPPED [AOT]
+aster.gallery                相册           1.0.1    STOPPED [AOT]
+aster.game.2048              2048             1.3.0    STOPPED [AOT]
+aster.gfxshow                Gfx Show         0.1.0    STOPPED [AOT]
+aster.hello                  Hello Aster      1.0.0    STOPPED [AOT]
+aster.imucube                IMU 立方体    1.0.0    STOPPED [AOT]
+aster.permdeny               Perm Deny Test   1.0.0    STOPPED [AOT]
+aster.player                 Player           1.0.0    STOPPED [AOT]
+aster.reader                 Reader           1.0.0    STOPPED [AOT]
+aster.snake                  Snake            1.2.1    STOPPED [AOT]
+aster.trap                   Trap Test        1.0.0    STOPPED [AOT]
+com.example.breakout         打砖块        1.0.3    STOPPED [AOT]
+aster:~$
+> aster app start aster.snake
+aster app start aster.snake
+[00:03:25.434,000] <inf> aster_fontsd: cpfont cache: released 177008 B
+[00:03:25.435,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:03:25.436,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+[00:03:25.817,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aot exec: psram write=0x3c223740 exec=0x42223740 size=19244
+[00:03:25.903,000] <inf> aster_rt: guest linear cap 96 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:03:25.916,000] <inf> aster_plat: display flip: 2 front buffers x 307200 B in PSRAM
+[00:03:25.917,000] <inf> aster_native: surface: 320x480 panel-canvas requested -> granted (engine writes panel order)
+[00:03:26.053,000] <inf> aster_native: [app:aster.snake] snake 320x480 grid 20x28
+[00:03:26.054,000] <inf> aster_rt: app started: aster.snake (Snake, 21 KB, AOT)
+started aster.snake
+[00:03:26.064,000] <wrn> aster_audio: pa gpio not ready
+aster:~$
+> aster app stats aster.snake
+aster app stats aster.snake
+id=aster.snake state=RUNNING
+mem: initial=262144 max=0 stack=8192 heap=262144 peak=286720
+frames=6 fps=8 uptime=804ms
+aster:~$
+> aster app stop aster.snake
+aster app stop aster.snake
+[00:03:27.156,000] <wrn> aster_audio: pa gpio not ready
+[00:03:27.157,000] <inf> aster_fontsd: cpfont cache: released 48528 B
+[00:03:27.158,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:03:27.163,000] <inf> aster_rt: app stopped: aster.snake
+ok
+aster:~$ [00:03:27.174,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:03:27.175,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$
+> aster app list
+aster app list
+ID                           NAME             VER      STATE
+aster.apitest                API Test         1.0.0    STOPPED [AOT]
+aster.chess                  Chess            1.0.1    STOPPED [AOT]
+aster.gallery                相册           1.0.1    STOPPED [AOT]
+aster.game.2048              2048             1.3.0    STOPPED [AOT]
+aster.gfxshow                Gfx Show         0.1.0    STOPPED [AOT]
+aster.hello                  Hello Aster      1.0.0    STOPPED [AOT]
+aster.imucube                IMU 立方体    1.0.0    STOPPED [AOT]
+aster.permdeny               Perm Deny Test   1.0.0    STOPPED [AOT]
+aster.player                 Player           1.0.0    STOPPED [AOT]
+aster.reader                 Reader           1.0.0    STOPPED [AOT]
+aster.snake                  Snake            1.2.1    STOPPED [AOT]
+aster.trap                   Trap Test        1.0.0    STOPPED [AOT]
+com.example.breakout         打砖块        1.0.3    STOPPED [AOT]
+aster:~$

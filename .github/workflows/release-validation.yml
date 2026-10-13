@@ -1,0 +1,119 @@
+name: Three-repository candidate validation
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: aster-firmware
+          fetch-depth: 0
+      - id: matrix
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          m=json.loads(Path('aster-firmware/contract/release-matrix.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              for key in ('sdk','simulator'):
+                  f.write(key+'_repo='+m[key]['repository']+'\n')
+                  f.write(key+'_ref='+m[key]['revision']+'\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.matrix.outputs.sdk_repo }}
+          ref: ${{ steps.matrix.outputs.sdk_ref }}
+          path: aster-sdk
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.matrix.outputs.simulator_repo }}
+          ref: ${{ steps.matrix.outputs.simulator_ref }}
+          path: aster-sim
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+          cache: npm
+          cache-dependency-path: aster-sim/package-lock.json
+      - run: pip install -r aster-sdk/requirements.txt -r aster-firmware/requirements-ci.txt
+      - run: npm ci --prefix aster-sim
+      - name: Preserve reviewed baseline from PR base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            if git -C aster-firmware cat-file -e "$BASE_SHA:contract/abi-baseline.json"; then
+              git -C aster-firmware show "$BASE_SHA:contract/abi-baseline.json" > "$RUNNER_TEMP/abi-baseline.json"
+            else
+              echo 'First baseline introduction requires reviewer approval; bootstrap against committed baseline.'
+              cp aster-firmware/contract/abi-baseline.json "$RUNNER_TEMP/abi-baseline.json"
+            fi
+          else
+            cp aster-firmware/contract/abi-baseline.json "$RUNNER_TEMP/abi-baseline.json"
+          fi
+      - name: Build and execute required APP packages
+        run: >-
+          python aster-firmware/tools/release_check.py
+          --sdk aster-sdk --sim aster-sim --require-clean
+          --baseline "$RUNNER_TEMP/abi-baseline.json"
+          --output "$RUNNER_TEMP/aster-release-check"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-report-and-required-apps
+          path: ${{ runner.temp }}/aster-release-check
+          if-no-files-found: error
+          include-hidden-files: true
+  firmware:
+    needs: integration
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: lckfb-s3
+            config: config/default.conf
+          - board: waveshare-35b
+            config: boards/waveshare_35b/selection.conf
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: aster-firmware
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build gperf device-tree-compiler
+      - run: pip install west
+      - run: west init -l aster-firmware && west update && west zephyr-export
+      - run: pip install -r zephyr/scripts/requirements.txt
+      - run: west sdk install --gnu-toolchains xtensa-espressif_esp32s3_zephyr-elf --install-dir "$RUNNER_TEMP/zephyr-sdk"
+      - name: Apply the reviewed driver patches in order
+        run: |
+          for name in aster_zephyr_v4.4.2.patch aster_zephyr_v4.4.2_qspi.patch aster_zephyr_v4.4.2_psram_dma.patch aster_zephyr_v4.4.2_usb_serial_console_batch.patch aster_zephyr_v4.4.2_sram_tail_heap.patch; do
+            git -C zephyr apply "$GITHUB_WORKSPACE/aster-firmware/patches/$name"
+          done
+          git -C modules/hal/espressif apply "$GITHUB_WORKSPACE/aster-firmware/patches/aster_zephyr_v4.4.2_esp_task_stacks.patch"
+      - name: Full board firmware build
+        env:
+          ZEPHYR_SDK_INSTALL_DIR: ${{ runner.temp }}/zephyr-sdk
+        working-directory: aster-firmware
+        run: python tools/firmware.py build --config ${{ matrix.config }} --build-dir build/release-${{ matrix.board }}
+      - name: Save exact build identity
+        working-directory: aster-firmware
+        run: python tools/build_identity.py --build-dir build/release-${{ matrix.board }} --board ${{ matrix.board }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.board }}
+          path: |
+            aster-firmware/build/release-${{ matrix.board }}/zephyr/zephyr.bin
+            aster-firmware/build/release-${{ matrix.board }}/zephyr/.config
+            aster-firmware/build/release-${{ matrix.board }}/identity.json
+          if-no-files-found: error
+          include-hidden-files: true

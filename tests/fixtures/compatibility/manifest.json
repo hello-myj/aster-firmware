@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "purpose": "Frozen old SDK packages; never regenerate during candidate validation",
+  "toolchain": {
+    "schema": 1,
+    "boards": {
+      "xtensa": {
+        "cpu": "xtensa",
+        "aot_backend": "xtensa",
+        "profile": "esp32s3-wamr-2.4.3-v6"
+      }
+    },
+    "profiles": {
+      "esp32s3-wamr-2.4.3-v6": {
+        "aot_format": 6,
+        "wasi_sdk": "24.0",
+        "hosts": {
+          "windows-x64": {
+            "wasi": "build/windows-downloads/wasi-sdk-app",
+            "wamrc": "build/windows-downloads/wamrc-xtensa/wamrc.exe",
+            "wamrc_sha256": "cae253b32834bb01b8aef79caff012e0dcdd44d5f354a556af78a625467b251a"
+          },
+          "linux-x64": {
+            "wasi": "toolchain/wasi-sdk-24.0-x86_64-linux",
+            "wamrc": "toolchain/wamrc",
+            "wamrc_sha256": "460265bdeec01b5ae22ab17825fcba9e57ccba4f868043cbb6910c215497f647"
+          }
+        }
+      }
+    }
+  },
+  "packages": [
+    {
+      "file": "aster.hello.ast",
+      "sha256": "a8cdd949783a7c5073e4e14d8056b9650d9c4d220c8af7aac291a82caaf2d1d4",
+      "sdk_commit": "1b7a944cc01802ab6621cd4e3459d3638dfc9c09",
+      "target": "xtensa",
+      "kind": "old-sdk"
+    },
+    {
+      "file": "aster.game.2048.ast",
+      "sha256": "38339e30e1ec726475f1acdbacf82acf2595399528a022b2dbf17e8e05860d58",
+      "sdk_commit": "1b7a944cc01802ab6621cd4e3459d3638dfc9c09",
+      "target": "xtensa",
+      "kind": "old-sdk"
+    },
+    {
+      "file": "com.example.breakout.ast",
+      "sha256": "705dda83367bcfbd7232f2d3ec36ec9e412afb8d89bda80da0112f8ed504d024",
+      "sdk_commit": "1b7a944cc01802ab6621cd4e3459d3638dfc9c09",
+      "target": "xtensa",
+      "kind": "external-reference",
+      "source_sha256": {
+        "icon.bin": "2180fa633c24f0ef92a34959ab221f15e4f690739179e4600b9df96782efa8d3",
+        "app.toml": "0d24fd72af8a674f1092b39ebda5e5e678de0c5051ddf37b0b0eed9f5c70e0cb",
+        "src/game.h": "0ff3c7c643eb6c024e58fa16e994fff2fabf4fa8112d47d09aebd251ba0d3f3b",
+        "src/main.c": "9c27604481815c522fbb48fa1e4010d9f5a312b79773118b1b2a8126a20e953f"
+      }
+    }
+  ]
+}

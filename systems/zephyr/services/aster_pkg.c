@@ -1,16 +1,25 @@
 /* SPDX-License-Identifier: MIT */
 #include "aster_pkg.h"
+#include "aster_versions.h"
+#include "aster_app_mgr.h"
 #include "aster_sig.h"
 #include "aster_storage.h"
 #include "aster_sysinfo.h"
 #include "aster_mem.h"
 #include "aster_bytes.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <zephyr/fs/fs.h>
 #include <zephyr/kernel.h>
+#ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
+#include <zephyr/sys/reboot.h>
+#if defined(CONFIG_SOC_SERIES_ESP32S3)
+#include <esp_rom_sys.h>
+#endif
+#endif
 #include <zephyr/logging/log.h>
 #include <aster/aster.h>
 #include <aster/icon.h>
@@ -525,14 +534,140 @@ static int json_arr(char *out, size_t n, const char *key, const char arr[][24], 
 	return (int)used;
 }
 
+/* All installation files use DMA-safe writes and the same durable error gate.
+ * A failed close is an installation failure even after a successful write. */
+#ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
+static struct {
+	char id[64], stage[20], operation[20], active[64];
+	bool armed; unsigned action;
+} pkg_fault;
+int aster_pkg_fault_arm(const char *id, const char *stage, const char *operation, unsigned action)
+{
+	if (strncmp(id, "test.p0.", 8) || strlen(id) >= sizeof(pkg_fault.id) ||
+	    strlen(stage) >= sizeof(pkg_fault.stage) || strlen(operation) >= sizeof(pkg_fault.operation)) {
+		return ASTER_EINVAL;
+	}
+	aster_app_mgr_files_lock();
+	snprintf(pkg_fault.id, sizeof(pkg_fault.id), "%s", id);
+	snprintf(pkg_fault.stage, sizeof(pkg_fault.stage), "%s", stage);
+	snprintf(pkg_fault.operation, sizeof(pkg_fault.operation), "%s", operation);
+	pkg_fault.action = action;
+	pkg_fault.armed = true;
+	aster_app_mgr_files_unlock();
+	return ASTER_OK;
+}
+void aster_pkg_fault_clear(void) { pkg_fault.armed = false; }
+static bool install_fault(const char *stage, const char *operation)
+{
+	if (!pkg_fault.armed || strcmp(pkg_fault.active, pkg_fault.id) ||
+	    strcmp(stage, pkg_fault.stage) || strcmp(operation, pkg_fault.operation)) { return false; }
+	pkg_fault.armed = false;
+	LOG_ERR("install: diagnostic fault stage=%s operation=%s reset=%d", stage, operation, pkg_fault.action);
+	if (pkg_fault.action == 2) {
+		LOG_ERR("POWER_CUT_READY id=%s stage=%s operation=%s", pkg_fault.active, stage, operation);
+		for (;;) { k_msleep(1000); }
+	}
+	if (pkg_fault.action == 1) {
+#if defined(CONFIG_SOC_SERIES_ESP32S3)
+		/* Reset the full SoC for transaction interruption tests; esp_restart
+		 * otherwise restarts CPUs while retaining some peripheral state. */
+		esp_rom_software_reset_system();
+#else
+		sys_reboot(SYS_REBOOT_COLD);
+#endif
+	}
+	return true;
+}
+#else
+static bool install_fault(const char *stage, const char *operation)
+{
+	(void)stage; (void)operation; return false;
+}
+#endif
+
+static int install_verify(const char *path, const void *data, size_t len,
+                          const char *stage)
+{
+	struct fs_dirent st;
+	int err = fs_stat(path, &st);
+	if (err || st.type != FS_DIR_ENTRY_FILE || st.size != len) {
+		LOG_ERR("install: stage=%s operation=verify-size path=%s result=%d", stage, path, err);
+		return ASTER_EIO;
+	}
+	struct fs_file_t f;
+	fs_file_t_init(&f);
+	err = fs_open(&f, path, FS_O_READ);
+	if (err) {
+		LOG_ERR("install: stage=%s operation=verify-open path=%s result=%d", stage, path, err);
+		return ASTER_EIO;
+	}
+	uint8_t chunk[512];
+	const uint8_t *expected = data;
+	size_t done = 0;
+	while (done < len) {
+		size_t n = len - done < sizeof(chunk) ? len - done : sizeof(chunk);
+		int read = aster_fs_read_safe(&f, chunk, n);
+		if (read < 0 || (size_t)read != n) {
+			LOG_ERR("install: stage=%s operation=verify-read path=%s result=%d", stage, path, read);
+			err = ASTER_EIO;
+			break;
+		}
+		if (install_fault(stage, "verify")) { chunk[0] ^= 1u; }
+		if (memcmp(chunk, expected + done, n)) {
+			LOG_ERR("install: stage=%s operation=verify-content path=%s", stage, path);
+			err = ASTER_ECORRUPT;
+			break;
+		}
+		done += n;
+	}
+	int close = fs_close(&f);
+	if (close) {
+		LOG_ERR("install: stage=%s operation=verify-close path=%s result=%d", stage, path, close);
+		err = ASTER_EIO;
+	}
+	return err;
+}
+
+static int install_write(const char *path, const void *data, size_t len,
+                         const char *stage)
+{
+	struct fs_file_t f;
+	fs_file_t_init(&f);
+	int err = install_fault(stage, "open") ? -EIO : fs_open(&f, path, FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC);
+	if (err) {
+		LOG_ERR("install: stage=%s operation=open path=%s result=%d", stage, path, err);
+		return ASTER_EIO;
+	}
+	size_t requested = install_fault(stage, "write") && len ? len - 1u : len;
+	int written = aster_fs_write_safe(&f, data, requested);
+	if (written < 0 || (size_t)written != len) {
+		LOG_ERR("install: stage=%s operation=write path=%s result=%d expected=%u",
+			stage, path, written, (unsigned)len);
+		err = ASTER_EIO;
+	} else {
+		int sync = fs_sync(&f);
+		if (install_fault(stage, "sync")) { sync = -EIO; }
+		if (sync) {
+			LOG_ERR("install: stage=%s operation=sync path=%s result=%d", stage, path, sync);
+			err = ASTER_EIO;
+		}
+	}
+	int close = fs_close(&f);
+	if (install_fault(stage, "close")) { close = -EIO; }
+	if (close) {
+		LOG_ERR("install: stage=%s operation=close path=%s result=%d", stage, path, close);
+		err = ASTER_EIO;
+	}
+	return err ? err : install_verify(path, data, len, stage);
+}
+
 static int rmrf(const char *path)
 {
 	struct fs_dir_t dir;
 	struct fs_dirent st;
 	int err = fs_stat(path, &st);
-
 	if (err) {
-		return 0;
+		return err == -ENOENT ? 0 : err;
 	}
 	if (st.type != FS_DIR_ENTRY_DIR) {
 		return fs_unlink(path);
@@ -542,24 +677,21 @@ static int rmrf(const char *path)
 	if (err) {
 		return err;
 	}
-	while (fs_readdir(&dir, &st) == 0 && st.name[0]) {
+	while ((err = fs_readdir(&dir, &st)) == 0 && st.name[0]) {
 		char child[256];
-		size_t plen = strlen(path);
-		size_t nlen = strlen(st.name);
-
-		if (plen + 1 + nlen >= sizeof(child)) {
-			continue;
+		if (snprintf(child, sizeof(child), "%s/%s", path, st.name) >= (int)sizeof(child)) {
+			err = -ENAMETOOLONG;
+			break;
 		}
-		memcpy(child, path, plen);
-		child[plen] = '/';
-		memcpy(child + plen + 1, st.name, nlen + 1);
-		if (st.type == FS_DIR_ENTRY_DIR) {
-			rmrf(child);
-		} else {
-			fs_unlink(child);
+		err = st.type == FS_DIR_ENTRY_DIR ? rmrf(child) : fs_unlink(child);
+		if (err) {
+			break;
 		}
 	}
-	fs_closedir(&dir);
+	int close = fs_closedir(&dir);
+	if (err || close) {
+		return err ? err : close;
+	}
 	return fs_unlink(path);
 }
 
@@ -612,7 +744,6 @@ static int extract_mjr1(const uint8_t *blob, size_t len, const char *appdir)
 	if (snprintf(root, sizeof(root), "%s/assets", appdir) >= (int)sizeof(root)) {
 		return ASTER_ENOMEM;
 	}
-	(void)rmrf(root);
 	if (aster_storage_mkdir_p(root)) {
 		return ASTER_EIO;
 	}
@@ -624,7 +755,6 @@ static int extract_mjr1(const uint8_t *blob, size_t len, const char *appdir)
 		const char *rel;
 		char dest[256];
 		char parent[256];
-		struct fs_file_t f;
 		int err;
 		size_t max_rel;
 
@@ -634,8 +764,8 @@ static int extract_mjr1(const uint8_t *blob, size_t len, const char *appdir)
 		rel = (const char *)(blob + po);
 		max_rel = len - po;
 		if (max_rel == 0 || !memchr(rel, 0, max_rel) || !asset_relpath_ok(rel)) {
-			LOG_WRN("install: skip bad asset path");
-			continue;
+			LOG_ERR("install: stage=assets operation=validate bad asset path");
+			return ASTER_ECORRUPT;
 		}
 		if (snprintf(dest, sizeof(dest), "%s/%s", root, rel) >= (int)sizeof(dest)) {
 			return ASTER_ENOMEM;
@@ -652,28 +782,46 @@ static int extract_mjr1(const uint8_t *blob, size_t len, const char *appdir)
 				}
 			}
 		}
-		fs_file_t_init(&f);
-		err = fs_open(&f, dest, FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC);
+		err = install_write(dest, blob + fo, fl, "assets");
 		if (err) {
-			LOG_ERR("install: open %s (%d)", dest, err);
-			return ASTER_EIO;
-		}
-		err = aster_fs_write_safe(&f, blob + fo, fl);
-		fs_close(&f);
-		if (err < (int)fl) {
-			LOG_ERR("install: write %s (%d/%u)", dest, err, (unsigned)fl);
-			return ASTER_EIO;
+			return err;
 		}
 	}
 	LOG_INF("install: assets %u file(s) -> %s", n, root);
 	return ASTER_OK;
 }
 
-int aster_pkg_install_file(const char *src_path)
+static bool install_id_valid(const char *id)
+{
+	if (!id[0] || strstr(id, "..")) { return false; }
+	for (size_t i = 0; id[i]; i++) {
+		unsigned char c = (unsigned char)id[i];
+		bool alnum = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+		if (!alnum && (i == 0 || (c != '.' && c != '_' && c != '-'))) { return false; }
+	}
+	return true;
+}
+
+#ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
+static void pkg_trace(const char *stage)
+{
+	struct k_thread *t = k_current_get();
+	size_t unused = 0;
+	(void)k_thread_stack_space_get(t, &unused);
+	LOG_INF("pkg trace: %s thread=%p stack=%p/%u unused=%u", stage, t,
+		(void *)t->stack_info.start, (unsigned)t->stack_info.size, (unsigned)unused);
+}
+#else
+static void pkg_trace(const char *stage) { (void)stage; }
+#endif
+
+static int pkg_install_locked(const char *src_path)
 {
 	uint8_t *img = NULL;
 	size_t size = 0;
+	pkg_trace("load-source");
 	int err = load_file(src_path, &img, &size);
+	pkg_trace("loaded-source");
 	if (err) {
 		LOG_ERR("install: load %s (%d)", src_path, err);
 		return ASTER_EIO;
@@ -682,11 +830,19 @@ int aster_pkg_install_file(const char *src_path)
 	aster_manifest_t m;
 	const uint8_t *wasm; size_t wlen;
 	const uint8_t *aot; size_t alen; uint32_t atarget;
+	pkg_trace("parse-source");
 	err = aster_pkg_parse(img, size, &m, &wasm, &wlen, &aot, &alen, &atarget);
+	pkg_trace("parsed-source");
 	if (err) {
 		LOG_ERR("install: parse %s (%d)", src_path, err);
 		aster_psram_free(img);
 		return err;
+	}
+
+	if (!install_id_valid(m.id)) {
+		LOG_ERR("install: stage=parse operation=app-id invalid APP identifier");
+		aster_psram_free(img);
+		return ASTER_ECORRUPT;
 	}
 
 	/* A package carries exactly ONE AOT image, built for one target
@@ -711,127 +867,94 @@ int aster_pkg_install_file(const char *src_path)
 		return err;
 	}
 
-	char appdir[128];
-	aster_storage_app_dir(appdir, sizeof(appdir), m.id);
-
-	/* make sure the per-app dir tree exists (fresh card / lost ensure_dirs) */
-	int derr = aster_storage_mkdir_p(appdir);
-	if (derr) {
-		LOG_ERR("install: mkdir %s (%d)", appdir, derr);
+#ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
+	snprintf(pkg_fault.active, sizeof(pkg_fault.active), "%s", m.id);
+#endif
+	/* No APP may retain a borrowed registry record across a version switch.
+	 * The launch reservation and this check share files_lock. */
+	if (aster_app_mgr_is_live(NULL)) {
+		LOG_ERR("install: stage=prepare operation=busy app=%s; return to launcher first", m.id);
+		aster_psram_free(img);
+		return ASTER_EBUSY;
+	}
+	char base[128], appdir[128];
+	aster_storage_app_dir(base, sizeof(base), m.id);
+	struct aster_version current;
+	pkg_trace("select-version");
+	err = aster_versions_prepare(base, &current);
+	pkg_trace("selected-version");
+	if (err && err != -ENOENT) {
+		LOG_ERR("install: stage=recovery operation=select path=%s result=%d", base, err);
 		aster_psram_free(img);
 		return ASTER_EIO;
 	}
-
-	/* fresh install: wipe old package files but keep data/ */
-	struct fs_dir_t dir;
-	fs_dir_t_init(&dir);
-	if (fs_opendir(&dir, appdir) == 0) {
-		struct fs_dirent ent;
-		while (fs_readdir(&dir, &ent) == 0 && ent.name[0]) {
-			if (ent.type != FS_DIR_ENTRY_FILE) {
-				continue;
-			}
-			/* keep data/ and cache/ dirs (handled above), delete files */
-			char p[192];
-			size_t plen = strlen(appdir), nlen = strlen(ent.name);
-
-			if (plen + 1 + nlen >= sizeof(p)) {
-				continue;
-			}
-			memcpy(p, appdir, plen);
-			p[plen] = '/';
-			memcpy(p + plen + 1, ent.name, nlen + 1);
-			fs_unlink(p);
-		}
-		fs_closedir(&dir);
+	unsigned slot = err || current.slot < 0 ? 0u : (unsigned)current.slot ^ 1u;
+	uint32_t sequence = err ? 1u : current.sequence + 1u;
+	/* Remove the inactive record BEFORE replacing its payload, so an old
+	 * record cannot accidentally bind to a same-version rebuilt manifest. */
+	char inactive_record[192];
+	snprintf(inactive_record, sizeof(inactive_record), "%s/.active%u", base, slot);
+	err = fs_unlink(inactive_record);
+	if (err && err != -ENOENT) {
+		LOG_ERR("install: stage=prepare operation=invalidate path=%s result=%d", inactive_record, err);
+		aster_psram_free(img);
+		return ASTER_EIO;
+	}
+	err = aster_versions_dir(appdir, sizeof(appdir), base, (int)slot);
+	if (!err) { err = rmrf(appdir); }
+	if (!err) { err = aster_storage_mkdir_p(appdir); }
+	if (err) {
+		LOG_ERR("install: stage=prepare operation=staging path=%s result=%d", base, err);
+		aster_psram_free(img);
+		return ASTER_EIO;
+	}
+	/* All writes go to the inactive slot. The old commit record and its
+	 * payload are never modified, and user data/cache remain in base/. */
+	char marker[192];
+	snprintf(marker, sizeof(marker), "%s/%s", appdir, ASTER_INSTALL_MARKER);
+	err = install_write(marker, "installing\n", 11, "begin");
+	if (err) {
+		aster_psram_free(img);
+		return err;
 	}
 
-	/* copy package.ast -- SOURCE IS PSRAM: the SD controller's DMA cannot
-	 * read external RAM, a raw fs_write here lands 0-byte or partially
-	 * corrupt files on disk (observed: app.aot 0 B -> silent interpreter
-	 * fallback at ~2 fps; "主" glyph byte-hole in app.wasm -> tofu).
-	 * aster_fs_write_safe shuttles through an internal-RAM bounce. */
+	/* Loaded package bytes may be in PSRAM; install_write always bounces. */
 	char dst[192];
 	snprintf(dst, sizeof(dst), "%s/package.ast", appdir);
-	struct fs_file_t f;
-	fs_file_t_init(&f);
-	err = fs_open(&f, dst, FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC);
+	err = install_write(dst, img, size, "package");
 	if (err) {
-		LOG_ERR("install: open %s (%d)", dst, err);
 		aster_psram_free(img);
-		return ASTER_EIO;
+		return err;
 	}
-	err = aster_fs_write_safe(&f, img, size);
-	fs_close(&f);
-	if (err < (int)size) {
-		LOG_ERR("install: write %s (%d/%u)", dst, err, (unsigned)size);
-		aster_psram_free(img);
-		return ASTER_EIO;
-	}
-
-	/* extract app.wasm */
 	snprintf(dst, sizeof(dst), "%s/app.wasm", appdir);
-	fs_file_t_init(&f);
-	err = fs_open(&f, dst, FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC);
+	err = install_write(dst, wasm, wlen, "wasm");
 	if (err) {
 		aster_psram_free(img);
-		return ASTER_EIO;
-	}
-	err = aster_fs_write_safe(&f, wasm, wlen);
-	fs_close(&f);
-	if (err < (int)wlen) {
-		LOG_ERR("install: write %s (%d/%u)", dst, err, (unsigned)wlen);
-		aster_psram_free(img);
-		return ASTER_EIO;
+		return err;
 	}
 
-	/* extract app.aot when the package's AOT target matches this platform's
-	 * (CONFIG_ASTER_AOT_TARGET_ID is derived from the CPU arch chosen by the
-	 * board port) */
+	/* extract app.aot when the package's CPU matches the platform */
 	if (aot_ok) {
 		snprintf(dst, sizeof(dst), "%s/app.aot", appdir);
-		fs_file_t_init(&f);
-		err = fs_open(&f, dst, FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC);
-		if (!err) {
-			err = aster_fs_write_safe(&f, aot, alen);
-			fs_close(&f);
-			if (err < (int)alen) {
-				LOG_ERR("install: aot write %s (%d/%u)",
-					dst, err, (unsigned)alen);
-				aster_psram_free(img);
-				return ASTER_EIO;
-			}
-		} else {
-			LOG_ERR("install: aot open %s (%d)", dst, err);
+		err = install_write(dst, aot, alen, "aot");
+		if (err) {
 			aster_psram_free(img);
-			return ASTER_EIO;
+			return err;
 		}
 	}
 
-	/* launcher tile: ASTI at /SD:/aster/apps/<id>/icon.bin */
-	snprintf(dst, sizeof(dst), "%s/icon.bin", appdir);
+	/* An absent/invalid optional icon keeps the existing fallback behavior;
+	 * writing a valid supplied icon must succeed. */
 	if (m.icon_len && in_bounds(m.icon_off, m.icon_len, size, m.hdr_size) &&
 	    aster_icon_parse(img + m.icon_off, m.icon_len, NULL) == ASTER_OK) {
-		fs_file_t_init(&f);
-		err = fs_open(&f, dst, FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC);
-		if (!err) {
-			err = aster_fs_write_safe(&f, img + m.icon_off, m.icon_len);
-			fs_close(&f);
-			if (err < (int)m.icon_len) {
-				LOG_WRN("install: icon.bin write %s (%d/%u)", dst, err,
-					(unsigned)m.icon_len);
-				(void)fs_unlink(dst);
-			}
+		snprintf(dst, sizeof(dst), "%s/icon.bin", appdir);
+		err = install_write(dst, img + m.icon_off, m.icon_len, "icon");
+		if (err) {
+			aster_psram_free(img);
+			return err;
 		}
-	} else {
-		struct fs_dirent st;
-
-		if (fs_stat(dst, &st) == 0) {
-			(void)fs_unlink(dst);
-		}
-		if (m.icon_len) {
-			LOG_WRN("install: icon not ASTI, skip %s", m.id);
-		}
+	} else if (m.icon_len) {
+		LOG_WRN("install: icon not ASTI, skip %s", m.id);
 	}
 
 	/* drop stale assets even when the new package has none */
@@ -839,12 +962,17 @@ int aster_pkg_install_file(const char *src_path)
 		char assets_dir[192];
 
 		snprintf(assets_dir, sizeof(assets_dir), "%s/assets", appdir);
-		(void)rmrf(assets_dir);
+		err = rmrf(assets_dir);
+		if (err) {
+			LOG_ERR("install: stage=assets operation=cleanup path=%s result=%d", assets_dir, err);
+			aster_psram_free(img);
+			return ASTER_EIO;
+		}
 	}
 	if (m.assets_len && in_bounds(m.assets_off, m.assets_len, size, m.hdr_size)) {
 		err = extract_mjr1(img + m.assets_off, m.assets_len, appdir);
 		if (err) {
-			LOG_ERR("install: assets %s (%d)", m.id, err);
+			LOG_ERR("install: stage=assets operation=extract path=%s result=%d", appdir, err);
 			aster_psram_free(img);
 			return err;
 		}
@@ -874,8 +1002,14 @@ int aster_pkg_install_file(const char *src_path)
 	 * of this buffer. One longer capability name moves it, and the failure
 	 * it would cause is silent (see above), which is the whole reason
 	 * overflowing is a hard ASTER_ECORRUPT rather than a shorter manifest. */
-	char line[ASTER_MANIFEST_MAX];
-	int w = snprintf(line, sizeof(line),
+	/* Keep nested FS/CRC calls comfortably below the shell's stack budget. */
+	char *line = aster_psram_alloc(ASTER_MANIFEST_MAX);
+	if (!line) {
+		LOG_ERR("install: stage=manifest operation=allocate bytes=%u", ASTER_MANIFEST_MAX);
+		aster_psram_free(img);
+		return ASTER_ENOMEM;
+	}
+	int w = snprintf(line, ASTER_MANIFEST_MAX,
 		"{\"format\":1,\"id\":\"%s\",\"name\":\"%s\",\"version\":\"%s\","
 		"\"abi_min\":\"%s\",\"abi_target\":\"%s\",\"entry\":\"app.wasm\","
 		"\"mem_initial\":%u,\"mem_max\":%u,\"mem_stack\":%u,\"mem_heap\":%u,"
@@ -883,34 +1017,34 @@ int aster_pkg_install_file(const char *src_path)
 		m.id, m.name, m.version, m.abi_min, m.abi_target,
 		m.mem_initial, m.mem_max, m.mem_stack ? m.mem_stack : 65536,
 		m.mem_heap ? m.mem_heap : 262144, aot_ok ? 1u : 0u);
-	int r = (w > 0 && w < (int)sizeof(line)) ? 0 : -1;
+	int r = (w > 0 && w < (int)ASTER_MANIFEST_MAX) ? 0 : -1;
 
 	if (r >= 0 && m.description[0]) {
-		r = json_string_field(line + w, sizeof(line) - w, "description", m.description);
+		r = json_string_field(line + w, ASTER_MANIFEST_MAX - w, "description", m.description);
 		if (r >= 0) { w += r; r = 0; }
 	}
 
 	if (r >= 0) {
-		r = json_arr(line + w, sizeof(line) - w, "requires",
+		r = json_arr(line + w, ASTER_MANIFEST_MAX - w, "requires",
 			     m.requires, m.requires_n);
 	}
 	if (r >= 0) {
 		w += r;
-		r = json_arr(line + w, sizeof(line) - w, "optional",
+		r = json_arr(line + w, ASTER_MANIFEST_MAX - w, "optional",
 			     m.optional, m.optional_n);
 	}
 	if (r >= 0) {
 		w += r;
-		r = json_arr(line + w, sizeof(line) - w, "permissions",
+		r = json_arr(line + w, ASTER_MANIFEST_MAX - w, "permissions",
 			     m.permissions, m.permissions_n);
 	}
 	if (r >= 0) {
 		w += r;
 	}
 	if (r >= 0 && m.category[0]) {
-		r = snprintf(line + w, sizeof(line) - w, ",\"category\":\"%s\"",
+		r = snprintf(line + w, ASTER_MANIFEST_MAX - w, ",\"category\":\"%s\"",
 			     m.category);
-		if (r < 0 || r >= (int)sizeof(line) - w) {
+		if (r < 0 || r >= (int)ASTER_MANIFEST_MAX - w) {
 			r = -1;
 		} else {
 			w += r;
@@ -922,9 +1056,9 @@ int aster_pkg_install_file(const char *src_path)
 	 * ASTER_ORIENT_ANY here and is omitted, which is the same thing the
 	 * package would have meant by leaving the key out. */
 	if (r >= 0 && aster_pkg_orientation_name(m.orientation) != NULL) {
-		r = snprintf(line + w, sizeof(line) - w, ",\"orientation\":\"%s\"",
+		r = snprintf(line + w, ASTER_MANIFEST_MAX - w, ",\"orientation\":\"%s\"",
 			     aster_pkg_orientation_name(m.orientation));
-		if (r < 0 || r >= (int)sizeof(line) - w) {
+		if (r < 0 || r >= (int)ASTER_MANIFEST_MAX - w) {
 			r = -1;
 		} else {
 			w += r;
@@ -932,8 +1066,8 @@ int aster_pkg_install_file(const char *src_path)
 		}
 	}
 	if (r >= 0) {
-		r = snprintf(line + w, sizeof(line) - w, "}\n");
-		if (r < 0 || r >= (int)sizeof(line) - w) {
+		r = snprintf(line + w, ASTER_MANIFEST_MAX - w, "}\n");
+		if (r < 0 || r >= (int)ASTER_MANIFEST_MAX - w) {
 			r = -1;
 		}
 	}
@@ -942,27 +1076,66 @@ int aster_pkg_install_file(const char *src_path)
 		LOG_ERR("install %s: manifest needs more than %zu B "
 			"(requires=%u optional=%u permissions=%u); refusing rather "
 			"than writing a manifest the scanner would reject",
-			m.id, sizeof(line), m.requires_n, m.optional_n,
+			m.id, (size_t)ASTER_MANIFEST_MAX, m.requires_n, m.optional_n,
 			m.permissions_n);
+		aster_psram_free(line);
 		aster_psram_free(img);
 		return ASTER_ECORRUPT;
 	}
 	w += r;
 
 	snprintf(dst, sizeof(dst), "%s/manifest.json", appdir);
-	fs_file_t_init(&f);
-	err = fs_open(&f, dst, FS_O_WRITE | FS_O_CREATE | FS_O_TRUNC);
-	if (err == 0) {
-		fs_write(&f, line, (size_t)w);
-		fs_close(&f);
+	err = install_write(dst, line, (size_t)w, "manifest");
+	aster_psram_free(line);
+	if (err) {
+		aster_psram_free(img);
+		return err;
 	}
 
-	/* data dir */
-	snprintf(dst, sizeof(dst), "%s/data", appdir);
-	aster_storage_mkdir_p(dst);
+	snprintf(dst, sizeof(dst), "%s/data", base);
+	err = aster_storage_mkdir_p(dst);
+	if (err) {
+		LOG_ERR("install: stage=data operation=mkdir path=%s result=%d", dst, err);
+		aster_psram_free(img);
+		return ASTER_EIO;
+	}
+	err = fs_unlink(marker);
+	if (err) {
+		LOG_ERR("install: stage=commit operation=remove-marker path=%s result=%d", marker, err);
+		aster_psram_free(img);
+		return ASTER_EIO;
+	}
+
+	uint32_t manifest_crc;
+	err = aster_versions_manifest_crc(appdir, &manifest_crc);
+	if (err) {
+		LOG_ERR("install: stage=commit operation=seal path=%s result=%d", appdir, err);
+		aster_psram_free(img);
+		return ASTER_EIO;
+	}
+	uint8_t record[ASTER_VERSION_RECORD_SIZE];
+	aster_versions_record(record, slot, sequence, manifest_crc);
+	snprintf(dst, sizeof(dst), "%s/.active%u", base, slot);
+	err = install_write(dst, record, sizeof(record), "commit");
+	if (err) {
+		LOG_ERR("install: stage=commit operation=publish path=%s result=%d", base, err);
+		aster_psram_free(img);
+		return err;
+	}
 
 	aster_psram_free(img);
 	LOG_INF("installed %s (%s v%s, %u KB wasm)", m.id, m.name, m.version,
 		(unsigned)(wlen / 1024));
 	return ASTER_OK;
+}
+
+int aster_pkg_install_file(const char *src_path)
+{
+	aster_app_mgr_files_lock();
+	int err = pkg_install_locked(src_path);
+#ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
+	pkg_fault.active[0] = 0;
+#endif
+	aster_app_mgr_files_unlock();
+	return err;
 }

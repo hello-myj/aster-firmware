@@ -1,8 +1,8 @@
 # Waveshare ESP32-S3-Touch-LCD-3.5B
 
 新增的项目内 Zephyr board：`waveshare_esp32s3_touch_lcd_35b/esp32s3/procpu`。
-Aster/SDK 目标 ID：`waveshare-35b`，ABI 3.7.0。V1/V2 官方说明程序通用。
-当前状态：实验性板级支持；已在微雪真机验证刷机、USB shell、SD 挂载、320×480 主页显示和 IMU 采样。触摸、APP 实际显示和音频播放/录音仍在验证。
+Aster 硬件型号：`waveshare-35b`；SDK CPU 目标：`xtensa`，ABI 3.7.0。V1/V2 官方说明程序通用。
+当前状态：实验性板级支持；已在微雪真机验证刷机、USB shell、SD 挂载和 320×480 主页显示。当前默认固件不启用 QMI8658，不声明 accelerometer/gyroscope 能力；历史 IMU 采样测试不代表当前配置支持 IMU APP。其他外设与 APP 行为仍以实机验收为准。
 
 依据：[官方资料入口](https://docs.waveshare.net/ESP32-S3-Touch-LCD-3.5B/Resources-And-Documents/)、
 [官方示例程序](https://files.waveshare.net/wiki/ESP32-S3-Touch-LCD-3.5B/ESP32-S3-Touch-LCD-3.5B-Demo.zip)
@@ -28,7 +28,7 @@ python tools/firmware.py flash --config boards/waveshare_35b/selection.conf --bu
 也可在 `python tools/firmware.py menuconfig` 的 Hardware model 中选择该板。
 摄像头是可选外接模块，目前没有选择传感器驱动，配置关闭且不声明 camera 能力。
 
-SDK 可使用 `aster build APP_DIR --target waveshare-35b`；屏幕必须通过 display_get_info
+SDK 可使用 `aster build APP_DIR --target xtensa --aot`，包位于 APP 工程的 `dist/xtensa/`；部署示例中的路径以 APP 工程为当前目录。屏幕必须通过 `aster_display_get_info()`
 读取实际尺寸，避免将旧板 240×320 写死在 APP 中。
 
 ## 外设连接
@@ -53,7 +53,7 @@ SDK 可使用 `aster build APP_DIR --target waveshare-35b`；屏幕必须通过 
 板载 Type-C 的 USB Serial/JTAG 用于 west/esptool 烧录和 Aster 文件服务（通常 /dev/ttyACM0）。
 Shell 使用独立 3.3 V USB-TTL：板 TX=GPIO43、板 RX=GPIO17、GND；交叉连接，115200 baud。
 GPIO44 是 ES8311 MCLK，因此不能沿用 ESP32-S3 默认 UART0 RX=44。
-`targets/waveshare-35b.json` 中 `/dev/ttyUSB0` 是外接 USB-TTL 的默认值，可通过 CLI --console 覆盖。
+固件 `hardware/waveshare-35b.json` 记录板级部署默认值；SDK 使用 `targets/xtensa.json`，通过 `--port` 指定实际设备串口，双串口配置可用 `--console` 指定命令端口。
 标准模式没有外接 USB-TTL 时可烧录和传输文件；下方 USB 调试模式可以仅使用板载 USB 获得 shell。
 
 仅接板载 USB 调试时可使用独立配置：
@@ -67,7 +67,7 @@ USB 调试模式将 console/shell 切到 USB Serial/JTAG；该串口同时支持
 SDK 探测到 `serial=shared` 后自动在同一端口安装和启动 APP，例如：
 
 ```sh
-aster deploy dist/waveshare-35b/aster.imucube.ast --target waveshare-35b --port /dev/ttyACM0 --run
+aster deploy dist/xtensa/aster.hello.ast --target xtensa --port /dev/ttyACM0 --run
 ```
 
 无需为传包切换镜像。LCKFB 的 CH340 shell 同样支持该功能（`/dev/ttyUSB0`）。
@@ -75,7 +75,7 @@ aster deploy dist/waveshare-35b/aster.imucube.ast --target waveshare-35b --port 
 上传前关闭独立串口监视器，上传完成后可在同一端口恢复监视。
 
 将现有字体资源与 APP 放到 FAT SD 卡中，系统字体按固件 README 的资源部署方式准备。
-请勿把 shell 和文件服务同时指向同一 UART：二者分别消费数据，会破坏协议。
+共享串口配置由 shell 统一接收并在传输期间切换处理器；不要另开独立文件接收线程与 shell 争抢同一 UART。
 
 ## 显示方向与 launcher
 

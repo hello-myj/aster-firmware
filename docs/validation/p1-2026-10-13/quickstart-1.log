@@ -1,0 +1,2 @@
+/home/myj/zephyrproject/aster/aster-firmware/build/p1-verified/quickstart-app
+Next: cd /home/myj/zephyrproject/aster/aster-firmware/build/p1-verified/quickstart-app; aster build; aster run

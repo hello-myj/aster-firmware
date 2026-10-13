@@ -6,3 +6,6 @@ __pycache__/
 *.log
 config/aster.conf
 config/aster.conf.old
+
+# Retain curated hardware evidence with the source repository.
+!docs/validation/**/*.log

@@ -1,0 +1,4 @@
+# Font scalar/vector equivalence must run, rather than be skipped, in release CI.
+numpy==2.5.0
+freetype-py==2.5.1
+fonttools==4.64.0

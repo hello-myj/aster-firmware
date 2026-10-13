@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 
 
-def run_c(code):
+def run_c(code, timeout=5):
     with tempfile.TemporaryDirectory() as directory:
         executable=str(Path(directory)/'test')
         result=subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror',
@@ -14,7 +14,7 @@ def run_c(code):
             input=code,text=True,capture_output=True)
         if result.returncode:
             raise AssertionError(result.stderr)
-        subprocess.run([executable],check=True,timeout=5)
+        subprocess.run([executable],check=True,timeout=timeout)
 
 
 class Waveshare(unittest.TestCase):

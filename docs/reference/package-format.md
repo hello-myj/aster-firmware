@@ -71,7 +71,7 @@ then file_count × 12B: path_off, data_off, data_len  (offsets from blob start)
 then path strings (NUL-terminated) and file bytes, 4-byte padded
 ```
 
-Paths are relative (`icons/clock.bin`), no `..`, no leading `/`. Install extracts to `/SD:/aster/apps/<id>/assets/<path>`. Reinstall deletes the old `assets/` tree first and keeps `data/`. The original `package.ast` is still stored in full (same double-copy as wasm).
+Paths are relative (`icons/clock.bin`), no `..`, no leading `/`. Install extracts into the inactive code slot of `/SD:/aster/apps/<id>/`; APPs access the selected resources through `/assets/<path>`. Upgrade keeps the current code slot intact until commit and preserves the stable `data/` and `cache/` directories. The original `package.ast` is still stored in full (same double-copy as wasm).
 
 App icons use the **ASTI** pixel format (see [gfx-engine.md](gfx-engine.md)). No fonts are
 packed: since ABI 2.1 every glyph streams from one TTF on the SD card
@@ -150,18 +150,15 @@ done by filename, not by a manifest field (see the AOT paragraph above).
 
 ## Install layout (device)
 
-```
-/SD:/aster/apps/<id>/
-  ├── package.ast        (original copy)
-  ├── app.wasm           (extracted)
-  ├── app.aot-<target>   (extracted, optional)
-  ├── icon.bin           (extracted ASTI launcher tile, optional)
-  ├── manifest.json      (extracted; includes category / orientation when set)
-  ├── assets/            (optional)
-  └── data/              (app sandbox root, created on first write)
-```
+The device stores program files and resources in two private version slots,
+with separate commit records and stable user-data directories. Existing flat
+installations remain readable. The current layout, commit rules, error handling
+and reboot recovery are documented in [APP installation and recovery](../package-installation.md).
 
-`app.toml` may set `icon = "icon.bin"` (ASTI packed into the `.ast` icon section) and `category = "game"|"tool"|"system"`, and `orientation = "portrait"|"landscape"`. Install writes the tile to `icon.bin` and copies `category` and `orientation` into the on-disk manifest. The desktop lists apps from the registry and loads `"<id>/icon.bin"`; it does not guess icons from the id string.
+`app.toml` may declare `icon`, `category` and `orientation`. Install extracts the
+ASTI icon and normalized metadata into the selected code generation; the desktop
+reads them through the registry. APPs keep using the public `/assets`, `/data`
+and `/cache` paths, without embedding physical version-slot paths.
 
 `aster app install <path.ast>` verifies: magic, header consistency
 (offsets + lengths inside file), manifest JSON required keys, ABI compat

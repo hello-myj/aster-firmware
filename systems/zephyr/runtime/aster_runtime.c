@@ -4,6 +4,7 @@
  * ASTER runtime core: WAMR integration + app event loop thread.
  */
 #include "aster_runtime.h"
+#include "aster_watchdog.h"
 #include "aster_native.h"
 #include "aster_mem.h"
 #include "aster_storage.h"
@@ -321,6 +322,8 @@ int aster_runtime_init(void)
 	k_sem_init(&worker_ready, 0, 1);
 	k_sem_init(&worker_done, 0, 1);
 	k_work_init(&relaunch_work, relaunch_fn);
+	int guard = aster_watchdog_init();
+	if (guard) { return guard; }
 	k_thread_stack_t *app_stack = aster_dram_alloc(
 			K_KERNEL_STACK_LEN(CONFIG_ASTER_APP_STACK_SIZE));
 
@@ -387,7 +390,8 @@ static int ctx_load(aster_app_ctx_t *ctx, const aster_app_rec_t *rec)
 {
 	char dir[192];
 	char path[224];
-	aster_storage_app_dir(dir, sizeof(dir), rec->id);
+	int selected = aster_storage_app_code_dir(dir, sizeof(dir), rec->id);
+	if (selected) { return selected; }
 
 	if (!rec->has_aot || !IS_ENABLED(CONFIG_ASTER_AOT)) {
 		LOG_ERR("AOT required on device: rebuild and reinstall %s with AOT", rec->id);
@@ -469,19 +473,37 @@ static int ctx_load(aster_app_ctx_t *ctx, const aster_app_rec_t *rec)
 	return 0;
 }
 
+/* Report committed Guest linear bytes, not an unsupported global pool query. */
+static void ctx_note_linear_memory(aster_app_ctx_t *ctx)
+{
+	uint64_t first = 0, end = 0;
+	if (wasm_runtime_get_app_addr_range(ctx->module_inst, 0, &first, &end) &&
+	    end >= first && end - first <= UINT32_MAX) {
+		aster_app_mgr_note_mem(ctx->id, (uint32_t)(end - first));
+	}
+}
+
 static int call_fn(aster_app_ctx_t *ctx, void *func, uint32_t argc, uint32_t *ret)
 {
 	if (!func) {
 		return 0;
 	}
 	uint32_t argv[2] = { 0, 0 };
-	if (!wasm_runtime_call_wasm(ctx->exec_env, func, argc, argv)) {
+	enum aster_callback_phase phase = func == ctx->f_init ? ASTER_CB_INIT :
+		func == ctx->f_start ? ASTER_CB_START : func == ctx->f_stop ? ASTER_CB_STOP :
+		func == ctx->f_destroy ? ASTER_CB_DESTROY : func == ctx->f_pause ? ASTER_CB_PAUSE : ASTER_CB_RESUME;
+	aster_watchdog_begin(ctx->id,phase);
+	bool ok = wasm_runtime_call_wasm(ctx->exec_env, func, argc, argv);
+	int late = aster_watchdog_end();
+	if (late) { ctx->crashed = ctx->quit = true; return ASTER_ETIMEDOUT; }
+	if (!ok) {
 		const char *ex = wasm_runtime_get_exception(ctx->module_inst);
-		if (ctx->exit_clean) {
+		if (ctx->exit_clean && ex && strstr(ex,"terminated by user")) {
 			/* aster_app_exit() -> wasm_runtime_terminate(): expected */
 			LOG_DBG("wasm call ended by aster_app_exit: %s", ex ? ex : "?");
 		} else {
 			LOG_ERR("trap in wasm call: %s", ex ? ex : "?");
+			ctx->crashed = ctx->quit = true;
 		}
 		wasm_runtime_clear_exception(ctx->module_inst);
 		return -EIO;
@@ -505,13 +527,17 @@ static void deliver_event(aster_app_ctx_t *ctx, const aster_event_t *ev)
 	memcpy(native, ev, sizeof(*ev));
 
 	uint32_t argv[1] = { offset };
-	if (!wasm_runtime_call_wasm(ctx->exec_env, ctx->f_event, 1, argv)) {
-		const char *ex = wasm_runtime_get_exception(ctx->module_inst);
+	aster_watchdog_begin(ctx->id,ASTER_CB_EVENT);
+	bool ok = wasm_runtime_call_wasm(ctx->exec_env, ctx->f_event, 1, argv);
+	int late = aster_watchdog_end();
+	if (!ok || late) {
+		const char *detail = wasm_runtime_get_exception(ctx->module_inst);
+		char ex[128];snprintf(ex,sizeof(ex),"%s",detail ? detail : (late ? "callback deadline exceeded" : "?"));
 		wasm_runtime_clear_exception(ctx->module_inst);
 		wasm_runtime_module_free(ctx->module_inst, offset);
 		/* aster_app_exit aborts the in-flight call: that is a clean stop */
 		if (!ctx->exit_clean) {
-			LOG_ERR("ASTER_TRAP %s: %s", ctx->id, ex ? ex : "?");
+			LOG_ERR("ASTER_TRAP %s: %s", ctx->id, ex);
 			ctx->crashed = true;
 		}
 		ctx->quit = true;
@@ -819,10 +845,7 @@ static void app_event_loop(aster_app_ctx_t *ctx)
 			deliver_event(ctx, &ev);
 		}
 
-		/* memory stats (runtime pool, not wasm linear: proxy) */
-		mem_alloc_info_t mai;
-		wasm_runtime_get_mem_alloc_info(&mai);
-		aster_app_mgr_note_mem(ctx->id, mai.total_size - mai.total_free_size);
+		ctx_note_linear_memory(ctx);
 
 		/* Pace to the framerate, but slice the sleep so touch latency
 		 * stays low: a single k_msleep(frame) would make the runtime
@@ -934,11 +957,12 @@ static int ctx_startup(aster_app_ctx_t *ctx)
 	ctx->start_ms = (uint64_t)k_uptime_get();
 
 	uint32_t init_ret = 0;
-	if (call_fn(ctx, ctx->f_init, 0, &init_ret) != 0) {
+	int init_call = call_fn(ctx, ctx->f_init, 0, &init_ret);
+	if (init_call != 0) {
 		if (!ctx->exit_clean) {
-			LOG_ERR("aster_app_init trapped");
+			LOG_ERR("aster_app_init failed: %d", init_call);
 			ctx_cleanup(ctx);
-			return ASTER_ECORRUPT;
+			return init_call == ASTER_ETIMEDOUT ? ASTER_ETIMEDOUT : ASTER_ECORRUPT;
 		}
 		ctx->quit = true; /* exited from within init: skip straight to teardown */
 		return ASTER_OK;
@@ -949,9 +973,10 @@ static int ctx_startup(aster_app_ctx_t *ctx)
 		return ASTER_ESTATE;
 	}
 
-	if (call_fn(ctx, ctx->f_start, 0, NULL) != 0 && !ctx->exit_clean) {
+	int start_call = call_fn(ctx, ctx->f_start, 0, NULL);
+	if (start_call != 0 && !ctx->exit_clean) {
 		ctx_cleanup(ctx);
-		return ASTER_ECORRUPT;
+		return start_call == ASTER_ETIMEDOUT ? ASTER_ETIMEDOUT : ASTER_ECORRUPT;
 	}
 	if (ctx->exit_clean) {
 		ctx->quit = true;
@@ -1010,7 +1035,7 @@ static void worker_fn(void *p1, void *p2, void *p3)
 #endif
 			/* the ctx never ran: hand the record back, aster_app_start
 			 * published it as RUNNING before the handoff */
-			aster_app_mgr_set_state(ctx->id, ASTER_APP_STATE_STOPPED, 0);
+			aster_app_mgr_set_state(ctx->id, ASTER_APP_STATE_CRASHED, (uint32_t)-worker_result);
 			/* this path skips the teardown below, and it is the
 			 * launcher -- not another app -- that comes back, so
 			 * the window has to be put back here too. */
@@ -1071,7 +1096,7 @@ static void worker_fn(void *p1, void *p2, void *p3)
 #endif
 
 		aster_app_mgr_set_state(id, crashed ? ASTER_APP_STATE_CRASHED
-					    : ASTER_APP_STATE_STOPPED, 0);
+					    : ASTER_APP_STATE_STOPPED, crashed ? (uint32_t)-ASTER_ECORRUPT : 0);
 		if (crashed) {
 			LOG_ERR("app crashed: %s (resources reclaimed)", id);
 		}
@@ -1106,6 +1131,8 @@ static int app_start_common(const char *id, bool wait_ready)
 	}
 
 	k_mutex_lock(&app_lock, K_FOREVER);
+	aster_app_mgr_files_lock();
+	bool files_locked = true;
 	int ret = ASTER_OK;
 
 	if (current || worker_pending) {
@@ -1144,6 +1171,10 @@ static int app_start_common(const char *id, bool wait_ready)
 	 * lifetime: worker_fn's startup-failure path hands it back to STOPPED
 	 * and teardown sets CRASHED/STOPPED once the ctx is gone. */
 	aster_app_mgr_set_state(id, ASTER_APP_STATE_RUNNING, 0);
+	/* The live-state reservation now rejects upgrades. Release before the
+	 * worker calls guest init, which may itself call appmgr APIs. */
+	aster_app_mgr_files_unlock();
+	files_locked = false;
 
 	/* hand the whole launch to the worker: load -> init -> start.
 	 * `current` is set there before wasm executes, so aster_app_exit and
@@ -1165,6 +1196,7 @@ static int app_start_common(const char *id, bool wait_ready)
 	}
 	ret = worker_result;
 out:
+	if (files_locked) { aster_app_mgr_files_unlock(); }
 	k_mutex_unlock(&app_lock);
 	return ret;
 }

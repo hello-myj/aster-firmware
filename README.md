@@ -94,4 +94,8 @@ build/host/bin/aster-host tests/fixtures/hello.wasm
 
 `aster-host` 仅为 Linux x86_64 上的核心 ABI / APP 生命周期测试程序，不注册为硬件型号，不提供完整屏幕、存储、音频或摄像头模拟。它不需要 Zephyr 或 SDK；开发测试最多处理 600 帧，不限制单个无法返回的 WASM 调用。
 
-架构与移植边界见 [docs/architecture.md](docs/architecture.md)，许可见 [NOTICE.md](NOTICE.md)。实机显示、音频、触摸等仍需开发板验证。
+架构与移植边界见 [docs/architecture.md](docs/architecture.md)，P0 实测结果与剩余硬件验收见 [可靠性验收记录](docs/reliability-validation.md)，许可见 [NOTICE.md](NOTICE.md)。实机显示、音频、触摸等仍需开发板验证。
+
+APP 从独立工程到设备的步骤见 [快速入门](docs/quickstart.md)，ABI 报告、固定旧包与三仓库候选发布检查见 [发布验证](docs/release-validation.md)。
+
+固定图形场景的真机数据、合批收益及测量边界见 [图形基准](docs/graphics-benchmark.md)。模拟器确定性回放与故障诊断说明在 aster-sim/docs/replay.md。

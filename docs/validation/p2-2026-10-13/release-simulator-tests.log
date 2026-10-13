@@ -1,0 +1,286 @@
+TAP version 13
+# Subtest: stop cancels a pending effect decode but keeps its cache for later playback
+ok 1 - stop cancels a pending effect decode but keeps its cache for later playback
+  ---
+  duration_ms: 2.700676
+  type: 'test'
+  ...
+# Subtest: natural BGM completion reports IDLE feedback and a new session can play again
+ok 2 - natural BGM completion reports IDLE feedback and a new session can play again
+  ---
+  duration_ms: 0.396122
+  type: 'test'
+  ...
+# Subtest: effects mix with BGM, are decoded once, and same handle restarts without stacking
+ok 3 - effects mix with BGM, are decoded once, and same handle restarts without stacking
+  ---
+  duration_ms: 0.438505
+  type: 'test'
+  ...
+# Subtest: pause, seek and stop never send a false natural completion
+ok 4 - pause, seek and stop never send a false natural completion
+  ---
+  duration_ms: 0.21377
+  type: 'test'
+  ...
+# Subtest: stop while background decode is pending cannot start a stale stream
+ok 5 - stop while background decode is pending cannot start a stale stream
+  ---
+  duration_ms: 0.450853
+  type: 'test'
+  ...
+# Subtest: queued pre-unlock pause is preserved after enabling sound
+ok 6 - queued pre-unlock pause is preserved after enabling sound
+  ---
+  duration_ms: 0.37893
+  type: 'test'
+  ...
+# Subtest: external SDK 2048 loads 16 kHz effects and loops BGM
+ok 7 - external SDK 2048 loads 16 kHz effects and loops BGM
+  ---
+  duration_ms: 27.19837
+  type: 'test'
+  ...
+# Subtest: external SDK breakout WASM: native 240x320, touch and pause
+ok 8 - external SDK breakout WASM: native 240x320, touch and pause
+  ---
+  duration_ms: 281.518525
+  type: 'test'
+  ...
+# Subtest: external SDK breakout WASM: native 320x480, touch and pause
+ok 9 - external SDK breakout WASM: native 320x480, touch and pause
+  ---
+  duration_ms: 465.044038
+  type: 'test'
+  ...
+# Subtest: external SDK breakout WASM: native 480x800, touch and pause
+ok 10 - external SDK breakout WASM: native 480x800, touch and pause
+  ---
+  duration_ms: 154.929675
+  type: 'test'
+  ...
+# Subtest: native font sizes, default and ties match the reviewed SDK contract
+ok 11 - native font sizes, default and ties match the reviewed SDK contract
+  ---
+  duration_ms: 1.701576
+  type: 'test'
+  ...
+# Subtest: text background uses actual native ascent and line height at every size
+ok 12 - text background uses actual native ascent and line height at every size
+  ---
+  duration_ms: 0.766707
+  type: 'test'
+  ...
+# Subtest: ABI 3.7 paired IMU samples, cache TTL and u32 wraparound
+ok 13 - ABI 3.7 paired IMU samples, cache TTL and u32 wraparound
+  ---
+  duration_ms: 7.039305
+  type: 'test'
+  ...
+# Subtest: IMU validates before writing and reports missing/invalid channels
+ok 14 - IMU validates before writing and reports missing/invalid channels
+  ---
+  duration_ms: 2.096913
+  type: 'test'
+  ...
+# Subtest: external SDK ABI 3.7 imucube responds to six-axis motion
+ok 15 - external SDK ABI 3.7 imucube responds to six-axis motion
+  ---
+  duration_ms: 170.538026
+  type: 'test'
+  ...
+# Subtest: release cannot silently skip external APP regression
+ok 16 - release cannot silently skip external APP regression
+  ---
+  duration_ms: 1.3758
+  type: 'test'
+  ...
+# Subtest: default virtual filesystem performs no host writes and supports file lifecycle
+ok 17 - default virtual filesystem performs no host writes and supports file lifecycle
+  ---
+  duration_ms: 10.303277
+  type: 'test'
+  ...
+# Subtest: session memory survives reload, isolates APP data, shares SD, and fresh sessions reset
+ok 18 - session memory survives reload, isolates APP data, shares SD, and fresh sessions reset
+  ---
+  duration_ms: 3.156634
+  type: 'test'
+  ...
+# Subtest: external SDK 2048 renders using only memory storage
+ok 19 - external SDK 2048 renders using only memory storage
+  ---
+  duration_ms: 11.796364
+  type: 'test'
+  ...
+# Subtest: replay repeats complete WASM state with a fixed clock, including pause
+ok 20 - replay repeats complete WASM state with a fixed clock, including pause
+  ---
+  duration_ms: 922.203601
+  type: 'test'
+  ...
+# Subtest: allocator failure has APP/phase/ABI diagnostics and nonzero exit
+ok 21 - allocator failure has APP/phase/ABI diagnostics and nonzero exit
+  ---
+  duration_ms: 387.540086
+  type: 'test'
+  ...
+# Subtest: hard-required missing capability is reported before initialization
+ok 22 - hard-required missing capability is reported before initialization
+  ---
+  duration_ms: 293.816813
+  type: 'test'
+  ...
+# Subtest: quota failure is atomic and accounts for unlinked open files
+ok 23 - quota failure is atomic and accounts for unlinked open files
+  ---
+  duration_ms: 0.468814
+  type: 'test'
+  ...
+# Subtest: seeded sensor stimuli reproduce and malformed replay inputs fail
+ok 24 - seeded sensor stimuli reproduce and malformed replay inputs fail
+  ---
+  duration_ms: 0.557702
+  type: 'test'
+  ...
+# Subtest: real SDK 2048 deterministic swipe renders identical state and pixels
+ok 25 - real SDK 2048 deterministic swipe renders identical state and pixels
+  ---
+  duration_ms: 797.859181
+  type: 'test'
+  ...
+# Subtest: quota and optional-capability faults reach APP imports with correct errors
+ok 26 - quota and optional-capability faults reach APP imports with correct errors
+  ---
+  duration_ms: 3.502481
+  type: 'test'
+  ...
+# Subtest: WASM Trap report preserves APP and failing callback after cleanup
+ok 27 - WASM Trap report preserves APP and failing callback after cleanup
+  ---
+  duration_ms: 368.450815
+  type: 'test'
+  ...
+# Subtest: resolution parsing rejects invalid values and respects headless frame limit
+ok 28 - resolution parsing rejects invalid values and respects headless frame limit
+  ---
+  duration_ms: 1.065118
+  type: 'test'
+  ...
+# Subtest: ASTP truncation, malicious paths and ABI mismatch fail before instantiation
+ok 29 - ASTP truncation, malicious paths and ABI mismatch fail before instantiation
+  ---
+  duration_ms: 4.224526
+  type: 'test'
+  ...
+# Subtest: all public ABI 3.7 aster imports have an explicit handler
+ok 30 - all public ABI 3.7 aster imports have an explicit handler
+  ---
+  duration_ms: 6.696755
+  type: 'test'
+  ...
+# Subtest: memory bounds and struct version checks reject corrupt APP pointers
+ok 31 - memory bounds and struct version checks reject corrupt APP pointers
+  ---
+  duration_ms: 2.51104
+  type: 'test'
+  ...
+# Subtest: file seek/read/EOF, readonly assets, dirs and sandbox escape prevention
+ok 32 - file seek/read/EOF, readonly assets, dirs and sandbox escape prevention
+  ---
+  duration_ms: 5.634045
+  type: 'test'
+  ...
+# Subtest: permissions and KV isolation enforce APP manifest
+ok 33 - permissions and KV isolation enforce APP manifest
+  ---
+  duration_ms: 4.16562
+  type: 'test'
+  ...
+# Subtest: normal RGB565 surface preserves acquired pixels, flush clipping and destruction
+ok 34 - normal RGB565 surface preserves acquired pixels, flush clipping and destruction
+  ---
+  duration_ms: 9.023727
+  type: 'test'
+  ...
+# Subtest: virtual Wi-Fi exposes completed station state without host network calls
+ok 35 - virtual Wi-Fi exposes completed station state without host network calls
+  ---
+  duration_ms: 3.89297
+  type: 'test'
+  ...
+# Subtest: images decode to RGB565 and virtual camera/audio report explicit unavailable states
+ok 36 - images decode to RGB565 and virtual camera/audio report explicit unavailable states
+  ---
+  duration_ms: 27.354074
+  type: 'test'
+  ...
+# Subtest: WAV background, pause/resume/seek, effects and PCM recording fixtures
+ok 37 - WAV background, pause/resume/seek, effects and PCM recording fixtures
+  ---
+  duration_ms: 5.002495
+  type: 'test'
+  ...
+# Subtest: appmgr catalogs, switches and only virtually removes other APPs
+ok 38 - appmgr catalogs, switches and only virtually removes other APPs
+  ---
+  duration_ms: 3.316605
+  type: 'test'
+  ...
+# Subtest: WASM lifecycle dispatches frame, input, timers and pause without bundled APPs
+ok 39 - WASM lifecycle dispatches frame, input, timers and pause without bundled APPs
+  ---
+  duration_ms: 1.533169
+  type: 'test'
+  ...
+# Subtest: native panel canvas resolves to RGB565 and uses display dimensions
+ok 40 - native panel canvas resolves to RGB565 and uses display dimensions
+  ---
+  duration_ms: 1.734626
+  type: 'test'
+  ...
+# Subtest: resolution selects the window and board flags are not accepted
+ok 41 - resolution selects the window and board flags are not accepted
+  ---
+  duration_ms: 2.070045
+  type: 'test'
+  ...
+# Subtest: SDK compatibility check rejects same-ABI public structure changes
+ok 42 - SDK compatibility check rejects same-ABI public structure changes
+  ---
+  duration_ms: 4.276279
+  type: 'test'
+  ...
+# Subtest: linear memory follows the package maximum, not a board profile
+ok 43 - linear memory follows the package maximum, not a board profile
+  ---
+  duration_ms: 4.993961
+  type: 'test'
+  ...
+# Subtest: full-panel 320x480 canvas uses platform memory; ordinary and partial surfaces use APP heap
+ok 44 - full-panel 320x480 canvas uses platform memory; ordinary and partial surfaces use APP heap
+  ---
+  duration_ms: 7.055969
+  type: 'test'
+  ...
+# Subtest: scale-fit keeps the app buffer and inverse-maps touch into it
+ok 45 - scale-fit keeps the app buffer and inverse-maps touch into it
+  ---
+  duration_ms: 6.461286
+  type: 'test'
+  ...
+# Subtest: blocked WASM event is killed without freezing the CLI
+ok 46 - blocked WASM event is killed without freezing the CLI
+  ---
+  duration_ms: 1578.087925
+  type: 'test'
+  ...
+1..46
+# tests 46
+# suites 0
+# pass 46
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2864.037976

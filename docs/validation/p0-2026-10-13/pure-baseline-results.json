@@ -1,0 +1,8 @@
+[
+  {
+    "case": "watchdog disabled, ordinary SDK Xtensa AOT pure loop",
+    "result": "start command never regains shell prompt; manual recovery/firmware reset required",
+    "graceful_termination_proven": false,
+    "evidence": "/tmp/aster-p0-pure-baseline.log"
+  }
+]

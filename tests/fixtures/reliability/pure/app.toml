@@ -1,0 +1,15 @@
+[app]
+id="test.p0.pure"
+name="P0 pure loop"
+version="1.0.0"
+abi="3.7.0"
+abi_min="3.7"
+aot=true
+initial_memory=131072
+max_memory=262144
+heap=65536
+stack=16384
+requires=[]
+sources=["src/main.c"]
+[sdk]
+target="xtensa"

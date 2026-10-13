@@ -21,6 +21,7 @@ typedef struct {
 	char            name[40];
 	char            description[ASTER_APP_DESCRIPTION_MAX];
 	char            version[24];
+	int             code_slot; /* -1 legacy; 0/1 immutable code generation */
 	char            entry[48];   /* "app.wasm" or "app.aot" */
 	uint32_t        abi_major;
 	char            abi_min[8];
@@ -76,6 +77,15 @@ int  aster_app_mgr_count(void);
  * change must never target a live record.) */
 const aster_app_rec_t *aster_app_mgr_get(int idx);
 const aster_app_rec_t *aster_app_mgr_find(const char *id);
+/* Serialize code-version changes with launch reservations and uninstall.
+ * Lock order: runtime app_lock -> files_lock -> registry reg_lock.
+ * Never wait for guest execution while holding files_lock. */
+void aster_app_mgr_files_lock(void);
+void aster_app_mgr_files_unlock(void);
+/* NULL asks whether any APP is live, including launch reservations. */
+bool aster_app_mgr_is_live(const char *id);
+/* Selected slot cached by scan; immutable until a serialized registry change. */
+bool aster_app_mgr_code_slot(const char *id, int *slot);
 int  aster_app_mgr_install(const char *src_path);
 int  aster_app_mgr_uninstall(const char *id);
 /* read manifest.json fields into rec (used by scan) */

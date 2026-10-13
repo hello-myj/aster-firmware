@@ -65,5 +65,8 @@ if(selection MATCHES "CONFIG_ASTER_CFG_USB_CONSOLE=y")
   # stalled. Polling drains its FIFO and also supports shared binary transfers.
   file(APPEND "${bridge}" "CONFIG_SHELL_BACKEND_SERIAL_INTERRUPT_DRIVEN=n\nCONFIG_SHELL_BACKEND_SERIAL_API_POLLING=y\nCONFIG_SHELL_BACKEND_SERIAL_RX_POLL_PERIOD=1\n")
 endif()
-set(CONF_FILE "${ASTER_ROOT}/prj.conf;${selected_conf};${ASTER_USER_CONFIG};${bridge}")
+# Zephyr reads CONF_FILE from its cache. A new --config must replace a prior
+# fragment list even when reusing the same build directory.
+set(CONF_FILE "${ASTER_ROOT}/prj.conf;${selected_conf};${ASTER_USER_CONFIG};${bridge}"
+    CACHE STRING "Configuration fragments selected by Aster" FORCE)
 set(DTC_OVERLAY_FILE "${selected_overlay}" CACHE STRING "Hardware overlays" FORCE)

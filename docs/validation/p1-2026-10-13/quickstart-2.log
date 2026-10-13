@@ -1,0 +1,11 @@
+[build] test.quickstart v1.0.0 (2 src)
+  wasm: 16546 bytes
+  assets: 4 file(s)
+  aot:  42396 bytes
+packed /home/myj/zephyrproject/aster/aster-firmware/build/p1-verified/quickstart-app/dist/xtensa/test.quickstart.ast: 159800 bytes unsigned (hdr 72, manifest 494, wasm 16546, aot 42396, icon 27664, assets 72624)
+OK  /home/myj/zephyrproject/aster/aster-firmware/build/p1-verified/quickstart-app/dist/xtensa/test.quickstart.ast
+    id=test.quickstart name=quickstart-app ver=1.0.0 abi={'min': '3.4', 'target': '3.4.0'} requires=['display', 'touch', 'audio-out']
+    manifest=494B wasm=16546B aot=42396B(target 1) icon=27664B assets=72624B(4 files) hdr=72 total=159800B
+    imports: 10 aster_* + 1 libc-builtin (all resolvable), exports: 10
+    signature: none
+OK  /home/myj/zephyrproject/aster/aster-firmware/build/p1-verified/quickstart-app/dist/xtensa/test.quickstart.ast

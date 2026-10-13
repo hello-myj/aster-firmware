@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "aster_storage.h"
+#include "aster_versions.h"
+#include "aster_app_mgr.h"
 #include "aster_perms.h"
 
 #include <errno.h>
@@ -119,7 +121,7 @@ static int ensure_one(const char *dir)
 
 int aster_storage_mkdir_p(const char *path)
 {
-	char tmp[128];
+	char tmp[256];
 	size_t n = strlen(path);
 	if (n >= sizeof(tmp)) {
 		return -EINVAL;
@@ -229,6 +231,18 @@ void aster_storage_app_dir(char *buf, size_t n, const char *id)
 	snprintf(buf, n, "%s/%s", ASTER_APPS_DIR, id);
 }
 
+int aster_storage_app_code_dir(char *buf, size_t n, const char *id)
+{
+	char base[128];
+	aster_storage_app_dir(base, sizeof(base), id);
+	struct aster_version version;
+	if (aster_app_mgr_code_slot(id, &version.slot)) {
+		return aster_versions_dir(buf, n, base, version.slot);
+	}
+	int err = aster_versions_find(base, &version);
+	return err ? err : aster_versions_dir(buf, n, base, version.slot);
+}
+
 int aster_storage_sandbox(char *out, size_t n, const char *id, const char *app_path,
 			uint32_t perm)
 {
@@ -274,7 +288,12 @@ int aster_storage_sandbox(char *out, size_t n, const char *id, const char *app_p
 	}
 
 	char root[96];
-	aster_storage_app_dir(root, sizeof(root), id);
+	if (strcmp(sub, "/assets") == 0) {
+		int err = aster_storage_app_code_dir(root, sizeof(root), id);
+		if (err) { return err; }
+	} else {
+		aster_storage_app_dir(root, sizeof(root), id);
+	}
 	int w = snprintf(out, n, "%s%s%s", root, sub, app_path + strlen(sub));
 	if (w < 0 || (size_t)w >= n) {
 		return -ENAMETOOLONG;
