@@ -44,4 +44,12 @@ python aster-firmware/tools/graphics_benchmark.py --sdk aster-sdk --port /dev/tt
 
 原始结果、截图和回放证据见 [validation/p2-2026-10-13/](validation/p2-2026-10-13/)，corrected-memory/ 保存修正统计后同一固件的前后对比，production.json 记录正式固件恢复和 13 个 AOT APP 保留。最后已关闭 profiler/故障注入、清理测试 APP，Snake 启停正常。
 
-本轮只验证微雪上的矩形全帧场景与最终像素；未逐帧检查扫描中的瞬态画面。中文文本、抗锯齿、bitmap/缓存、脏矩形、launcher 动画和 LCKFB 应另建固定场景；不能把 8.53 倍外推到所有 APP。LCKFB 当前改动已完成完整编译，未做本轮实机性能测试。Windows 模拟器新增文件清单已调整，原生便携打包/运行仍待验收。模拟器可重复的状态/截图不替代上述硬件检查。
+本轮只验证微雪上的矩形全帧场景与最终像素；未逐帧检查扫描中的瞬态画面。中文文本、抗锯齿、bitmap/缓存、脏矩形、launcher 动画和 LCKFB 应另建固定场景；不能把 8.53 倍外推到所有 APP。LCKFB 已完成下述独立实机补测，仍未覆盖所有图形与 launcher 场景。Windows 模拟器新增文件清单已调整，原生便携打包/运行仍待验收。模拟器可重复的状态/截图不替代上述硬件检查。
+
+## LCKFB 纯配置补测（2026-10-13）
+
+LCKFB ESP32-S3，240×320 RGB565，明确选择 CONFIG_ASTER_HW_LCKFB_S3=y。同一固定场景各运行三轮：individual 平均绘制耗时为 43.97、43.95、43.98 ms/帧，batched 为 28.71、28.73、28.67 ms/帧；三轮均值为 43.97 与 28.70 ms/帧，约快 1.53 倍，耗时降低约 34.7%。实际平均帧间隔为 45.26 与 29.92 ms（约 22.10 与 33.42 帧/秒）。
+
+全部六份截图像素相同，两种模式 Guest 线性内存峰值均为 544768 字节。原始数据、镜像/配置哈希和截图见 [LCKFB 图形证据](validation/lckfb-2026-10-13/graphics/graphics.json)。这与微雪的分辨率、显示通路不同，不将 8.53 倍结果外推至立创板。
+
+首轮共用 build/ 根目录残留的微雪配置被 Zephyr 自动合并，结果已作废并移入 superseded-mixed-config/；上述数字均来自移除残留配置后重新刷入的纯 LCKFB 图形镜像。构建工具现拒绝未明确选择的 build/ 根目录配置碎片，并检查实际板型选择。

@@ -1,0 +1,316 @@
+hw imu
+accel  44 69 1000 mg
+gyro   1140 1921 -484 mdps
+aster:~$
+hw imu
+accel  46 71 1028 mg
+gyro   1109 1890 -453 mdps
+aster:~$
+hw imu
+accel  47 69 1029 mg
+gyro   1093 1859 -15 mdps
+aster:~$
+hw imu
+accel  45 71 1030 mg
+gyro   1171 1671 -453 mdps
+aster:~$
+hw imu
+accel  45 71 1030 mg
+gyro   1031 2015 -468 mdps
+aster:~$
+hw imu
+accel  48 68 1031 mg
+gyro   1203 1937 -624 mdps
+aster:~$
+hw imu
+accel  49 72 1030 mg
+gyro   1203 1874 -312 mdps
+aster:~$
+hw imu
+accel  46 71 1030 mg
+gyro   1187 1890 -156 mdps
+aster:~$
+1491 us flush=678 us sum=22169 us (max 24699/1119) cmds=45 flushed=76800 px
+aster:~$ [00:01:46.966,000] <inf> aster_gfx: gfx op: CLEAR     3483 us/frame  16%  n=1
+aster:~$ [00:01:46.975,000] <inf> aster_gfx: gfx op: RECT_S    1319 us/frame   6%  n=2
+aster:~$ [00:01:46.985,000] <inf> aster_gfx: gfx op: LINE_AA   1793 us/frame   8%  n=24
+aster:~$ [00:01:46.995,000] <inf> aster_gfx: gfx op: TRI      10760 us/frame  50%  n=12
+aster:~$ [00:01:47.005,000] <inf> aster_gfx: gfx op: TEXT      4060 us/frame  18%  n=6
+aster:~$ hw imu
+accel  48 71 1030 mg
+gyro   984 2031 -312 mdps
+aster:~$
+hw imu
+accel  48 70 1031 mg
+gyro   1015 2093 -609 mdps
+aster:~$
+hw imu
+accel  49 69 1030 mg
+gyro   1046 1968 -312 mdps
+aster:~$ [00:01:49.072,000] <inf> aster_plat: disp tim: n=64 avg_rect=153600 B direct send (no gather) write=1274559 us (MB/s w=7)
+aster:~$ [00:01:49.153,000] <inf> aster_gfx: gfx tim: raster=21602 us flush=681 us sum=22283 us (max 23971/852) cmds=45 flushed=76800 px
+aster:~$ [00:01:49.157,000] <inf> aster_gfx: gfx op: CLEAR
+hw imu
+accel  51 68 1029 mg
+gyro   1046 2156 -390 mdps
+aster:~$
+hw imu
+accel  47 70 1028 mg
+gyro   1203 1812 -421 mdps
+aster:~$
+hw imu
+accel  47 71 1031 mg
+gyro   796 2343 -515 mdps
+aster:~$
+hw imu
+accel  46 71 1028 mg
+gyro   1156 1781 -406 mdps
+aster:~$
+hw imu
+accel  49 70 1028 mg
+gyro   1437 1953 -562 mdps
+aster:~$
+hw imu
+accel  45 71 1000 mg
+gyro   1171 1843 -593 mdps
+aster:~$
+hw imu
+accel  48 69 1026 mg
+gyro   1078 2124 -531 mdps
+aster:~$
+hw imu
+accel  48 70 1061 mg
+gyro   984 2187 -515 mdps
+aster:~$
+hw imu
+accel  48 69 1031 mg
+gyro   1062 2218 -343 mdps
+aster:~$
+hw imu
+accel  45 69 1028 mg
+gyro   1062 2078 -359 mdps
+aster:~$
+hw imu
+accel  48 72 1025 mg
+gyro   874 2265 -499 mdps
+aster:~$ [00:02:00.047,000] <inf> aster_plat: disp tim: n=64 avg_rect=153600 B direct send (no gather) write=1276950 us (MB/s w=7)
+aster:~$ [00:02:00.130,000] <inf> aster_gfx: gfx tim: raster=21697 us flush=689 us sum=22386 us (max 24539/1313) cmds=45 flushed=76800 px
+aster:~$ [00:02:00.134,000] <inf> aster_gfx: gfx op: CLEAR     3559 us/frame  16%  n=1
+aster:~$ [00:02:00.143,000] <inf> aster_gfx: gfx op: RECT_S    1316 us/frame   6%  n=2
+aster:~$ [00:02:00.153,000] <inf> aster_gfx: gfx op: LINE_AA   1817 us/frame   8%  n=24
+aster:~$ [00:02:00.163,000] <inf> aster_gfx: gfx op: TRI      10796 us/frame  49%  n=12
+aster:~$ [00:02:00.173,000] <inf> aster_gfx: gfx op: TEXT      4142 us/frame  19%  n=6
+aster:~$
+hw imu
+accel  50 68 1031 mg
+gyro   1015 1765 -374 mdps
+aster:~$
+hw imu
+accel  48 71 1031 mg
+gyro   1078 1953 -515 mdps
+aster:~$
+hw imu
+accel  48 72 1030 mg
+gyro   1093 2312 -296 mdps
+aster:~$
+hw imu
+accel  50 71 1029 mg
+gyro   953 1812 -390 mdps
+aster:~$
+hw imu
+accel  49 70 1029 mg
+gyro   1171 2093 -62 mdps
+aster:~$
+hw imu
+accel  48 73 1028 mg
+gyro   1187 2249 -453 mdps
+aster:~$
+hw imu
+accel  46 70 1026 mg
+gyro   1078 1671 -265 mdps
+aster:~$
+nf> aster_native: [app:aster.imucube] imu sample seq=2472 err=0 a=487,681,10081 g=22,42,62
+aster:~$ hw imu
+accel  47 72 1026 mg
+gyro   1031 1921 -31 mdps
+aster:~$
+hw imu
+accel  46 70 1026 mg
+gyro   781 2140 -515 mdps
+aster:~$
+hw imu
+accel  47 71 1028 mg
+gyro   968 2062 -390 mdps
+aster:~$ [00:02:10.066,000] <inf> aster_native: [app:aster.imucube] imu sample seq=2531 err=0 a=480,708,10096 g=12,32,-4
+aster:~$
+hw imu
+accel  49 70 1029 mg
+gyro   1093 1984 -515 mdps
+aster:~$ [00:02:11.092,000] <inf> aster_gfx: gfx tim: raster=21709 us flush=707 us sum=22416 us (max 24407/2504) cmds=45 flushed=76800 px
+aster:~$ [00:02:11.095,000] <inf> aster_gfx: gfx op: CLEAR     3473 us/frame  16%  n=1
+aster:~$ [00:02:11.105,000] <inf> aster_gfx: gfx op: RECT_S    1335 us/frame   6%  n=2
+aster:~$ [00:02:11.115,000] <inf> aster_gfx: gfx op: LINE_AA   1794 us/frame   8%  n=24
+aster:~$ [00:02:11.124,000] <inf> aster_gfx: gfx op: TRI      10818 us/frame  50%  n=12
+aster:~$ [00:02:11.134,000] <inf> aster_gfx: gfx op: TEXT      4206 us/frame  19%  n=6
+aster:~$
+hw imu
+accel  47 71 1027 mg
+gyro   999 2203 -406 mdps
+aster:~$ [00:02:12.091,000] <inf> aster_native: [app:aster.imucube] imu sample seq=2590 err=0 a=487,689,10092 g=18,32,-11
+aster:~$
+hw imu
+accel  49 74 1027 mg
+gyro   1171 1968 -281 mdps
+aster:~$ [00:02:13.203,000] <inf> aster_plat: disp tim: n=64 avg_rect=153600 B direct send (no gather) write=1279174 us (MB/s w=7)
+aster:~$
+hw imu
+accel  48 71 1028 mg
+gyro   999 2140 -374 mdps
+aster:~$ [00:02:14.111,000] <inf> aster_native: [app:aster.imucube] imu sample seq=2649 err=0 a=477,707,9815 g=19,33,-11
+aster:~$
+hw imu
+accel  49 69 1030 mg
+gyro   1265 1921 -203 mdps
+aster:~$
+hw imu
+accel  51 70 1029 mg
+gyro   1093 2203 -281 mdps
+aster:~$ [00:02:16.141,000] <inf> aster_native: [app:aster.imucube] imu sample seq=2708 err=0 a=471,694,10074 g=20,34,-13
+aster:~$
+hw imu
+accel  49 73 1026 mg
+gyro   874 1843 -281 mdps
+aster:~$
+hw imu
+accel  48 70 1025 mg
+gyro   828 2249 -203 mdps
+aster:~$ [00:02:18.172,000] <inf> aster_native: [app:aster.imucube] imu sample seq=2767 err=0 a=462,696,10102 g=17,31,-6
+aster:~$
+hw imu
+accel  47 71 1025 mg
+gyro   765 2015 -515 mdps
+aster:~$
+hw imu
+accel  53 69 1000 mg
+gyro   937 2343 -718 mdps
+aster:~$ [00:02:20.199,000] <inf> aster_native: [app:aster.imucube] imu sample seq=2826 err=0 a=453,690,10129 g=20,36,-11
+aster:~$
+hw imu
+accel  47 70 1029 mg
+gyro   937 2046 -718 mdps
+aster:~$
+nf> aster_gfx: gfx tim: raster=22067 us flush=689 us sum=22756 us (max 25101/1359) cmds=45 flushed=76800 px
+aster:~$ [00:02:22.066,000] <inf> aster_gfx: gfx op: CLEAR     3532 us/frame  16%  n=1
+aster:~$ [00:02:22.076,000] <inf> aster_gfx: gfx op: RECT_S    1323 us/frame   6%  n=2
+aster:~$ [00:02:22.086,000] <inf> aster_gfx: gfx op: LINE_AA   1881 us/frame   8%  n=24
+aster:~$ [00:02:22.096,000] <inf> aster_gfx: gfx op: TRI      11006 us/frame  50%  n=12
+aster:~$ [00:02:22.106,000] <inf> aster_gfx: gfx op: TEXT      4242 us/frame  19%  n=6
+aster:~$ hw imu
+accel  49 70 1029 mg
+gyro   1124 1968 -218 mdps
+aster:~$ [00:02:22.222,000] <inf> aster_native: [app:aster.imucube] imu sample seq=2885 err=0 a=468,705,10095 g=16,35,-11
+aster:~$
+hw imu
+accel  49 73 1024 mg
+gyro   828 2156 -484 mdps
+aster:~$
+hw imu
+accel  47 72 1028 mg
+gyro   937 1671 -390 mdps
+aster:~$ [00:02:24.168,000] <inf> aster_plat: disp tim: n=64 avg_rect=153600 B direct send (no gather) write=1279552 us (MB/s w=7)
+aster:~$ [00:02:24.227,000] <inf> aster_native: [app:aster.imucube] imu sample seq=2945 err=0 a=465,699,10096 g=14,31,-11
+aster:~$ [00:02:24.251,000] <inf> aster_gfx: gfx tim: raster=22029 us flush=680 us sum=22709 us (max 27227/897) cmds=45 flushed=76800 px
+aster:~$ [00:02:24.254,000] <inf> aster_gfx: gfx op: CLEAR     3590 us/frame  16%  n=1
+hw imu
+accel  50 72 1028 mg
+gyro   1062 2031 -343 mdps
+aster:~$
+hw imu
+accel  47 71 1029 mg
+gyro   984 2156 -15 mdps
+aster:~$ [00:02:26.251,000] <inf> aster_native: [app:aster.imucube] imu sample seq=3004 err=0 a=489,701,10087 g=20,32,-7
+aster:~$
+hw imu
+accel  50 69 1031 mg
+gyro   968 2234 -499 mdps
+aster:~$
+hw imu
+accel  48 75 1032 mg
+gyro   968 2124 -296 mdps
+aster:~$
+hw imu
+accel  52 73 1028 mg
+gyro   874 2203 -374 mdps
+aster:~$
+hw imu
+accel  46 71 1028 mg
+gyro   1062 1937 -546 mdps
+aster:~$
+hw imu
+accel  52 73 1023 mg
+gyro   1156 1874 -140 mdps
+aster:~$
+hw imu
+accel  49 72 1032 mg
+gyro   1156 2249 -578 mdps
+aster:~$
+er:~$ [00:02:33.078,000] <inf> aster_gfx: gfx op: TEXT      4189 us/frame  19%  n=6
+aster:~$ hw imu
+accel  50 71 1030 mg
+gyro   1265 1921 -546 mdps
+aster:~$
+hw imu
+accel  48 73 1030 mg
+gyro   937 2312 -374 mdps
+aster:~$
+hw imu
+accel  52 74 1030 mg
+gyro   906 1984 -218 mdps
+aster:~$ [00:02:35.146,000] <inf> aster_plat: disp tim: n=64 avg_rect=153600 B direct send (no gather) write=1286246 us (MB/s w=7)
+aster:~$ [00:02:35.227,000] <inf> aster_gfx: gfx tim: raster=21702 us flush=723 us sum=22425 us (max 24699/2516) cmds=45 flushed=76800 px
+aster:~$ [00:02:35.230,000] <inf> aster_gfx: gfx op: CLEAR     3526 us/frame  16%  n=1
+aster:~$ [00:02:35.240,000] <inf> aster_gfx: gfx op: RECT_S    1310 us/frame   6%  n=2
+aster:~$ [00:02:35.250,000] <inf> aster_gfx: gfx op: LINE_AA   1824 us/frame   8%  n=24
+aster:~$ [00:02:35.260,000] <inf> aster_gfx: gfx op: TRI      10834 us/frame  50%  n=12
+aster:~$ [00:02:35.270,000] <inf> aster_gfx: gfx op: TEXT      4134 us/frame  19%  n=6
+aster:~$
+hw imu
+accel  49 72 1031 mg
+gyro   1249 1828 -374 mdps
+aster:~$
+hw imu
+accel  51 71 1028 mg
+gyro   999 1984 -343 mdps
+aster:~$
+hw imu
+accel  49 71 1027 mg
+gyro   843 1718 -640 mdps
+aster:~$
+> aster app state aster.imucube
+aster app state aster.imucube
+aster.imucube: RUNNING (err=0 starts=1)
+aster:~$
+> aster app stats aster.imucube
+aster app stats aster.imucube
+id=aster.imucube state=RUNNING
+mem: initial=393216 max=1048576 stack=16384 heap=262144 peak=286720
+frames=3389 fps=30 uptime=116393ms
+aster:~$ [00:02:39.536,000] <inf> aster_plat: disp tim: n=64 avg_rect=153600 B direct send (no gather) write=1279403 us (MB/s w=7)
+aster:~$ [00:02:39.617,000] <inf> aster_gfx: gfx tim: raster=21555 us flush=700 us sum=22255 us (max 25354/2255) cmds=45 flushed=76800 px
+aster:~$ [00:02:39.621,000] <inf> aster_gfx: gfx op: CLEAR     3513 us/frame  16%  n=1
+aster:~$ [00:02:39.630,000] <inf> aster_gfx: gfx op: RECT_S    1310 us/frame   6%  n=2
+aster:~$ [00:02:39.640,000] <inf> aster_gfx: gfx op: LINE_AA   1793 us/frame   8%  n=24
+aster:~$ [00:02:39.650,000] <inf> aster_gfx: gfx op: TRI      10810 us/frame  50%  n=12
+aster:~$ [00:02:39.660,000] <inf> aster_gfx: gfx op: TEXT      4062 us/frame  18%  n=6
+aster:~$
+> aster sys mem
+aster sys mem
+dram heap:  size=49152 peak=35660 used=32340 free=16572
+            (AOT text is a PSRAM alloc; this heap is DMA/stacks)
+ext ram:    8388608 total, wamr_cap=7864320
+psram:      static=139616 heap=7864320 used=8003936 of 8388608 (95%)
+ext heap:   largest free block >= 6291456 B
+ext heap:   8 x 150 KB blocks fit at once
+stacks:     see `kernel thread stacks`
+static dram: build-time; `west build` prints dram0_0_seg
+aster:~$

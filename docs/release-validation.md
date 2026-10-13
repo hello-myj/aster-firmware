@@ -56,4 +56,10 @@ P1 第 5～7 项实现和本地验收已完成。固件 65 项、SDK 75 项测�
 
 证据保存在 [validation/p1-2026-10-13/](validation/p1-2026-10-13/)。本地包含未提交改动，report 标记 dirty；这不是已发布版本。两板 build identity 的 hardware_test=not_run 指本次新构建镜像没有刷入实机，不与另行记录的旧镜像 APP 验证混为一谈。
 
-仍待发布前完成：提交三仓库改动并审阅/更新所需组合提交号；从干净检出运行 `--require-clean` 和远端 CI，确认 integration 及两板 job 成功；Windows 原生快速入门及 LCKFB 实机旧包/新工程验证；用户可见画面和外设行为按设备范围验收。GitHub 工作流已编写并通过 YAML 解析，未推送或触发远端运行。P0 剩余 SD/断电/长期资源验收仍在 [可靠性清单](reliability-validation.md)，不会因 P1 自动检查通过而清除。
+后续三仓库分支提交/推送、本地 `--require-clean` 及 LCKFB 旧包/新工程补测已完成，见下方更新。仍待发布前完成：核实远端 CI 的 integration 及两板 job 成功；Windows 原生快速入门；用户可见画面和外设行为按设备范围验收。最新板型保护改动尚未提交，提交后应对最终候选重新运行干净发布检查。P0 剩余 SD/断电/长期资源验收仍在 [可靠性清单](reliability-validation.md)，不会因 P1 自动检查通过而清除。
+
+## LCKFB 与分支更新（2026-10-13）
+
+三仓库已提交并推送 GitHub 的 work/p0-p2-20261013 分支，主分支未合并；本地 --require-clean 检查已通过。远端 CI 是否通过仍需单独核实，Windows 原生验收仍待完成。
+
+LCKFB 纯板型诊断镜像上，冻结旧 hello/2048 和文档快速入门工程均安装并以 Xtensa AOT 启动通过；hello 正常结束，2048 与快速入门运行后停止。临时 hello/快速入门已卸载，2048 同 ID 更新保留原用户目录。证据见 [LCKFB 兼容结果](validation/lckfb-2026-10-13/compatibility/hardware.json)。记录中镜像哈希是调用者提供的已刷入镜像哈希，并非设备读回认证。构建板型保护和本轮记录为后续未提交改动，不将旧分支 HEAD 宣称为它们的完整源码版本。

@@ -1,0 +1,75 @@
+{
+  "firmware_sha256": "e7cf57d0ef16a12723982a218c1021895dc8a79b98abad8828230f82e914a006",
+  "config_sha256": "b732a2c58a3aaa7635c9a199cdc7f526766879f2d8535b10f468690a74f43d86",
+  "selected_hardware": "lckfb-s3",
+  "fault_injection": false,
+  "graphics_profilers": false,
+  "timeouts_ms": [
+    15000,
+    5000,
+    3000
+  ],
+  "cases": [
+    {
+      "id": "aster.snake",
+      "aot_start_stop_passed": true
+    },
+    {
+      "id": "aster.gallery",
+      "aot_start_stop_passed": true
+    },
+    {
+      "id": "aster.reader",
+      "aot_start_stop_passed": true
+    },
+    {
+      "id": "aster.player",
+      "aot_start_stop_passed": true
+    },
+    {
+      "id": "aster.game.2048",
+      "aot_start_stop_passed": true
+    },
+    {
+      "id": "aster.starcatch",
+      "aot_start_stop_passed": true
+    },
+    {
+      "id": "com.example.breakout",
+      "aot_start_stop_passed": true
+    }
+  ],
+  "default_event_elapsed_ms": 5008,
+  "default_event_watchdog_passed": true,
+  "original_ids_preserved": [
+    "aster.apitest",
+    "aster.camera",
+    "aster.chess",
+    "aster.gallery",
+    "aster.game.2048",
+    "aster.imucube",
+    "aster.permdeny",
+    "aster.player",
+    "aster.prismdrop",
+    "aster.reader",
+    "aster.snake",
+    "aster.starcatch",
+    "aster.trap",
+    "aster.xiangqi",
+    "com.example.breakout",
+    "com.example.neonduel",
+    "com.example.sdkhello"
+  ],
+  "test_apps_removed": true,
+  "imu_left_running_for_user": false,
+  "status": "passed",
+  "base_commit": "eaa34c88edb4e7b685e7129a363c28f08b3987ad",
+  "local_build_identity_guard_added": true,
+  "physical_feedback": {
+    "display": "normal",
+    "imu_motion": "normal",
+    "touch_zero_button": "normal",
+    "confirmed_by_user": true
+  },
+  "returned_to_launcher": true
+}

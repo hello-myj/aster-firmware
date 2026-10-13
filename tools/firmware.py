@@ -33,6 +33,16 @@ def hardware(path=None):
     return matches[0]
 
 
+def check_build_fragments(build_dir, selected_config):
+    """Zephyr appends build-root *.conf after CONF_FILE; reject stray profiles."""
+    allowed = {Path(selected_config).resolve(), (Path(build_dir) / "aster-services.conf").resolve()}
+    unexpected = [p for p in Path(build_dir).glob("*.conf") if p.resolve() not in allowed]
+    if unexpected:
+        raise ValueError("Unexpected build-root Kconfig fragments (Zephyr auto-merges them): " +
+                         ", ".join(str(p) for p in sorted(unexpected)) +
+                         ". Move them outside the build directory or select the intended file with --config.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["menuconfig", "build", "flash", "config"])
@@ -47,6 +57,8 @@ def main():
         os.environ["KCONFIG_CONFIG"] = str(selected_config)
         menuconfig.menuconfig(config)
         return 0
+    if args.command in ("build", "flash"):
+        check_build_fragments(build_dir, selected_config)
     selected = hardware(args.config)
     if args.command == "config":
         print(selected["public"]["name"])

@@ -1,0 +1,472 @@
+> aster sys info
+aster sys info
+ASTER 0.1.0
+platform=zephyr board=aster.esp32s3.lckfb soc=esp32s3 arch=xtensa abi=3.7.0
+cpu=240000000 hz cores=2
+ram int=327680 ext=8388608 flash=16777216
+sd_mounted=yes apps=17
+sigpolicy=allow-unsigned
+aster:~$
+> aster app list
+aster app list
+ID                           NAME             VER      STATE
+aster.imucube                IMU 立方体    1.0.0    STOPPED [AOT]
+aster.apitest                API Test         1.0.0    STOPPED [AOT]
+aster.gallery                相册           1.0.1    STOPPED [AOT]
+aster.game.2048              2048             1.3.0    STOPPED [AOT]
+aster.permdeny               Perm Deny Test   1.0.0    STOPPED [AOT]
+aster.player                 Player           1.0.0    STOPPED [AOT]
+aster.reader                 Reader           1.0.0    STOPPED [AOT]
+aster.snake                  Snake            1.2.1    STOPPED [AOT]
+aster.trap                   Trap Test        1.0.0    STOPPED [AOT]
+aster.chess                  Chess            1.0.1    STOPPED
+aster.starcatch              Star Catch       1.0.0    STOPPED [AOT]
+aster.prismdrop              Prism Drop       1.0.0    STOPPED [AOT]
+com.example.sdkhello         SDK Hello        1.0.0    STOPPED [AOT]
+aster.camera                 拍照           1.0.0    STOPPED
+aster.xiangqi                Chinese Chess    1.0.0    STOPPED
+com.example.neonduel         霓虹对决     1.0.1    STOPPED [AOT]
+com.example.breakout         打砖块        1.0.3    STOPPED [AOT]
+aster:~$
+> aster app install /SD:/test.p0.eventloop.ast
+aster app install /SD:/test.p0.eventloop.ast
+[00:00:25.002,000] <err> fs: failed to unlink path (-2)
+[00:00:25.704,000] <inf> aster_pkg: install: assets 2 file(s) -> /SD:/aster/apps/test.p0.eventloop/.v0/assets
+[00:00:25.846,000] <inf> aster_pkg: installed test.p0.eventloop (P0 eventloop v2.0.0, 4 KB wasm)
+installed OK
+aster:~$
+> eventloop start [sent once]
+aster app start test.p0.eventloop
+[00:00:27.283,000] <inf> aster_qpanel: qpanel: volume 40 restored
+[00:00:27.284,000] <inf> aster_flux: FLUX Rev.04: 320x480, 22 entries (18 installed)
+[00:00:27.363,000] <inf> aster_fontsd: cpfont cache: released 186992 B
+[00:00:27.364,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:00:27.367,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:00:27.834,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1d3680 exec=0x421d3680 size=10116
+[00:00:27.975,000] <inf> aster_rt: guest linear cap 106 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:00:28.000,000] <err> fs: file open error (-2)
+[00:00:28.040,000] <err> fs: file open error (-2)
+[00:00:28.119,000] <inf> aster_native: [app:test.p0.eventloop] P0 TEST version=2 save=OK cache=OK asset=resource-version=2
+
+[00:00:28.119,000] <inf> aster_plat: display flip: 2 front buffers x 153600 B in PSRAM
+[00:00:28.127,000] <inf> aster_native: surface: 240x320 panel-canvas requested -> granted (engine writes panel order)
+[00:00:28.142,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+[00:00:28.289,000] <inf> aster_native: [app:test.p0.eventloop] STRESS mode=2 file=67108865 timer=100663297 effect=1
+[00:00:28.289,000] <inf> aster_rt: app started: test.p0.eventloop (P0 eventloop, 12 KB, AOT)
+[00:�ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x3 (RTC_SW_SYS_RST),boot:0xb (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4037ecce
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fc9a190,len:0x7a54
+load:0x40378000,len:0x12178
+load:0x50000050,len:0x24
+SHA-256 comparison failed:
+Calculated: 0e8c4016de5852fdbc1657da1c472f78ad4ffad8f629619bade254bd844106f8
+Expected: 00000000c0630000000000000000000000000000000000000000000000000000
+Attempting to boot anyway...
+entry 0x40382bb0
+I (soc_init): ESP Simple boot
+I (soc_init): compile time Oct 13 2026 14:12:54
+W (soc_init): Unicore bootloader
+I (soc_init): chip revision: v0.2
+I (flash_init): Boot SPI Speed : 80MHz
+I (flash_init): SPI Mode       : DIO
+I (flash_init): SPI Flash Size : 16MB
+I (boot): DRAM	: lma=00000020h vma=3fc9a190h size=07a54h ( 31316)
+I (boot): IRAM	: lma=00007a7ch vma=40378000h size=12178h ( 74104)
+I (boot): RTC_DATA	: lma=00019bfch vma=50000050h size=00024h (    36)
+I (boot): IROM	: lma=00020000h vma=42000000h size=e9a60h (957024)
+I (boot): DROM	: lma=00110000h vma=3c0f0000h size=3acf4h (240884)
+I (boot): libc heap size 219 kB.
+I (cache): Instruction cache: size 32KB, 8Ways, cache line size 32Byte
+I (spi_flash): detected chip: generic
+I (spi_flash): flash io: dio
+I (octal_psram): vendor id    : 0x0d (AP)
+I (octal_psram): dev id       : 0x02 (generation 3)
+I (octal_psram): density      : 0x03 (64 Mbit)
+I (octal_psram): good-die     : 0x01 (Pass)
+I (octal_psram): Latency      : 0x01 (Fixed)
+I (octal_psram): VCC          : 0x01 (3V)
+I (octal_psram): SRF          : 0x01 (Fast Refresh)
+I (octal_psram): BurstType    : 0x01 (Hybrid Wrap)
+I (octal_psram): BurstLen     : 0x01 (32 Byte)
+I (octal_psram): Readlatency  : 0x02 (10 cycles@Fixed)
+I (octal_psram): DriveStrength: 0x00 (1/1)
+I (MSPI Timing): Enter psram timing tuning
+I (esp_psram): Found 8MB PSRAM device
+I (esp_psram): Speed: 80MHz
+
+aster:~$ [00:00:00.600,000] <inf> aster_ui_lvgl: native lvgl 320x240 band=160 rows/320 max
+aster:~$ [00:00:00.601,000] <inf> sdhc: SDHC I/O: slot: 0, bus width 1, clock 0Hz, card power OFF, voltage 3.3V
+aster:~$ [00:00:00.611,000] <inf> sdhc: Bus width set successfully to 1 bit
+aster:~$ [00:00:00.620,000] <inf> sdhc: Bus timing successfully changed to LEGACY
+aster:~$ [00:00:01.129,000] <inf> sdhc: SDHC I/O: slot: 0, bus width 1, clock 0Hz, card power ON, voltage 3.3V
+aster:~$ [00:00:01.630,000] <inf> sdhc: SDHC I/O: slot: 0, bus width 1, clock 400000Hz, card power ON, voltage 3.3V
+aster:~$ [00:00:01.631,000] <inf> sdhc: Bus clock successfully set to 400 kHz
+aster:~$ [00:00:01.645,000] <inf> sd: Maximum SD clock is under 25MHz, using clock of 10000000Hz
+aster:~$ [00:00:01.651,000] <inf> sdhc: SDHC I/O: slot: 0, bus width 1, clock 10000000Hz, card power ON, voltage 3.3V
+aster:~$ [00:00:01.663,000] <inf> sdhc: Bus clock successfully set to 10000 kHz
+aster:~$ [00:00:01.698,000] <inf> aster_storage: SD mounted: 14910 MB
+aster:~$ [00:00:02.636,000] <inf> aster_main: apps registered: 18
+aster:~$ [00:00:02.655,000] <inf> aster_wifi: saved Wi-Fi profile loaded for ChinaNet-CHZNJQR2-2.4G
+aster:~$ [00:00:02.656,000] <err> aster_watch: ASTER_RECOVERED id=test.p0.eventloop phase=event elapsed=5008
+aster:~$ [00:00:02.667,000] <inf> aster_rt: ASTER runtime ready (ABI 3.7, guest cap 7680 KB, WAMR 2.4.3)
+aster:~$ [00:00:02.678,000] <inf> aster_rt: system ui: built-in launcher
+aster:~$ [00:00:02.687,000] <inf> aster_fsvc: file svc on USB-CDC (ASTERPUT <path> <len> <crc32> [resume-off])
+aster:~$ [00:00:02.698,000] <inf> aster_main: ready — type `aster` or `hw` for commands
+aster:~$ [00:00:02.709,000] <inf> aster_ui_lvgl: lvgl window -> 240x320 (was 320x240)
+aster:~$ [00:00:02.718,000] <inf> aster_rt: display mode: portrait
+aster:~$ [00:00:02.770,000] <inf> aster_fontsd: cpfont 20px: 28988 glyphs available
+aster:~$ [00:00:02.780,000] <inf> aster_fontsd: cpfont 12px: 28988 glyphs available
+aster:~$ [00:00:02.790,000] <inf> aster_fontsd: cpfont 14px: 28988 glyphs available
+aster:~$ [00:00:02.800,000] <inf> aster_fontsd: cpfont 16px: 28988 glyphs available
+aster:~$ [00:00:02.810,000] <inf> aster_fontsd: cpfont 18px: 28988 glyphs available
+aster:~$ [00:00:02.821,000] <inf> aster_fontsd: cpfont 24px: 28988 glyphs available
+aster:~$ [00:00:02.832,000] <inf> aster_fontsd: cpfont 28px: 28988 glyphs available
+aster:~$ [00:00:02.844,000] <inf> aster_fontsd: cpfont 32px: 28988 glyphs available
+aster:~$ [00:00:02.855,000] <inf> aster_fontsd: cpfont 40px: 28988 glyphs available
+aster:~$ [00:00:02.866,000] <inf> aster_fontsd: cpfont 48px: 28988 glyphs available
+aster:~$ [00:00:02.867,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:00:03.411,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+aster:~$ [00:00:03.865,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aster:~$ [00:00:03.880,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$ [00:00:04.383,000] <inf> aster_fontsd: cpfont cache: 32px allocated 57672 B
+aster:~$ [00:00:04.713,000] <inf> aster_fontsd: cpfont cache: 28px allocated 46152 B
+aster:~$ [00:00:04.797,000] <inf> aster_audio: es8311 ready id=0x83
+aster:~$ [00:00:04.820,000] <inf> aster_audio: es7210 ready id=0x72 addr=0x41
+aster:~$ [00:00:04.821,000] <inf> aster_qpanel: qpanel: volume 40 restored
+aster:~$ [00:00:04.827,000] <inf> aster_flux: FLUX Rev.04: 320x480, 22 entries (18 installed)
+aster:~$ [00:00:05.575,000] <wrn> aster_time: SNTP ntp.aliyun.com failed: -11
+aster:~$ [00:00:05.576,000] <wrn> aster_time: SNTP time.cloudflare.com failed: -11
+aster:~$ [00:00:05.583,000] <wrn> aster_time: wall clock sync failed: -11; retrying
+aster:~$
+> aster sys info
+aster sys info
+ASTER 0.1.0
+platform=zephyr board=aster.esp32s3.lckfb soc=esp32s3 arch=xtensa abi=3.7.0
+cpu=240000000 hz cores=2
+ram int=327680 ext=8388608 flash=16777216
+sd_mounted=yes apps=18
+sigpolicy=allow-unsigned
+aster:~$
+> aster app state test.p0.eventloop
+aster app state test.p0.eventloop
+test.p0.eventloop: CRASHED (err=8 starts=0)
+aster:~$
+> aster app uninstall test.p0.eventloop
+aster app uninstall test.p0.eventloop
+[00:00:07.249,000] <inf> aster_app_mgr: uninstalled test.p0.eventloop
+uninstalled
+aster:~$
+> aster fs rm /SD:/test.p0.eventloop.ast
+aster fs rm /SD:/test.p0.eventloop.ast
+removed
+aster:~$ [00:00:07.587,000] <inf> aster_qpanel: qpanel: volume 40 restored
+aster:~$ [00:00:07.587,000] <inf> aster_flux: FLUX Rev.04: 320x480, 21 entries (17 installed)
+aster:~$
+> aster app start aster.snake
+aster app start aster.snake
+[00:00:07.991,000] <inf> aster_fontsd: cpfont cache: released 186992 B
+[00:00:07.992,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:00:07.995,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:00:08.457,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1d7cc0 exec=0x421d7cc0 size=19244
+[00:00:08.529,000] <inf> aster_rt: guest linear cap 106 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:00:08.546,000] <inf> aster_plat: display flip: 2 front buffers x 153600 B in PSRAM
+[00:00:08.546,000] <inf> aster_native: surface: 240x320 panel-canvas requested -> granted (engine writes panel order)
+[00:00:08.663,000] <inf> aster_native: [app:aster.snake] snake 240x320 grid 15x18
+[00:00:08.664,000] <inf> aster_rt: app started: aster.snake (Snake, 21 KB, AOT)
+[00:00:08.675,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+started aster.snake
+aster:~$
+> aster app state aster.snake
+aster app state aster.snake
+aster.snake: RUNNING (err=0 starts=1)
+aster:~$
+> aster app stop aster.snake
+aster app stop aster.snake
+[00:00:10.427,000] <inf> aster_fontsd: cpfont cache: released 62360 B
+[00:00:10.428,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:00:10.435,000] <inf> aster_rt: app stopped: aster.snake
+ok
+aster:~$ [00:00:10.447,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:00:10.448,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+aster:~$
+> aster app state aster.snake
+aster app state aster.snake
+aster.snake: STOPPED (err=0 starts=1)
+aster:~$
+> aster app start aster.gallery
+aster app start aster.gallery
+[00:00:11.737,000] <inf> aster_fontsd: cpfont cache: 32px allocated 57672 B
+[00:00:12.044,000] <inf> aster_fontsd: cpfont cache: 28px allocated 46152 B
+[00:00:12.150,000] <inf> aster_qpanel: qpanel: volume 40 restored
+[00:00:12.150,000] <inf> aster_flux: FLUX Rev.04: 320x480, 21 entries (17 installed)
+[00:00:12.284,000] <inf> aster_fontsd: cpfont cache: released 186992 B
+[00:00:12.284,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:00:12.288,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:00:12.759,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1d6600 exec=0x421d6600 size=13120
+[00:00:12.813,000] <inf> aster_rt: guest linear cap 106 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:00:12.868,000] <inf> aster_native: [app:aster.gallery] gallery: 4 images
+[00:00:12.868,000] <inf> aster_rt: app started: aster.gallery (相册, 16 KB, AOT)
+started aster.gallery
+aster:~$
+> aster app state aster.gallery
+aster app state aster.gallery
+aster.gallery: RUNNING (err=0 starts=1)
+aster:~$
+> aster app stop aster.gallery
+aster app stop aster.gallery
+[00:00:14.597,000] <inf> aster_fontsd: cpfont cache: released 34640 B
+[00:00:14.597,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:00:14.605,000] <inf> aster_rt: app stopped: aster.gallery
+ok
+aster:~$ [00:00:14.617,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:00:14.618,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+aster:~$
+> aster app state aster.gallery
+aster app state aster.gallery
+aster.gallery: STOPPED (err=0 starts=1)
+aster:~$
+> aster app start aster.reader
+[00:00:15.602,000] <inf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$ aster app start aster.reader
+[00:00:15.966,000] <inf> aster_fontsd: cpfont cache: 32px allocated 57672 B
+[00:00:16.271,000] <inf> aster_fontsd: cpfont cache: 28px allocated 46152 B
+[00:00:16.378,000] <inf> aster_qpanel: qpanel: volume 40 restored
+[00:00:16.378,000] <inf> aster_flux: FLUX Rev.04: 320x480, 21 entries (17 installed)
+[00:00:16.494,000] <inf> aster_fontsd: cpfont cache: released 186992 B
+[00:00:16.494,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:00:16.498,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:00:16.517,000] <inf> aster_time: wall clock synchronized (1791872234 UTC)
+[00:00:16.963,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1d94e0 exec=0x421d94e0 size=24428
+[00:00:17.051,000] <inf> aster_rt: guest linear cap 106 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:00:17.068,000] <inf> aster_plat: display flip: 2 front buffers x 153600 B in PSRAM
+[00:00:17.069,000] <inf> aster_native: surface: 240x320 panel-canvas requested -> granted (engine writes panel order)
+[00:00:17.087,000] <inf> aster_native: [app:aster.reader] reader 240x320 12 items 20px canvas=1
+[00:00:17.087,000] <inf> aster_rt: app started: aster.reader (Reader, 27 KB, AOT)
+[00:00:17.099,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+started aster.reader
+aster:~$
+> aster app state aster.reader
+aster app state aster.reader
+aster.reader: RUNNING (err=0 starts=1)
+aster:~$
+> aster app stop aster.reader
+aster app stop aster.reader
+[00:00:18.817,000] <inf> aster_fontsd: cpfont cache: released 62360 B
+[00:00:18.817,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:00:18.825,000] <inf> aster_rt: app stopped: aster.reader
+ok
+aster:~$ [00:00:18.837,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:00:18.838,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+aster:~$
+> aster app state aster.reader
+aster app state aster.reader
+aster.reader: STOPPED (err=0 starts=1)
+aster:~$
+> aster app start aster.player
+aster app start aster.player
+[00:00:20.236,000] <inf> aster_fontsd: cpfont cache: 32px allocated 57672 B
+[00:00:20.507,000] <inf> aster_fontsd: cpfont cache: 28px allocated 46152 B
+[00:00:20.616,000] <inf> aster_qpanel: qpanel: volume 40 restored
+[00:00:20.616,000] <inf> aster_flux: FLUX Rev.04: 320x480, 21 entries (17 installed)
+[00:00:20.733,000] <inf> aster_fontsd: cpfont cache: released 186992 B
+[00:00:20.733,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:00:20.737,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:00:21.197,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1dbe00 exec=0x421dbe00 size=34180
+[00:00:21.293,000] <inf> aster_rt: guest linear cap 105 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:00:21.309,000] <inf> aster_plat: display flip: 2 front buffers x 153600 B in PSRAM
+[00:00:21.309,000] <inf> aster_native: surface: 240x320 panel-canvas requested -> granted (engine writes panel order)
+[00:00:21.320,000] <inf> aster_native: [app:aster.player] player 240x320 4 tracks in /music canvas=1
+[00:00:21.327,000] <inf> aster_rt: app started: aster.player (Player, 38 KB, AOT)
+[00:00:21.340,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+started aster.player
+aster:~$
+> aster app state aster.player
+aster app state aster.player
+aster.player: RUNNING (err=0 starts=1)
+aster:~$
+> aster app stop aster.player
+aster app stop aster.player
+[00:00:23.037,000] <inf> aster_fontsd: cpfont cache: released 62360 B
+[00:00:23.037,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:00:23.045,000] <inf> aster_rt: app stopped: aster.player
+ok
+aster:~$ [00:00:23.056,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:00:23.057,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+aster:~$
+> aster app state aster.player
+aster app state aster.player
+aster.player: STOPPED (err=0 starts=1)
+aster:~$
+> aster app start aster.game.2048
+aster app start aster.game.2048
+[00:00:24.404,000] <inf> aster_fontsd: cpfont cache: 32px allocated 57672 B
+[00:00:24.656,000] <inf> aster_fontsd: cpfont cache: 28px allocated 46152 B
+[00:00:24.762,000] <inf> aster_qpanel: qpanel: volume 40 restored
+[00:00:24.763,000] <inf> aster_flux: FLUX Rev.04: 320x480, 21 entries (17 installed)
+[00:00:24.878,000] <inf> aster_fontsd: cpfont cache: released 186992 B
+[00:00:24.878,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:00:24.882,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:00:25.349,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1da5e0 exec=0x421da5e0 size=28788
+[00:00:25.431,000] <inf> aster_rt: guest linear cap 106 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:00:25.447,000] <inf> aster_plat: display flip: 2 front buffers x 153600 B in PSRAM
+[00:00:25.447,000] <inf> aster_native: surface: 240x320 panel-canvas requested -> granted (engine writes panel order)
+[00:00:25.656,000] <inf> aster_alrc: lyrics none
+[00:00:25.671,000] <inf> aster_native: [app:aster.game.2048] 2048 240x320 best=5704 canvas=1
+[00:00:25.672,000] <inf> aster_rt: app started: aster.game.2048 (2048, 32 KB, AOT)
+[00:00:25.683,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+started aster.game.2048
+aster:~$
+> aster app state aster.game.2048
+aster app state aster.game.2048
+aster.game.2048: RUNNING (err=0 starts=1)
+aster:~$
+> aster app stop aster.game.2048
+aster app stop aster.game.2048
+[00:00:27.520,000] <inf> aster_fontsd: cpfont cache: released 62360 B
+[00:00:27.520,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:00:27.528,000] <inf> aster_rt: app stopped: aster.game.2048
+ok
+aster:~$ [00:00:27.540,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:00:27.541,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+aster:~$
+> aster app state aster.game.2048
+aster app state aster.game.2048
+aster.game.2048: STOPPED (err=0 starts=1)
+aster:~$
+> aster app start aster.starcatch
+nf> aster_fontsd: cpfont cache: 16px allocated 20808 B
+aster:~$ aster app start aster.starcatch
+[00:00:28.882,000] <inf> aster_fontsd: cpfont cache: 32px allocated 57672 B
+[00:00:29.157,000] <inf> aster_fontsd: cpfont cache: 28px allocated 46152 B
+[00:00:29.265,000] <inf> aster_qpanel: qpanel: volume 40 restored
+[00:00:29.266,000] <inf> aster_flux: FLUX Rev.04: 320x480, 21 entries (17 installed)
+[00:00:29.383,000] <inf> aster_fontsd: cpfont cache: released 186992 B
+[00:00:29.383,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:00:29.387,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:00:29.851,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1d7460 exec=0x421d7460 size=17328
+[00:00:29.939,000] <inf> aster_rt: guest linear cap 106 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:00:29.955,000] <inf> aster_plat: display flip: 2 front buffers x 153600 B in PSRAM
+[00:00:29.956,000] <inf> aster_native: surface: 240x320 panel-canvas requested -> granted (engine writes panel order)
+[00:00:29.964,000] <inf> aster_rt: app started: aster.starcatch (Star Catch, 19 KB, AOT)
+[00:00:29.981,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+started aster.starcatch
+aster:~$
+> aster app state aster.starcatch
+aster app state aster.starcatch
+aster.starcatch: RUNNING (err=0 starts=1)
+aster:~$
+> aster app stop aster.starcatch
+aster app stop aster.starcatch
+[00:00:31.679,000] <inf> aster_fontsd: cpfont cache: released 62360 B
+[00:00:31.679,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:00:31.687,000] <inf> aster_rt: app stopped: aster.starcatch
+ok
+aster:~$ [00:00:31.699,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:00:31.700,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+aster:~$
+> aster app state aster.starcatch
+aster app state aster.starcatch
+aster.starcatch: STOPPED (err=0 starts=1)
+aster:~$
+> aster app start com.example.breakout
+aster app start com.example.breakout
+[00:00:33.058,000] <inf> aster_fontsd: cpfont cache: 32px allocated 57672 B
+[00:00:33.309,000] <inf> aster_fontsd: cpfont cache: 28px allocated 46152 B
+[00:00:33.415,000] <inf> aster_qpanel: qpanel: volume 40 restored
+[00:00:33.416,000] <inf> aster_flux: FLUX Rev.04: 320x480, 21 entries (17 installed)
+[00:00:33.549,000] <inf> aster_fontsd: cpfont cache: released 186992 B
+[00:00:33.549,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:00:33.553,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:00:34.026,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1df680 exec=0x421df680 size=49080
+[00:00:34.124,000] <inf> aster_rt: guest linear cap 105 pages (1024 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:00:34.174,000] <inf> aster_native: [app:com.example.breakout] breakout display 240x320, adaptive canvas 240x320
+[00:00:34.502,000] <inf> aster_native: [app:com.example.breakout] breakout ready bricks=30
+[00:00:34.503,000] <inf> aster_rt: app started: com.example.breakout (打砖块, 52 KB, AOT)
+[00:00:34.529,000] <inf> aster_plat: display flip: 2 front buffers x 153600 B in PSRAM
+started com.example.breakout
+aster:~$
+> aster app state com.example.breakout
+aster app state com.example.breakout
+com.example.breakout: RUNNING (err=0 starts=1)
+aster:~$
+> aster app stop com.example.breakout
+aster app stop com.example.breakout
+[00:00:36.301,000] <inf> aster_fontsd: cpfont cache: released 34640 B
+[00:00:36.302,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:00:36.328,000] <inf> aster_rt: app stopped: com.example.breakout
+ok
+aster:~$ [00:00:36.339,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:00:36.339,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+aster:~$
+> aster app state com.example.breakout
+aster app state com.example.breakout
+com.example.breakout: STOPPED (err=0 starts=1)
+aster:~$
+> hw audio state
+hw audio state
+state=idle bytes=0/0 msec=0/0 vol=40
+aster:~$
+> aster app list
+[00:00:37.706,000] <inf> aster_fontsd: cpfont cache: 32px allocated 57672 B
+aster:~$ aster app list
+ID                           NAME             VER      STATE
+aster.imucube                IMU 立方体    1.0.0    STOPPED [AOT]
+aster.apitest                API Test         1.0.0    STOPPED [AOT]
+aster.gallery                相册           1.0.1    STOPPED [AOT]
+aster.game.2048              2048             1.3.0    STOPPED [AOT]
+aster.permdeny               Perm Deny Test   1.0.0    STOPPED [AOT]
+aster.player                 Player           1.0.0    STOPPED [AOT]
+aster.reader                 Reader           1.0.0    STOPPED [AOT]
+aster.snake                  Snake            1.2.1    STOPPED [AOT]
+aster.trap                   Trap Test        1.0.0    STOPPED [AOT]
+aster.chess                  Chess            1.0.1    STOPPED
+aster.starcatch              Star Catch       1.0.0    STOPPED [AOT]
+aster.prismdrop              Prism Drop       1.0.0    STOPPED [AOT]
+com.example.sdkhello         SDK Hello        1.0.0    STOPPED [AOT]
+aster.camera                 拍照           1.0.0    STOPPED
+aster.xiangqi                Chinese Chess    1.0.0    STOPPED
+com.example.neonduel         霓虹对决     1.0.1    STOPPED [AOT]
+com.example.breakout         打砖块        1.0.3    STOPPED [AOT]
+aster:~$
+> aster app start aster.imucube
+aster app start aster.imucube
+[00:00:38.120,000] <inf> aster_qpanel: qpanel: volume 40 restored
+[00:00:38.120,000] <inf> aster_flux: FLUX Rev.04: 320x480, 21 entries (17 installed)
+[00:00:38.244,000] <inf> aster_fontsd: cpfont cache: released 186992 B
+[00:00:38.245,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:00:38.248,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:00:38.699,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1d9c00 exec=0x421d9c00 size=26848
+[00:00:38.789,000] <inf> aster_rt: guest linear cap 106 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:00:38.808,000] <inf> aster_plat: display flip: 2 front buffers x 153600 B in PSRAM
+[00:00:38.809,000] <inf> aster_native: surface: 240x320 panel-canvas requested -> granted (engine writes panel order)
+[00:00:38.817,000] <inf> aster_native: [app:aster.imucube] imu cube init 240x320 cache 10 ms
+[00:00:38.825,000] <inf> aster_rt: app started: aster.imucube (IMU 立方体, 29 KB, AOT)
+started aster.imucube
+aster:~$ [00:00:38.845,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$
+> aster app state aster.imucube
+aster app state aster.imucube
+aster.imucube: RUNNING (err=0 starts=1)
+aster:~$

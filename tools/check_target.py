@@ -14,10 +14,14 @@ FEATURES = {"display": "DISPLAY", "touch": "TOUCH", "mouse": "MOUSE", "keyboard"
 
 
 def check(target_id, build=None):
-    target = json.loads((ROOT / "hardware" / f"{target_id}.json").read_text())["public"]
+    record = json.loads((ROOT / "hardware" / f"{target_id}.json").read_text())
+    target = record["public"]
     build = build or ROOT / "build/firmware"
     text = (build / "zephyr/.config").read_text()
     config = dict(re.findall(r'^CONFIG_(\w+)=(.*)$', text, re.M))
+    selected_symbol = record["build"]["kconfig"]
+    if config.get(selected_symbol) != "y":
+        raise ValueError(f"hardware identity drift: expected CONFIG_{selected_symbol}=y for {target_id}")
     actual = {name for name, key in FEATURES.items() if config.get("ASTER_HAS_" + key) == "y"}
     if not actual <= set(target["capabilities"]):
         raise ValueError(f"capability drift: configured={sorted(actual)} published={target['capabilities']}")

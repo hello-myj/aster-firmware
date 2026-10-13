@@ -1,0 +1,13 @@
+{
+  "base_commit": "eaa34c88edb4e7b685e7129a363c28f08b3987ad",
+  "local_build_identity_guard_added": true,
+  "firmware_sha256": "505fa7480bdeb21920bd30d695bc3a962c0e0f7b27a33a9eac82a5991904f6c1",
+  "config_sha256": "3012c6c7098766f4f50328d4cf229ae3b7b5ff44039071ed3eb014e2f8fe0d6f",
+  "selected_hardware": "lckfb-s3",
+  "timeouts_ms": [
+    3000,
+    1000,
+    1000
+  ],
+  "fault_injection": true
+}

@@ -1,0 +1,146 @@
+> aster sys info
+aster sys info
+ASTER 0.1.0
+platform=zephyr board=aster.esp32s3.lckfb soc=esp32s3 arch=xtensa abi=3.7.0
+cpu=240000000 hz cores=2
+ram int=327680 ext=8388608 flash=16777216
+sd_mounted=yes apps=28
+sigpolicy=allow-unsigned
+aster:~$
+> aster app info test.p0.recovery
+aster app info test.p0.recovery
+id:       test.p0.recovery
+name:     P0 Recovery Test
+version:  2.0.0
+state:    STOPPED
+entry:    app.wasm
+mem:      initial=262144 max=1048576 stack=16384 heap=262144
+image:    wasm + aot
+starts:   0  last_err=0  peak=0
+abi:      min=3.7 target=3.7.0
+requires: display
+perms:    fs
+orient:   portrait
+aster:~$
+> aster app info test.p0.recovery
+aster app info test.p0.recovery
+id:       test.p0.recovery
+name:     P0 Recovery Test
+version:  2.0.0
+state:    STOPPED
+entry:    app.wasm
+mem:      initial=262144 max=1048576 stack=16384 heap=262144
+image:    wasm + aot
+starts:   0  last_err=0  peak=0
+abi:      min=3.7 target=3.7.0
+requires: display
+perms:    fs
+orient:   portrait
+aster:~$
+> aster app start test.p0.recovery
+aster app start test.p0.recovery
+[00:01:55.203,000] <inf> aster_fontsd: cpfont cache: released 140840 B
+[00:01:55.203,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:01:55.206,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:01:55.707,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1d34c0 exec=0x421d34c0 size=9540
+[00:01:55.818,000] <inf> aster_rt: guest linear cap 106 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:01:55.858,000] <inf> aster_native: [app:test.p0.recovery] P0 TEST version=2 save=OK cache=OK asset=resource-version=2
+
+[00:01:55.858,000] <inf> aster_plat: display flip: 2 front buffers x 153600 B in PSRAM
+[00:01:55.867,000] <inf> aster_native: surface: 240x320 panel-canvas requested -> granted (engine writes panel order)
+[00:01:55.881,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+[00:01:55.938,000] <inf> aster_rt: app started: test.p0.recovery (P0 Recovery Test, 12 KB, AOT)
+started test.p0.recovery
+aster:~$ [00:01:55.959,000] <inf> aster_native: [app:test.p0.recovery] P0 frame version=2
+aster:~$
+> aster app stop test.p0.recovery
+aster app stop test.p0.recovery
+[00:01:56.188,000] <inf> aster_native: [app:test.p0.recovery] P0 stopped version=2
+[00:01:56.188,000] <inf> aster_fontsd: cpfont cache: released 62360 B
+[00:01:56.191,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:01:56.204,000] <inf> aster_rt: app stopped: test.p0.recovery
+ok
+aster:~$ [00:01:56.215,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:01:56.217,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+aster:~$
+> aster fs cat /SD:/aster/apps/test.p0.recovery/data/save.txt
+aster fs cat /SD:/aster/apps/test.p0.recovery/data/save.txt
+SAVE_KEEP_123
+
+aster:~$ [00:01:56.690,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aster:~$
+> aster fs cat /SD:/aster/apps/test.p0.recovery/cache/keep.txt
+aster fs cat /SD:/aster/apps/test.p0.recovery/cache/keep.txt
+CACHE_KEEP_123
+
+aster:~$
+> aster app install /SD:/test.p0.recovery-v2.ast
+aster app install /SD:/test.p0.recovery-v2.ast
+[00:01:57.393,000] <inf> aster_pkg: pkg trace: load-source thread=0x3fca9c10 stack=0x3fcc2bb0/8192 unused=4348
+[00:01:57.471,000] <inf> aster_pkg: pkg trace: loaded-source thread=0x3fca9c10 stack=0x3fcc2bb0/8192 unused=3468
+[00:01:57.472,000] <inf> aster_pkg: pkg trace: parse-source thread=0x3fca9c10 stack=0x3fcc2bb0/8192 unused=3468
+[00:01:57.482,000] <inf> aster_pkg: pkg trace: parsed-source thread=0x3fca9c10 stack=0x3fcc2bb0/8192 unused=3468
+[00:01:57.492,000] <inf> aster_pkg: pkg trace: select-version thread=0x3fca9c10 stack=0x3fcc2bb0/8192 unused=3468
+[00:01:57.733,000] <inf> aster_pkg: pkg trace: selected-version thread=0x3fca9c10 stack=0x3fcc2bb0/8192 unused=1900
+[00:01:58.281,000] <inf> aster_fontsd: cpfont cache: 32px allocated 57672 B
+[00:01:58.786,000] <inf> aster_pkg: install: assets 1 file(s) -> /SD:/aster/apps/test.p0.recovery/.v0/assets
+[00:01:58.903,000] <inf> aster_pkg: installed test.p0.recovery (P0 Recovery Test v2.0.0, 4 KB wasm)
+installed OK
+aster:~$
+> aster app info test.p0.recovery
+$ [00:02:01.184,000] <inf> aster_flux: FLUX Rev.04: 320x480, 32 entries (28 installed)
+aster:~$ aster app info test.p0.recovery
+id:       test.p0.recovery
+name:     P0 Recovery Test
+version:  2.0.0
+state:    STOPPED
+entry:    app.wasm
+mem:      initial=262144 max=1048576 stack=16384 heap=262144
+image:    wasm + aot
+starts:   0  last_err=0  peak=0
+abi:      min=3.7 target=3.7.0
+requires: display
+perms:    fs
+orient:   portrait
+aster:~$
+> aster app start test.p0.recovery
+aster app start test.p0.recovery
+[00:02:01.693,000] <inf> aster_fontsd: cpfont cache: released 140840 B
+[00:02:01.693,000] <inf> aster_fontsd: cpfont app session: size caches on demand
+[00:02:01.697,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+[00:02:02.219,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aot exec: psram write=0x3c1d34c0 exec=0x421d34c0 size=9540
+[00:02:02.329,000] <inf> aster_rt: guest linear cap 106 pages (256 KB heap)
+Cannot override max memory with value greater than module max memory
+[00:02:02.368,000] <inf> aster_native: [app:test.p0.recovery] P0 TEST version=2 save=OK cache=OK asset=resource-version=2
+
+[00:02:02.369,000] <inf> aster_plat: display flip: 2 front buffers x 153600 B in PSRAM
+[00:02:02.377,000] <inf> aster_native: surface: 240x320 panel-canvas requested -> granted (engine writes panel order)
+[00:02:02.392,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+[00:02:02.446,000] <inf> aster_rt: app started: test.p0.recovery (P0 Recovery Test, 12 KB, AOT)
+started test.p0.recovery
+aster:~$ [00:02:02.467,000] <inf> aster_native: [app:test.p0.recovery] P0 frame version=2
+aster:~$
+> aster app stop test.p0.recovery
+aster app stop test.p0.recovery
+[00:02:02.808,000] <inf> aster_native: [app:test.p0.recovery] P0 stopped version=2
+[00:02:02.809,000] <inf> aster_fontsd: cpfont cache: released 62360 B
+[00:02:02.812,000] <inf> aster_fontsd: cpfont app session: caches released
+[00:02:02.825,000] <inf> aster_rt: app stopped: test.p0.recovery
+ok
+aster:~$ [00:02:02.836,000] <inf> aster_fontsd: cpfont cache: 20px allocated 27720 B
+aster:~$ [00:02:02.838,000] <inf> aster_fontsd: cpfont cache: 12px allocated 16712 B
+aster:~$
+> aster fs cat /SD:/aster/apps/test.p0.recovery/data/save.txt
+aster fs cat /SD:/aster/apps/test.p0.recovery/data/save.txt
+SAVE_KEEP_123
+
+aster:~$ [00:02:03.300,000] <inf> aster_fontsd: cpfont cache: 14px allocated 17928 B
+aster:~$
+> aster fs cat /SD:/aster/apps/test.p0.recovery/cache/keep.txt
+aster fs cat /SD:/aster/apps/test.p0.recovery/cache/keep.txt
+CACHE_KEEP_123
+
+aster:~$
