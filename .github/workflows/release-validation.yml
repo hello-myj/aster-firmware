@@ -94,7 +94,10 @@ jobs:
       - run: west init -l aster-firmware && west update && west zephyr-export
       - run: west packages pip --install --ignore-venv-check
       - run: west blobs fetch hal_espressif
-      - run: west sdk install --gnu-toolchains xtensa-espressif_esp32s3_zephyr-elf --install-dir "$RUNNER_TEMP/zephyr-sdk"
+      - name: Install the pinned Zephyr compiler with authenticated API access
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: west sdk install --gnu-toolchains xtensa-espressif_esp32s3_zephyr-elf --install-dir "$RUNNER_TEMP/zephyr-sdk" --personal-access-token "$GH_TOKEN"
       - name: Apply the reviewed driver patches in order
         run: |
           for name in aster_zephyr_v4.4.2.patch aster_zephyr_v4.4.2_qspi.patch aster_zephyr_v4.4.2_psram_dma.patch aster_zephyr_v4.4.2_usb_serial_console_batch.patch aster_zephyr_v4.4.2_sram_tail_heap.patch; do

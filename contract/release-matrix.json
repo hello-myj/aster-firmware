@@ -2,7 +2,7 @@
   "schema": 1,
   "sdk": {
     "repository": "hello-myj/aster-sdk",
-    "revision": "9ae73989dd469700ed886c4429741707a21ce7e0"
+    "revision": "893afc5c6c034cd4fed8ed16401d66e9d1a2409f"
   },
   "simulator": {
     "repository": "hello-myj/aster-sim",
