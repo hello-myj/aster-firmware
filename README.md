@@ -78,7 +78,7 @@ resources/fonts/          系统字体及生成记录
 python tools/resources.py
 ```
 
-把 `dist/sdcard/` 的内容复制到设备 SD 卡根目录，得到 `aster/fonts/ui_<px>.cpfont` 与 `faces.json`，覆盖 12/14/16/18/20/24/28/32/40/48px 原生字号。重烘焙字体可安装 `fonttools`、`freetype-py` 后使用 `tools/build_cpfont.py`，再运行 `tools/font_metrics.py` 更新公开度量。APP SDK 不负责生成或部署系统资源。
+把 `dist/sdcard/` 的内容复制到设备 SD 卡根目录，得到 `aster/fonts/ui_<px>.cpfont` 与 `faces.json`，覆盖 12/14/16/18/20/24/28/32/40/48px 原生字号。重烘焙字体可安装 `fonttools`、`freetype-py` 后使用 `tools/build_cpfont.py`，再运行 `tools/font_metrics.py` 更新公开度量。默认12px使用原生尺寸自动hinting，其余字号保留4倍采样；`--native-hint-max 0` 可生成全采样对照。字体度量和全部字符advance不变，配方/FreeType版本在faces.json中记录。APP SDK 不负责生成或部署系统资源。
 
 ## 契约发布与开发测试
 

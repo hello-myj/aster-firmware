@@ -9,7 +9,9 @@
     "ss": 4,
     "gamma": 1.0,
     "depth": 4,
-    "lut": "round"
+    "lut": "round",
+    "native_hint_max": 12,
+    "native_hint_freetype_version": "2.13.2"
   },
   "faces": [
     {
@@ -21,9 +23,9 @@
       "coverage": "full",
       "intervals": 138,
       "codepoints": 28988,
-      "bytes": 2429876,
-      "max_bmp": 85,
-      "max_scratch": 169
+      "bytes": 2283159,
+      "max_bmp": 78,
+      "max_scratch": 156
     },
     {
       "px": 14,

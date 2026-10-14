@@ -74,6 +74,10 @@ void aster_font_sd_cache_drop(void);
  * maintained): table/metadata reads, warm bursts, misses, white-box draws. */
 typedef struct {
 	uint32_t reads;         /* SD read calls (incl. table chunks)      */
+    uint32_t hits;          /* resident glyph lookups */
+    uint32_t load_us;       /* successful cold loads, wrapping sum */
+    uint32_t max_load_us;
+    uint32_t warm_us;       /* wrapping sum of synchronous warm time */
 	uint32_t read_bytes;
 	uint32_t warm_bursts;   /* prewarm calls               */
 	uint32_t warm_glyphs;   /* glyphs covered by warm bursts           */

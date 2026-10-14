@@ -7,7 +7,7 @@
  * rect through the existing async display path.
  *
  * Why commands instead of pure app-side pixel loops: text needs the
- * firmware's cpfont/tiny_ttf glyph caches, sprites need the image decoder,
+ * firmware's native cpfont glyph caches, sprites need the image decoder,
  * and antialiasing/blending runs 1.5-3x faster in firmware C with 32-bit
  * word fills. Cheap primitives (set_pixel, tight rect fills) stay inline
  * in the app header -- both roads paint the SAME buffer, mix freely.
@@ -81,9 +81,11 @@ typedef enum {
 	ASTER_GFX_BMP_SA  = 12, /*   + w4=scale, w5=alpha (each masked above)      */
 } aster_gfx_op_t;
 
-/* TEXT: px snapped to the nearest baked cpfont size (12..48) when within
- * 4 px, else the tiny_ttf pool; glyphs missing from the baked subset fall
- * back per-glyph. y is the BASELINE (cpfont metrics convention). */
+/* TEXT: px selects the nearest native cpfont face (12..48), never a resized
+ * glyph. Zero selects the generated UI default. SD resources must be present;
+ * there is no runtime TTF fallback. y is the BASELINE. With has_bg, glyph
+ * coverage blends against the supplied bg instead of the previous pixels;
+ * clear a separate rectangle when replacing the entire advance/line area. */
 /* BMP: handle from aster_gfx_bmp_load. Color key 0x0000 is transparent;
  * ALPHA multiplies coverage (255 = opaque). scale uses nearest sampling. */
 

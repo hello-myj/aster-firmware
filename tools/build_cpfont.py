@@ -72,11 +72,13 @@ assert struct.calcsize(TOC_FMT) == STYLE_TOC_SIZE
 # hairlines stop depending on which pixel the stem happened to land on; 8
 # doubles the bake for no visible change at these sizes.
 SS_DEFAULT = 4
-# Applied to grey BEFORE quantisation. 1.0 is the calibrated default; the
-# panels are dark-background/light-text and a value around 1.25 lifts the
-# midtones if that reads too thin on glass.
+# Applied to grey BEFORE quantisation. 1.0 preserves coverage; values below
+# one lift midtones, values above one darken them. Do not confuse gamma
+# changes with native grid hinting or use it to hide misplaced thin stems.
 GAMMA_DEFAULT = 1.0
 DEPTH_DEFAULT = 4
+# Native hinting selected on-device for the 12px face; larger faces keep SS.
+NATIVE_HINT_MAX_DEFAULT = 12
 
 
 def make_lut(gamma, depth=DEPTH_DEFAULT):
@@ -273,7 +275,7 @@ def glyph_index(intervals, cp):
     return -1
 
 
-def rasterize(ttf_path, px, cps, lut, ss=SS_DEFAULT):
+def rasterize(ttf_path, px, cps, lut, ss=SS_DEFAULT, native_hint_max=0):
     """Render every cp in `cps` at px device pixels. Returns
     (intervals, order, glyphs, bitmaps, advanceY, ascender, descender, ext)
     with glyphs/bitmaps index-aligned to `order` (== to_intervals order).
@@ -285,9 +287,10 @@ def rasterize(ttf_path, px, cps, lut, ss=SS_DEFAULT):
     layout in the firmware is built on those advances. Pass 2 runs at ss-x
     and supplies pixels only.
 
-    FT_LOAD_RENDER is kept at both sizes and no FT_LOAD_NO_HINTING / TARGET_*
-    is added: hinted stems are what the box filter averages into a crisp
-    vertical, and 4x ppem is high enough that hinting is stable there."""
+    The default preserves the existing supersampled bake. Optional native
+    auto-hinting renders pixels at final ppem for small sizes, while the
+    separate default 1x metrics pass keeps advances and line metrics stable.
+    Coverage remains grayscale and is quantized through the same 4bpp LUT."""
     face = freetype.Face(str(ttf_path))
     order = to_intervals(cps)[1]
 
@@ -310,6 +313,12 @@ def rasterize(ttf_path, px, cps, lut, ss=SS_DEFAULT):
         meta.append((adv, g.bitmap_left, g.bitmap_top,
                      bool(g.bitmap.width and g.bitmap.rows)))
 
+    native_hint = native_hint_max > 0 and px <= native_hint_max
+    if native_hint:
+        ss = 1
+    pixel_flags = freetype.FT_LOAD_RENDER
+    if native_hint:
+        pixel_flags |= freetype.FT_LOAD_FORCE_AUTOHINT | freetype.FT_LOAD_TARGET_NORMAL
     if ss > 1:
         face.set_char_size(0, (px * ss) << 6, 72, 72)
 
@@ -329,7 +338,7 @@ def rasterize(ttf_path, px, cps, lut, ss=SS_DEFAULT):
             glyphs.append((0, 0, 0, 0, 0, 0, total_bitmap))
             bitmaps.append(b"")
             continue
-        face.load_glyph(gi, freetype.FT_LOAD_RENDER)
+        face.load_glyph(gi, pixel_flags)
         g = face.glyph
         bm = g.bitmap
         if ss > 1:
@@ -352,7 +361,8 @@ def rasterize(ttf_path, px, cps, lut, ss=SS_DEFAULT):
             gray, w, h, left, top = resample_anchored(
                 gray, w, h, g.bitmap_left, g.bitmap_top, al, at, ss)
         else:
-            w, h, left, top = bm.width, bm.rows, left1, top1
+            w, h = bm.width, bm.rows
+            left, top = (g.bitmap_left, g.bitmap_top) if native_hint else (left1, top1)
             if w == 0 or h == 0:              # space etc: advance only
                 glyphs.append((0, 0, adv, 0, 0, 0, total_bitmap))
                 bitmaps.append(b"")
@@ -463,6 +473,8 @@ def main(argv=None):
     ap.add_argument("--ss", type=int, default=SS_DEFAULT,
                     help=f"supersample factor before box-downsampling "
                          f"(default {SS_DEFAULT}; 1 = render at 1x)")
+    ap.add_argument("--native-hint-max", type=int, default=NATIVE_HINT_MAX_DEFAULT,
+                    help="native auto-hinted grayscale pixels through this ppem (default 12); 0 restores supersampling for all faces; advances unchanged")
     ap.add_argument("--gamma", type=float, default=GAMMA_DEFAULT,
                     help=f"grey gamma applied before quantisation "
                          f"(default {GAMMA_DEFAULT}). Applied as "
@@ -487,6 +499,9 @@ def main(argv=None):
     if args.ss < 1:
         sys.exit("--ss must be >= 1")
 
+    if args.native_hint_max < 0 or args.native_hint_max > 48:
+        sys.exit("--native-hint-max must be 0..48")
+
     out_dir = Path(args.out)
     man = args.manifest if args.manifest is not None else str(
         out_dir / MANIFEST_DEFAULT.name)
@@ -502,7 +517,7 @@ def main(argv=None):
 
     lut = make_lut(args.gamma, args.depth)
     print(f"bake: {args.ss}x supersample, gamma {args.gamma}, "
-          f"{args.depth}bpp", file=sys.stderr)
+          f"{args.depth}bpp, native auto-hint through {args.native_hint_max}px", file=sys.stderr)
 
     grand = 0
     records = []
@@ -512,7 +527,7 @@ def main(argv=None):
         print(f"ui_{px}.cpfont: rasterizing {len(cps)} glyphs ...",
               file=sys.stderr, flush=True)
         (intervals, order, glyphs, bitmaps,
-         advY, asc, desc, ext) = rasterize(ttf, px, cps, lut, args.ss)
+         advY, asc, desc, ext) = rasterize(ttf, px, cps, lut, args.ss, args.native_hint_max)
         size = write_cpfont(out, intervals, order, glyphs, bitmaps,
                             advY, asc, desc)
         grand += size
@@ -544,7 +559,9 @@ def main(argv=None):
             return 0
         write_manifest(manifest, ttf, records, args.big_from,
                        {"ss": args.ss, "gamma": args.gamma,
-                        "depth": args.depth, "lut": "round"})
+                        "depth": args.depth, "lut": "round",
+                        "native_hint_max": args.native_hint_max,
+                        "native_hint_freetype_version": ".".join(map(str, freetype.version()))})
     print(f"total {grand / 1024 / 1024:.2f} MB", file=sys.stderr)
 
 

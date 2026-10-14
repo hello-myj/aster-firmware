@@ -194,6 +194,13 @@ static int cmd_sys_fonts(const struct shell *sh,size_t argc,char **argv)
   total+=st.bytes;
  }
  shell_print(sh,"glyph cache total=%u B (interval metadata separate)",total);
+ aster_font_sd_stats_t counters;
+ aster_font_sd_stats(&counters);
+ shell_print(sh,"glyph stats hits=%u misses=%u filled=%u evictions=%u reads=%u bytes=%u",
+   counters.hits,counters.misses,counters.miss_filled,counters.evictions,counters.reads,counters.read_bytes);
+ shell_print(sh,"glyph time load_us=%u max_load_us=%u warm_us=%u warm_calls=%u (synchronous, no queue)",
+   counters.load_us,counters.max_load_us,counters.warm_us,counters.warm_bursts);
+
  return 0;
 }
 #endif

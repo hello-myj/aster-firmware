@@ -9,6 +9,8 @@ class TextBounds(unittest.TestCase):
   clip=source[source.index('static inline bool clip_rect('):source.index('/* Every op that names a point')]
   op=source[source.index('static void op_text('):source.index('/* ---------------- sprite cache')]
   prefix=PREFIX.replace('GFX_HEADER',str(ROOT/'contract/include/aster/gfx.h')).replace('ERROR_HEADER',str(ROOT/'contract/include/aster/error.h'))
+  prefix=prefix.replace('static uint16_t out_blend(uint16_t d,uint16_t c,uint32_t a){(void)d;blends++;return c^(uint16_t)a;}',
+      '#include \"'+str(ROOT/'systems/zephyr/core/aster_color565.h')+'\"\nstatic uint16_t out_blend(uint16_t d,uint16_t c,uint32_t a){blends++;return out_pack(blend565(out_pack(d),c,a));}')
   run_c(prefix+r'''
 #define ASTER_FONT_UI_PX 16
 struct font;
@@ -40,5 +42,14 @@ int main(void){
  assert(a.has&&a.x0==2&&a.x1==3&&a.y0==4&&a.y1==6&&blends==2);
  for(int y=0;y<20;y++)for(int x=0;x<8;x++)assert((pixels[y*8+x]!=0xabcd)==(x==2&&y>=4&&y<6));
  s_clip_y=15;blends=0;a.has=false;op_text(&t,&c,arena,1,&a);assert(!a.has&&blends==0);
+ s_clip_x=s_clip_y=s_clip_w=s_clip_h=0;
+ mask[0]=85;mask[1]=170;mask[2]=0;mask[3]=255;
+ c.w[5]=0x10000|0x1234;
+ for(int i=0;i<160;i++)pixels[i]=0xf800;
+ op_text(&t,&c,arena,1,&a);
+ assert(pixels[2*8+1]==blend565(0x1234,0xffff,85));
+ assert(pixels[2*8+2]==blend565(0x1234,0xffff,170));
+ assert(pixels[3*8+1]==0x1234&&pixels[3*8+2]==0xffff);
+ uint16_t once=pixels[2*8+1];op_text(&t,&c,arena,1,&a);assert(pixels[2*8+1]==once);
  return 0;}
 ''')

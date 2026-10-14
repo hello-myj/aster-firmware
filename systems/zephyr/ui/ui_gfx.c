@@ -1025,7 +1025,7 @@ static void op_text(ppg_target_t *t, const aster_gfx_cmd_t *c, const uint8_t *ar
 							}
 							continue;
 						}
-						drow[pxx] = out_blend(drow[pxx], fg, cov);
+						drow[pxx] = out_blend(has_bg ? pbg : drow[pxx], fg, cov);
 					}
 				}
 				if (rf->release_glyph) {

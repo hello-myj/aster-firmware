@@ -210,9 +210,10 @@ static const struct sparse_ent *sparse_fetch(slot_t *s, uint32_t cp, int32_t gi)
  if(gi<0 || !cache_acquire(s)) return NULL;
  struct sparse_cache *c=s->cache;
  for(uint16_t i=0;i<c->n;i++) if(c->entries[i].cp==cp) {
-  c->entries[i].touched=++c->clock;return &c->entries[i];
+  c->entries[i].touched=++c->clock;s_st.hits++;return &c->entries[i];
  }
  s_st.misses++;
+ uint32_t started=k_cycle_get_32();
  fs_file_t_init(&f);
  if(fs_open(&f,s->path,FS_O_READ)!=0) return NULL;
  if(!read_at(&f,s->rec_foff+(uint32_t)gi*CPF_REC,raw,sizeof(raw))) {
@@ -234,6 +235,8 @@ static const struct sparse_ent *sparse_fetch(slot_t *s, uint32_t cp, int32_t gi)
  e->touched=++c->clock;c->used+=rec.dlen;
  s->cache_used=c->used;s->cache_glyphs=c->n;s_st.miss_filled++;
  s_st.reads+=rec.dlen?2u:1u;s_st.read_bytes+=sizeof(raw)+rec.dlen;
+ uint32_t elapsed=k_cyc_to_us_floor64((uint32_t)(k_cycle_get_32()-started));
+ s_st.load_us+=elapsed;if(elapsed>s_st.max_load_us)s_st.max_load_us=elapsed;
  return e;
 }
 
@@ -481,11 +484,13 @@ void aster_font_sd_warm(uint8_t px,const char *utf8)
 {
  slot_t *s=slot_by_px(px);
  if(!s || s->state!=ST_SPARSE || !utf8) return;
+ uint32_t started=k_cycle_get_32();
  s_st.warm_bursts++;
  const uint8_t *p=(const uint8_t *)utf8;
  while(*p) {uint32_t cp=utf8_next(&p);int32_t gi=iv_find(s,cp);
   if(gi>=0 && sparse_fetch(s,cp,gi)) s_st.warm_glyphs++;
  }
+ s_st.warm_us+=k_cyc_to_us_floor64((uint32_t)(k_cycle_get_32()-started));
 }
 void aster_font_sd_stats(aster_font_sd_stats_t *out) {if(out) *out=s_st;}
 void aster_font_sd_cache_drop(void)

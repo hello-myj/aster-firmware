@@ -21,38 +21,19 @@ static inline uint32_t ch_up(uint32_t v, uint32_t bits)
 	return (v << (8 - bits)) | (v >> (2 * bits - 8 > 0 ? 2 * bits - 8 : 0));
 }
 
-/* alpha = coverage in 0..255 (0 and 255 short-circuit; the integer lerp
- * below would round 255 to a neighbouring code, so the span matters). */
+/* Coverage is interpolated directly in native channel space and rounded once.
+ * Expanding to 8 bits then adding half a truncation step on conversion back
+ * brightens equal colors (and can create halos in antialiased text).
+ * Preserve endpoints, identity, symmetry and the channel convex hull. */
 static inline uint16_t blend565(uint16_t d, uint16_t c, uint32_t a)
 {
-	if (a >= 255u) {
-		return c;
-	}
-	if (a == 0u) {
-		return d;
-	}
-	uint32_t dr = (d >> 11) & 0x1F, dg = (d >> 5) & 0x3F, db = d & 0x1F;
-	uint32_t cr = (c >> 11) & 0x1F, cg = (c >> 5) & 0x3F, cb = c & 0x1F;
-	uint32_t ur = ch_up(cr, 5), ug = ch_up(cg, 6), ub = ch_up(cb, 5);
-	uint32_t ud = ch_up(dr, 5), ug2 = ch_up(dg, 6), ub2 = ch_up(db, 5);
-
-	uint32_t rr = (ud * (255u - a) + ur * a) / 255u;
-	uint32_t gg = (ug2 * (255u - a) + ug * a) / 255u;
-	uint32_t bb = (ub2 * (255u - a) + ub * a) / 255u;
-
-	rr = (rr + 4u) >> 3;
-	gg = (gg + 2u) >> 2;
-	bb = (bb + 4u) >> 3;
-	if (rr > 31u) {
-		rr = 31u;
-	}
-	if (gg > 63u) {
-		gg = 63u;
-	}
-	if (bb > 31u) {
-		bb = 31u;
-	}
-	return (uint16_t)((rr << 11) | (gg << 5) | bb);
+    if(a >= 255u) return c;
+    if(a == 0u) return d;
+    uint32_t inverse = 255u - a;
+    uint32_t r = (((d >> 11) & 31u) * inverse + ((c >> 11) & 31u) * a + 127u) / 255u;
+    uint32_t g = (((d >> 5) & 63u) * inverse + ((c >> 5) & 63u) * a + 127u) / 255u;
+    uint32_t b = ((d & 31u) * inverse + (c & 31u) * a + 127u) / 255u;
+    return (uint16_t)((r << 11) | (g << 5) | b);
 }
 
 #endif /* ASTER_CORE_COLOR565_H */

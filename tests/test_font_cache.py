@@ -63,7 +63,9 @@ typedef struct {int unused;} lv_font_t;
 static slot_t s_slots[2];
 static bool s_inited=true;
 static unsigned s_full_refs,disk_reads,live_allocs,fail_next;
-static struct {unsigned reads,read_bytes,evictions,misses,miss_filled;} s_st;
+static struct {unsigned reads,read_bytes,evictions,misses,miss_filled,hits,load_us,max_load_us;} s_st;
+static uint32_t k_cycle_get_32(void){static uint32_t clock;return ++clock;}
+static uint32_t k_cyc_to_us_floor64(uint32_t t){return t;}
 static void *aster_psram_alloc(unsigned n) {if(fail_next && --fail_next==0) return NULL;void *p=malloc(n);if(p) live_allocs++;return p;}
 static void aster_psram_free(void *p) {if(p) {live_allocs--;free(p);}}
 struct fs_file_t {int px;};
@@ -95,6 +97,7 @@ int main(void) {
   if(pass) assert(disk_reads==before);
  }
  assert(s_slots[0].cache->n==50 && s_slots[1].cache->n==50 && live_allocs==6);
+ assert(s_st.hits==200 && s_st.miss_filled==100 && s_st.load_us==100 && s_st.max_load_us==1);
  for(int gi=50;gi<500;gi++) {
   assert(sparse_fetch(s_slots,0x4e00,0));
   assert(sparse_fetch(s_slots,0x4e00+gi,gi));
@@ -157,3 +160,22 @@ int main(void) {
  return 0;
 }
 ''')
+
+    def test_native_hinting_keeps_metrics_and_grayscale_at_requested_size(self):
+        import importlib.util
+        for dependency in ('freetype','fontTools'):
+            if importlib.util.find_spec(dependency) is None:
+                self.skipTest('optional font bake dependency unavailable: '+dependency)
+        spec=importlib.util.spec_from_file_location('bake_hint',ROOT/'tools/build_cpfont.py')
+        bake=importlib.util.module_from_spec(spec);spec.loader.exec_module(bake)
+        text=set(map(ord,'音乐设置清晰中文笔画ABCxyz012345'))
+        base=bake.rasterize(ROOT/'resources/fonts/ui.ttf',12,text,bake.make_lut(1),4)
+        hinted=bake.rasterize(ROOT/'resources/fonts/ui.ttf',12,text,bake.make_lut(1),4,12)
+        self.assertEqual(base[1],hinted[1])
+        self.assertEqual(base[4:7],hinted[4:7])
+        self.assertEqual([g[2] for g in base[2]],[g[2] for g in hinted[2]])
+        self.assertNotEqual(base[3],hinted[3])
+        levels={v for packed in hinted[3] for byte in packed for v in (byte>>4,byte&15)}
+        self.assertGreater(len(levels),8) # Grayscale, not monochrome thresholding.
+        unchanged=bake.rasterize(ROOT/'resources/fonts/ui.ttf',16,text,bake.make_lut(1),4,12)
+        self.assertEqual(unchanged,bake.rasterize(ROOT/'resources/fonts/ui.ttf',16,text,bake.make_lut(1),4))
