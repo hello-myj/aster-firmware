@@ -125,14 +125,31 @@ ASTER_I("aster_gfx_exec") int32_t aster_gfx_exec(aster_handle_t surface,
 #define ASTER_GFX_FRAME_MAX_ARENA 131072u
 #define ASTER_GFX_FRAME_TIMEOUT_MS 1000u
 #define ASTER_GFX_FRAME_SUPPORTED 1u
+#define ASTER_GFX_FRAME_CLIP_SUPPORTED 2u
+#define ASTER_GFX_FRAME_FONT_EPOCH_SUPPORTED 4u
 #define ASTER_GFX_FRAME_QUERY 0u
 #define ASTER_GFX_FRAME_BEGIN 1u
 #define ASTER_GFX_FRAME_END 2u
 #define ASTER_GFX_FRAME_CANCEL 3u
+#define ASTER_GFX_FRAME_SET_CLIP 4u
 typedef struct {
  uint32_t size, version, action, frame_id, flags;
  int32_t error;
 } aster_gfx_frame_control_t;
+
+/* Optional, negotiated without new imports. QUERY advertises CLIP and FONT_EPOCH
+ * flags; if FONT_EPOCH is present, QUERY.frame_id is a read-only bitmap epoch,
+ * independent of repaint acknowledgement. Existing QUERY callers ignore it.
+ * SET_CLIP uses this 32-byte descriptor, echoing the active frame ID. The
+ * nonempty rectangle must fit the surface; it clips every subsequent private
+ * DRAW until changed or frame end. BEGIN resets to the whole surface.
+ * An uninitialized canvas must draw its full CLEAR before narrowing the clip.
+ * Unsupported hosts advertise neither bit; clients must not silently downgrade.
+ */
+typedef struct {
+ uint32_t size, version, action, frame_id, x, y, w, h;
+} aster_gfx_frame_clip_t;
+
 
 /* [3.1] "Should I repaint?" -- for event-driven apps that only redraw when
  * something happens.

@@ -14,6 +14,7 @@ typedef struct {
  uint64_t deadline;
  aster_dirty_set_t dirty;
  uint32_t published_surface, published_generation;
+ uint32_t clip_x, clip_y, clip_w, clip_h;
  int32_t error;
  uint8_t state;
  bool canvas, initialized;
@@ -61,9 +62,20 @@ static inline int32_t aster_frame_start(aster_frame_state_t *f,uint32_t surface,
  else for(uint32_t y=0;y<h;y++) memcpy(f->pixels+y*w*2u,source+y*pitch*2u,w*2u);
  f->cache_surface=surface;f->surface=surface;f->w=w;f->h=h;f->canvas=canvas;f->initialized=!canvas;
  f->id=++f->sequence;f->deadline=now+ASTER_GFX_FRAME_TIMEOUT_MS;
+ f->clip_x=f->clip_y=0;f->clip_w=w;f->clip_h=h;
  f->dirty.count=0;
  f->batches=f->commands=f->arena=0;f->error=0;f->state=ASTER_FRAME_DRAWING;
  return 0;
+}
+static inline int32_t aster_frame_set_clip(aster_frame_state_t *f,uint32_t surface,
+ const aster_gfx_frame_clip_t *c,uint64_t now) {
+ int e=aster_frame_check(f,now);if(e) return e;
+ if(f->surface!=surface||f->id!=c->frame_id) return aster_frame_fail(f,ASTER_ESTATE);
+ if(!c->w||!c->h||c->x>f->w||c->w>f->w-c->x||c->y>f->h||c->h>f->h-c->y)
+  return aster_frame_fail(f,ASTER_EINVAL);
+ if(!f->initialized&&(c->x||c->y||c->w!=f->w||c->h!=f->h))
+  return aster_frame_fail(f,ASTER_ESTATE);
+ f->clip_x=c->x;f->clip_y=c->y;f->clip_w=c->w;f->clip_h=c->h;return 0;
 }
 static inline int32_t aster_frame_batch(aster_frame_state_t *f,uint32_t surface,
  const aster_gfx_cmd_t *cmds,uint32_t n,uint32_t arena_len,uint64_t now) {

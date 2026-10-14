@@ -18,6 +18,8 @@ static aster_app_ctx_t ctx;
 static aster_gfx_frame_control_t control;
 static uint16_t guest[4*6],shown[4*4],canvas[4*4];
 static uint32_t generation;
+static bool aster_font_sd_repaint_pending(void){return false;}
+static uint32_t aster_font_sd_generation(void){return 37;}
 static int full,partial,failure,completion_error,snapshots;
 static aster_app_ctx_t *ctx_of(wasm_exec_env_t env){(void)env;return &ctx;}
 static void *buf(wasm_exec_env_t env,uint32_t off,uint32_t len){(void)env;(void)off;assert(len==sizeof(control));return &control;}
@@ -50,11 +52,13 @@ static void aster_gfx_note_committed_frame(const uint8_t *p,uint32_t w,uint32_t 
 }
 '''.replace('HEADER',str(ROOT/'systems/zephyr/runtime/include/aster_gfx_frame.h'))+body+r'''
 static int request(aster_surface_t *s,uint32_t action){
- control=(aster_gfx_frame_control_t){sizeof(control),1,action,action==ASTER_GFX_FRAME_BEGIN?0:ctx.gfx_frame.id,0,0};
+ control=(aster_gfx_frame_control_t){sizeof(control),1,action,(action==ASTER_GFX_FRAME_BEGIN||action==ASTER_GFX_FRAME_QUERY)?0:ctx.gfx_frame.id,0,0};
  return n_gfx_frame_control(0,1,s,4,sizeof(control));
 }
 int main(void){
  aster_surface_t s={4,4,6,1,false,false};
+ assert(request(&s,ASTER_GFX_FRAME_QUERY)==0&&control.frame_id==37);
+ assert((control.flags&7)==7);
  for(int i=0;i<24;i++)guest[i]=0x1234;
  assert(request(&s,ASTER_GFX_FRAME_BEGIN)==0);
  assert(request(&s,ASTER_GFX_FRAME_END)==0&&full==1&&!partial);

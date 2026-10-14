@@ -778,14 +778,22 @@ static int32_t n_gfx_frame_control(wasm_exec_env_t env,uint32_t h,
  aster_surface_t *s,uint32_t off,uint32_t len)
 {
  aster_app_ctx_t *ctx=ctx_of(env);aster_frame_state_t *f=&ctx->gfx_frame;
- if(!off||(off&3u)||len!=sizeof(aster_gfx_frame_control_t)) return ASTER_EINVAL;
+ if(!off||(off&3u)) return ASTER_EINVAL;
+ if(len==sizeof(aster_gfx_frame_clip_t)) {
+  const aster_gfx_frame_clip_t *clip=(const aster_gfx_frame_clip_t *)buf(env,off,len);
+  if(!clip||clip->size!=sizeof(*clip)||clip->version!=1||clip->action!=ASTER_GFX_FRAME_SET_CLIP) return ASTER_EINVAL;
+  return aster_frame_set_clip(f,h,clip,k_uptime_get());
+ }
+ if(len!=sizeof(aster_gfx_frame_control_t)) return ASTER_EINVAL;
  aster_gfx_frame_control_t *out=(aster_gfx_frame_control_t *)buf(env,off,len);
  if(!out) return ASTER_EINVAL;
  aster_gfx_frame_control_t c=*out;
  if(c.size!=sizeof(c)||c.version!=1||c.flags||c.error) return ASTER_EINVAL;
  if(c.action==ASTER_GFX_FRAME_QUERY) {
   if(c.frame_id) return ASTER_EINVAL;
-  out->flags=ASTER_GFX_FRAME_SUPPORTED;return 0;
+  (void)aster_font_sd_repaint_pending();
+  out->flags=ASTER_GFX_FRAME_SUPPORTED|ASTER_GFX_FRAME_CLIP_SUPPORTED|ASTER_GFX_FRAME_FONT_EPOCH_SUPPORTED;
+  out->frame_id=aster_font_sd_generation();return 0;
  }
  if(c.action==ASTER_GFX_FRAME_BEGIN) {
   if(c.frame_id) return ASTER_EINVAL;
@@ -896,9 +904,7 @@ static int32_t n_gfx_exec(wasm_exec_env_t env, uint32_t h, uint32_t cmds_off,
  if(frame->state) {
   e=aster_frame_batch(frame,h,cmds,n,arena_len,k_uptime_get());if(e) return e;
   uint32_t dx=0,dy=0,dw=0,dh=0;
-  bool clear=false;
-  for(uint32_t i=0;i<n;i++) if(ASTER_GFX_OP(&cmds[i])==ASTER_GFX_CLEAR) clear=true;
-  if(pw&&ph&&!clear) aster_gfx_set_clip(px,py,pw,ph);
+  aster_gfx_set_clip(frame->clip_x,frame->clip_y,frame->clip_w,frame->clip_h);
   int ran=aster_gfx_exec_unpublished_into(frame->pixels,frame->w,frame->h,frame->w,cmds,n,arena,arena_len,&dx,&dy,&dw,&dh);
   aster_gfx_set_clip(0,0,0,0);
   if(ran<0) return aster_frame_fail(frame,ran);
