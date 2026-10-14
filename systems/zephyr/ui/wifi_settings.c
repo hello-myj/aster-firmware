@@ -3,7 +3,6 @@
  */
 #include "wifi_settings.h"
 #include "aster_platform.h"
-#include "qpanel.h"
 #include "ui_font.h"
 #include "font_sd.h"
 #include "ui_lvgl.h"
@@ -35,6 +34,7 @@
 
 enum page { WIFI_LIST, WIFI_JOIN, WIFI_DETAILS, WIFI_FORGET_CONFIRM, HOTSPOT, HOTSPOT_EDIT };
 static enum page page;
+static void (*owner_close)(void);
 static lv_obj_t *root, *connection_name, *connection_info, *networks, *scan_label;
 static lv_obj_t *ssid_field, *password_field, *keyboard, *input, *hint, *toast;
 static lv_obj_t *hotspot_switch, *hotspot_name, *hotspot_info;
@@ -158,7 +158,10 @@ static void failed(int err)
 static void close_cb(lv_event_t *e)
 {
 	(void)e;
-	aster_qpanel_dismiss();
+	if (owner_close)
+		owner_close();
+	else if (root)
+		lv_obj_delete(root);
 }
 static void wifi_cb(lv_event_t *e)
 {
@@ -516,6 +519,7 @@ static void deleted(lv_event_t *e)
 {
 	(void)e;
 	root = NULL;
+	owner_close = NULL;
 	reset_view();
 }
 bool aster_wifi_settings_is_open(void) { return root != NULL; }
@@ -530,16 +534,18 @@ void aster_wifi_settings_warm(void)
 	aster_ui_font_warm(16, charset);
 	aster_ui_font_warm(20, "Wi-Fi连接网络网络详情个人热点设置个人热点忘记网络");
 }
-void aster_wifi_settings_open(lv_obj_t *parent)
+void aster_wifi_settings_open(lv_obj_t *parent, void (*close_owner)(void))
 {
 	if (root)
 		return;
-	w = aster_ui_lvgl_layout_width() - 8;
-	h = aster_ui_lvgl_layout_height() - 8;
+	lv_obj_update_layout(parent);
+	w = lv_obj_get_content_width(parent);
+	h = lv_obj_get_content_height(parent);
+	owner_close = close_owner;
 	root = lv_obj_create(parent);
 	lv_obj_add_flag(root, LV_OBJ_FLAG_FLOATING);
 	style(root, 0, 0, w, h, BG);
-	lv_obj_set_style_radius(root, 10, 0);
+	lv_obj_set_style_radius(root, 0, 0);
 	lv_obj_update_layout(root);
 	lv_obj_add_event_cb(root, deleted, LV_EVENT_DELETE, NULL);
 	ap_count = 0;

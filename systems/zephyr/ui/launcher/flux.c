@@ -22,6 +22,7 @@
 #include "ui_splash.h"
 #include "wifi_settings.h"
 #include "qpanel.h"
+#include "gesture.h"
 #include "aster_platform.h"
 #include "aster_app_mgr.h"
 #include "aster_runtime.h"
@@ -801,8 +802,26 @@ static int ribbon_hit(int x,int y)
  }
  return found;
 }
+/* Reuse the physical edge thresholds: top pull opens the mixer; bottom
+ * pull closes it. Slider strokes start outside the bottom band. Claiming a
+ * pull suppresses widget clicks; the launcher never maps it to APP exit. */
+static bool header_touch(const aster_touch_evt_t *raw)
+{
+ bool pressed=raw->action!=ASTER_TOUCH_UP;
+ bool enabled=visible && !modal && !aster_wifi_settings_is_open() &&
+              !aster_qpanel_is_open() && !launching;
+ uint32_t allow=page==MIXER?ASTER_GEST_ALLOW_EXIT:ASTER_GEST_ALLOW_PANEL;
+ aster_gest_t g=aster_gesture_feed(raw->x,raw->y,pressed,enabled?allow:0,view_h);
+ if(!enabled || (page==MIXER?g!=ASTER_GEST_PANEL_UP:g!=ASTER_GEST_PANEL_DOWN)) return false;
+ aster_ui_lvgl_pointer(raw->x,raw->y,pressed);
+ lv_indev_wait_release(aster_ui_lvgl_indev());
+ memset(&drag,0,sizeof(drag));
+ action=ACT_MIXER;
+ return true;
+}
 static void touch(const aster_touch_evt_t *raw)
 {
+ if(header_touch(raw)) return;
  aster_touch_evt_t mapped=*raw;
  to_design(&mapped.x,&mapped.y);
  const aster_touch_evt_t *e=&mapped;
@@ -926,13 +945,10 @@ void aster_launcher_show(void)
   lv_obj_align(brand_name,LV_ALIGN_LEFT_MID,ax(36),0);
   lv_obj_align(brand_mark,LV_ALIGN_LEFT_MID,ax(15),0);
  }
- bar_time=text(bar,"--:--",lckfb?205:231,lckfb?0:14,lckfb?60:43,DIM,16,lckfb?288:160);
- lv_obj_t *m=button(bar,NULL,lckfb?272:276,lckfb?0:5,lckfb?48:29,lckfb?40:29,BG,ACT_MIXER);
- lv_obj_t *settings_mark=icon(m,ICON_SETTINGS,6,6,lckfb?24:17,0xc3cbb5);
+ /* The rightmost 48 design pixels are reserved for future battery status. */
+ bar_time=text(bar,"--:--",205,lckfb?0:14,60,DIM,16,lckfb?288:160);
  if(lckfb) {
   lv_obj_align(bar_time,LV_ALIGN_LEFT_MID,ax(205),0);
-  lv_obj_center(settings_mark);
-  lv_obj_set_ext_click_area(m,6);
  }
  body=NULL;show_page(HOME);tick_clock();
  aster_qpanel_restore_volume();brightness_pending=brightness;
@@ -1005,7 +1021,7 @@ void aster_launcher_pump_idle(void)
  else if(a==ACT_PREV || a==ACT_NEXT) settle((selected[group]+(a==ACT_PREV?-1:1))*1000);
  else if(a==ACT_OPEN) {launching=true;animation_ms=now;from_pull=pull;}
  else if(a==ACT_SYSTEM) {prior_page=MIXER;show_page(SYSTEM);sound_pending=S_TAP;}
- else if(a==ACT_WIFI) {aster_wifi_settings_open(root);sound_pending=S_TAP;}
+ else if(a==ACT_WIFI) {aster_wifi_settings_open(root,NULL);sound_pending=S_TAP;}
  else if(a==ACT_QUIET) {
   quiet=!quiet;
   if(quiet) {saved_volume=aster_plat_audio_get_volume();volume_pending=0;} else volume_pending=saved_volume;

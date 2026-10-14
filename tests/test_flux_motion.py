@@ -120,6 +120,7 @@ static uint64_t now,animation_ms;
 static bool visible=true,modal,motion=true,animating,coasting,draw_pending,launching;
 static uint64_t k_uptime_get(void) {return now;}
 static bool aster_wifi_settings_is_open(void) {return false;}
+static bool header_touch(const aster_touch_evt_t *raw) {(void)raw;return false;}
 static void aster_ui_lvgl_pointer(int x,int y,bool pressed) {(void)x;(void)y;(void)pressed;}
 static int ribbon_hit(int x,int y) {(void)x;(void)y;return selected[group];}
 static void caption(void) {}
@@ -171,6 +172,84 @@ int main(void) {
  event(5900,425,ASTER_TOUCH_DOWN);
  now=6000;aster_touch_evt_t handle={275,425,ASTER_TOUCH_UP};touch(&handle);
  assert(launching); /* explicit bottom handle still opens */
+ return 0;
+}
+''')
+
+    def test_header_pull_opens_mixer_without_stealing_cards_or_settings(self):
+        source=(ROOT/'systems/zephyr/ui/launcher/flux.c').read_text()
+        helper=source[source.index('static bool header_touch('):source.index('static void touch(')]
+        recognizer=(ROOT/'systems/zephyr/ui/gesture.c').read_text()
+        recognizer='\n'.join(l for l in recognizer.splitlines() if not l.startswith('#include'))
+        run_c(r'''
+#include <assert.h>
+#include <string.h>
+#define BUILD_ASSERT(c,...) _Static_assert(c,"geometry")
+#define ASTER_UI_H 320
+'''+'#include "'+str(ROOT/'systems/zephyr/ui/gesture.h')+'"\n'+recognizer+r'''
+enum {HOME,MIXER,ASTER_TOUCH_DOWN=1,ASTER_TOUCH_MOVE,ASTER_TOUCH_UP,ACT_MIXER};
+typedef struct {uint32_t x,y,action;} aster_touch_evt_t;
+static bool visible=true,modal,wifi,panel,launching;
+static int page=HOME,view_h=320,action,waits,pointers;
+static struct {bool down;} drag;
+static bool aster_wifi_settings_is_open(void) {return wifi;}
+static bool aster_qpanel_is_open(void) {return panel;}
+static void aster_ui_lvgl_pointer(int x,int y,bool p) {(void)x;(void)y;(void)p;pointers++;}
+static void *aster_ui_lvgl_indev(void) {return 0;}
+static void lv_indev_wait_release(void *p) {(void)p;waits++;}
+'''+helper+r'''
+static bool sample(unsigned x,unsigned y,unsigned type) {
+ aster_touch_evt_t e={x,y,type};return header_touch(&e);
+}
+static void release(void) {sample(100,100,ASTER_TOUCH_UP);action=0;}
+int main(void) {
+ for(view_h=320;view_h<=480;view_h+=160) {
+  drag.down=true;
+  assert(!sample(100,4,ASTER_TOUCH_DOWN));
+  assert(sample(100,40,ASTER_TOUCH_MOVE));
+  assert(action==ACT_MIXER && !drag.down);
+  int before=waits;
+  assert(!sample(100,100,ASTER_TOUCH_MOVE) && waits==before);
+  release();
+ }
+ assert(waits==2 && pointers==2);
+ assert(!sample(100,4,ASTER_TOUCH_DOWN));
+ assert(!sample(100,4,ASTER_TOUCH_UP) && !action); /* ordinary tap */
+ assert(!sample(100,4,ASTER_TOUCH_DOWN));
+ assert(!sample(180,30,ASTER_TOUCH_MOVE) && !action); /* horizontal */
+ release();
+ assert(!sample(100,150,ASTER_TOUCH_DOWN));
+ assert(!sample(100,250,ASTER_TOUCH_MOVE) && !action); /* card scrolling */
+ release();
+ for(int i=0;i<4;i++) {
+  wifi=i==0;modal=i==1;panel=i==2;launching=i==3;page=HOME;
+  assert(!sample(100,4,ASTER_TOUCH_DOWN));
+  assert(!sample(100,90,ASTER_TOUCH_MOVE) && !action);
+  release();
+ }
+ wifi=modal=panel=launching=false;page=MIXER;
+ for(view_h=320;view_h<=480;view_h+=160) {
+  assert(!sample(100,view_h-5,ASTER_TOUCH_DOWN));
+  assert(sample(100,view_h-40,ASTER_TOUCH_MOVE) && action==ACT_MIXER);
+  int before=waits;
+  page=HOME; /* page changes before the finger is released */
+  assert(!sample(100,view_h-70,ASTER_TOUCH_MOVE) && waits==before);
+  release();page=MIXER;
+ }
+ view_h=320;
+ assert(!sample(100,4,ASTER_TOUCH_DOWN));
+ assert(!sample(100,90,ASTER_TOUCH_MOVE) && !action); /* no repeated open */
+ release();
+ assert(!sample(60,200,ASTER_TOUCH_DOWN));
+ assert(!sample(180,150,ASTER_TOUCH_MOVE) && !action); /* slider gesture */
+ release();
+ assert(!sample(100,view_h-5,ASTER_TOUCH_DOWN));
+ assert(!sample(180,view_h-30,ASTER_TOUCH_MOVE) && !action); /* horizontal */
+ release();
+ wifi=true;
+ assert(!sample(100,view_h-5,ASTER_TOUCH_DOWN));
+ assert(!sample(100,view_h-70,ASTER_TOUCH_MOVE) && !action);
+ release();
  return 0;
 }
 ''')

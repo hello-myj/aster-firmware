@@ -489,10 +489,12 @@ static void wifi_refresh(void);
 static void on_wifi_btn(lv_event_t *e)
 {
 	ARG_UNUSED(e);
-	lv_obj_set_pos(s_sheet, 4, 4);
-	lv_obj_set_size(s_sheet, aster_ui_lvgl_layout_width() - 8,
-			aster_ui_lvgl_layout_height() - 8);
-	aster_wifi_settings_open(s_sheet);
+	lv_obj_set_pos(s_sheet, 0, 0);
+	lv_obj_set_size(s_sheet, aster_ui_lvgl_layout_width(),
+			aster_ui_lvgl_layout_height());
+	lv_obj_set_style_border_width(s_sheet, 0, 0);
+	lv_obj_set_style_radius(s_sheet, 0, 0);
+	aster_wifi_settings_open(s_sheet, aster_qpanel_dismiss);
 }
 
 static void wifi_refresh(void)
