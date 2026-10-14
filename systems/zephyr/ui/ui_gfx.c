@@ -1044,9 +1044,12 @@ static void op_text(ppg_target_t *t, const aster_gfx_cmd_t *c, const uint8_t *ar
 
 #define SPRITE_SLOTS   6
 #define SPRITE_MAX_PX  (160u * 160u)
+/* Optional row bounds never exceed 1 KiB per sprite (six slots). */
+#define SPRITE_ROW_BUDGET 1024u
 
 typedef struct {
 	uint16_t *buf;
+	uint16_t *row_bounds; /* [first,last) non-key pixels for each source row */
 	uint32_t w, h;
 	uint32_t handle;
 	bool used;
@@ -1080,11 +1083,35 @@ static int sprite_alloc(uint32_t w, uint32_t h, uint32_t *handle)
   if (sp->used) continue;
   uint16_t *pixels=aster_psram_alloc((size_t)w*h*2u);
   if (!pixels) return ASTER_ENOMEM;
-  sp->buf=pixels;sp->w=w;sp->h=h;sp->handle=++s_spr_sequence;sp->used=true;sp->opaque=false;
+  sp->buf=pixels;sp->row_bounds=NULL;sp->w=w;sp->h=h;sp->handle=++s_spr_sequence;sp->used=true;sp->opaque=false;
   *handle=sp->handle;
   return ASTER_OK;
  }
  return ASTER_ENOMEM;
+}
+
+/* Build optional immutable bounds once, alongside decoded pixels. A row may
+ * contain key-colour holes; the rasterizer still tests pixels inside bounds.
+ * Tall/narrow sprites and allocation failure retain the scalar-key fallback. */
+static void sprite_prepare_rows(sprite_t *sp)
+{
+ sp->opaque = true;
+ for (size_t i=0;i<(size_t)sp->w*sp->h;i++) {
+  if (!sp->buf[i]) {sp->opaque=false;break;}
+ }
+ size_t bytes=(size_t)sp->h*2u*sizeof(uint16_t);
+ if (sp->opaque || bytes>SPRITE_ROW_BUDGET ||
+     bytes>=(size_t)sp->w*sp->h*sizeof(uint16_t)) return;
+ sp->row_bounds=aster_psram_alloc(bytes);
+ if (!sp->row_bounds) return;
+ for (uint32_t y=0;y<sp->h;y++) {
+  const uint16_t *row=sp->buf+(size_t)y*sp->w;
+  uint32_t first=0,last=sp->w;
+  while (first<last && !row[first]) first++;
+  while (last>first && !row[last-1]) last--;
+  sp->row_bounds[y*2u]=(uint16_t)first;
+  sp->row_bounds[y*2u+1u]=(uint16_t)last;
+ }
 }
 
 int32_t aster_gfx_bmp_load_into(const char *real_path, uint32_t cap_w, uint32_t cap_h,
@@ -1123,10 +1150,7 @@ int32_t aster_gfx_bmp_load_into(const char *real_path, uint32_t cap_w, uint32_t 
 	}
 	sp->w = ow;
 	sp->h = oh;
-	sp->opaque = true;
-	for (size_t i=0;i<(size_t)ow*oh;i++) {
-		if (!sp->buf[i]) {sp->opaque=false;break;}
-	}
+	sprite_prepare_rows(sp);
 	*out_handle = handle;
 	*out_w = ow;
 	*out_h = oh;
@@ -1137,6 +1161,7 @@ int aster_gfx_bmp_release(uint32_t handle)
 {
  sprite_t *sp=sprite_lookup(handle);
  if (!sp) return ASTER_EBADF;
+ aster_psram_free(sp->row_bounds);sp->row_bounds=NULL;
  aster_psram_free(sp->buf);sp->buf=NULL;sp->used=false;
  return ASTER_OK;
 }
@@ -1146,6 +1171,8 @@ void aster_gfx_drop_all(void)
 	s_last_buf = NULL;
 	for (uint32_t i = 0; i < SPRITE_SLOTS; i++) {
 		if (s_spr[i].used) {
+			aster_psram_free(s_spr[i].row_bounds);
+			s_spr[i].row_bounds = NULL;
 			aster_psram_free(s_spr[i].buf);
 			s_spr[i].buf = NULL;
 			s_spr[i].used = false;
@@ -1190,15 +1217,40 @@ static void op_bmp(ppg_target_t *t, const aster_gfx_cmd_t *c, acc_t *acc)
         }
         return;
     }
+    /* Exact rational stepping: floor(offset*source/destination), including
+     * after clipping. Quotient/remainder carry replaces divides in the pixel
+     * loop without fixed-point approximation or accumulated sampling drift. */
+    uint64_t ox=(uint64_t)((int64_t)cx-x)*sp->w;
+    uint64_t oy=(uint64_t)((int64_t)cy-y)*sp->h;
+    uint32_t sx0=(uint32_t)(ox/dw),rx0=(uint32_t)(ox%dw);
+    uint32_t sy=(uint32_t)(oy/dh),ry=(uint32_t)(oy%dh);
+    uint32_t dx=sp->w/dw,ex=sp->w%dw;
+    uint32_t dy=sp->h/dh,ey=sp->h%dh;
     for (uint32_t ty=cy;ty<cy+ch;ty++) {
-        uint32_t sy=(uint32_t)(((uint64_t)((int64_t)ty-y)*sp->h)/dh);
         const uint16_t *srow=sp->buf+(size_t)sy*sp->w;
+        uint32_t left=cx,right=cx+cw,sx=sx0,rx=rx0;
+        if (sp->row_bounds) {
+            uint32_t first=sp->row_bounds[sy*2u],last=sp->row_bounds[sy*2u+1u];
+            /* ceil(source_edge*destination/source_width) is the exact
+             * destination interval whose nearest samples lie in [first,last). */
+            int64_t lo=(int64_t)x+(int64_t)(((uint64_t)first*dw+sp->w-1u)/sp->w);
+            int64_t hi=(int64_t)x+(int64_t)(((uint64_t)last*dw+sp->w-1u)/sp->w);
+            if (lo>(int64_t)left) left=(uint32_t)lo;
+            if (hi<(int64_t)right) right=hi>0?(uint32_t)hi:0u;
+            if (left<right && left!=cx) {
+                uint64_t off=(uint64_t)((int64_t)left-x)*sp->w;
+                sx=(uint32_t)(off/dw);rx=(uint32_t)(off%dw);
+            }
+        }
         uint16_t *drow=row_at(t,ty);
-        for (uint32_t tx=cx;tx<cx+cw;tx++) {
-            uint32_t sx=(uint32_t)(((uint64_t)((int64_t)tx-x)*sp->w)/dw);
+        for (uint32_t tx=left;tx<right;tx++) {
             uint16_t col=srow[sx];
             if (col) drow[tx]=alpha>=255u?out_pack(col):out_blend(drow[tx],col,alpha);
+            sx+=dx;rx+=ex;
+            if (rx>=dw) {rx-=dw;sx++;}
         }
+        sy+=dy;ry+=ey;
+        if (ry>=dh) {ry-=dh;sy++;}
     }
 }
 
