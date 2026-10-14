@@ -100,7 +100,7 @@ jobs:
         run: west sdk install --gnu-toolchains xtensa-espressif_esp32s3_zephyr-elf --install-dir "$RUNNER_TEMP/zephyr-sdk" --personal-access-token "$GH_TOKEN"
       - name: Apply the reviewed driver patches in order
         run: |
-          for name in aster_zephyr_v4.4.2.patch aster_zephyr_v4.4.2_qspi.patch aster_zephyr_v4.4.2_psram_dma.patch aster_zephyr_v4.4.2_usb_serial_console_batch.patch aster_zephyr_v4.4.2_sram_tail_heap.patch; do
+          for name in aster_zephyr_v4.4.2.patch aster_zephyr_v4.4.2_qspi.patch aster_zephyr_v4.4.2_psram_dma.patch aster_zephyr_v4.4.2_usb_serial_console_batch.patch aster_zephyr_v4.4.2_sram_tail_heap.patch aster_zephyr_v4.4.2_tx_prefetch.patch; do
             git -C zephyr apply "$GITHUB_WORKSPACE/aster-firmware/patches/$name"
           done
           git -C modules/hal/espressif apply "$GITHUB_WORKSPACE/aster-firmware/patches/aster_zephyr_v4.4.2_esp_task_stacks.patch"

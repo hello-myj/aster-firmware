@@ -22,6 +22,9 @@ struct axs_config {
 struct axs_data {
  struct k_mutex lock;
  struct spi_config single, quad;
+#if defined(CONFIG_ASTER_QSPI_TUNING)
+ struct spi_config probe[2];uint8_t probe_index;
+#endif
  uint8_t *frame;
  const uint8_t *borrowed; /* Persistent UI frame; ordinary writes always copy. */
  uint16_t next_row;
@@ -95,6 +98,28 @@ static int axs_tx_locked(const struct device *dev,uint16_t x,uint16_t y,
  axs_end(dev);
  return err;
 }
+#if defined(CONFIG_ASTER_QSPI_TUNING)
+extern uint32_t spi_esp32_effective_hz(const struct device *);
+extern int spi_esp32_tx_prefetch_set(const struct device *,bool);
+int aster_axs15231b_qspi_tune(const struct device *dev,uint32_t mhz,bool prefetch,uint32_t *effective)
+{
+ const struct axs_config *c=dev->config;struct axs_data *d=dev->data;
+ if(mhz!=40&&mhz!=48&&mhz!=60&&mhz!=80) return -EINVAL;
+ k_mutex_lock(&d->lock,K_FOREVER);
+ int err=spi_esp32_tx_prefetch_set(c->spi.bus,prefetch);
+ if(!err) {
+  d->single.frequency=d->quad.frequency=mhz*1000000u;
+  /* Stable alternate config addresses bypass the SPI pointer cache, even
+   * for repeated tuning while the APP is paused. No dangling stack config. */
+  d->probe_index^=1u;d->probe[d->probe_index]=d->single;
+  const uint8_t nop[4]={0x02,0,0,0};
+  err=axs_write_bytes(dev,&d->probe[d->probe_index],nop,sizeof(nop));axs_end(dev);
+  *effective=spi_esp32_effective_hz(c->spi.bus);
+ }
+ k_mutex_unlock(&d->lock);return err;
+}
+#endif
+
 #if defined(CONFIG_ASTER_AXS_WINDOW_TEST)
 /* Diagnostic only: a real rectangle stream, not a shadow-rect/full-frame
  * fallback. Physical placement must be checked on the glass. */
@@ -292,7 +317,15 @@ static int axs_init(const struct device *dev)
  uint8_t rgb565=0x55;
  err=axs_cmd(dev,0x3a,&rgb565,1);
  if(!err) err=axs_cmd(dev,0x29,NULL,0);
- if(!err) LOG_INF("AXS15231B %ux%u QSPI %u MHz",c->width,c->height,c->spi.config.frequency/1000000);
+ if(!err) {
+  d->quad.frequency=CONFIG_ASTER_AXS_PIXEL_CLOCK_MHZ*1000000u;
+#if defined(CONFIG_ASTER_AXS_TX_PREFETCH)
+  extern int spi_esp32_tx_prefetch_set(const struct device *,bool);
+  err=spi_esp32_tx_prefetch_set(c->spi.bus,true);
+#endif
+  LOG_INF("AXS15231B %ux%u QSPI control %u MHz pixels requested %u MHz",
+   c->width,c->height,c->spi.config.frequency/1000000,d->quad.frequency/1000000);
+ }
  return err;
 }
 static DEVICE_API(display,axs_api)={

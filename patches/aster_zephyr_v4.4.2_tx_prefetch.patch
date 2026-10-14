@@ -1,0 +1,180 @@
+--- a/drivers/spi/Kconfig.esp32
++++ b/drivers/spi/Kconfig.esp32
+@@ -37,6 +37,27 @@
+ 	  Send 64-byte aligned/multiple PSRAM TX buffers through GDMA directly.
+ 	  Flush CPU cache before DMA; other buffers retain the bounce path.
+ 
++config SPI_ESP32_TX_PREFETCH
++	bool "ESP32-S3 bounded TX DMA lookahead copy"
++	depends on SOC_SERIES_ESP32S3 && SPI_ESP32_SLEEP_WAIT && DMA
++	default n
++	help
++	  Opt-in per-device via spi_esp32_tx_prefetch_set. TX-only single-buffer
++	  PSRAM transfers use two internal buffers with a total budget no larger
++	  than the existing DMA chunk ceiling. Copy the next band while the
++	  previous band is on the wire; fall back before transmission if allocation
++	  fails. RX, fragmented buffers and short transfers retain the old path.
++
++config SPI_ESP32_TX_PREFETCH_LARGE_BANDS
++	bool "Use two up-to-16 KiB internal TX prefetch bands"
++	depends on SPI_ESP32_TX_PREFETCH
++	default n
++	help
++	  Double the staging band size and allocation budget, without raising
++	  the DMA command ceiling. At the 16 KiB ceiling this allocates 32 KiB
++	  instead of 16 KiB. Requires sufficient internal heap; adaptive chunk
++	  shrinking also shrinks the pair. Allocation failure retains old bounce.
++
+ config SPI_ESP32_DMA_CHUNK_SIZE
+ 	int "Max bytes clocked per DMA user command"
+ 	range 256 16384
+--- a/drivers/spi/spi_esp32_spim.h
++++ b/drivers/spi/spi_esp32_spim.h
+@@ -72,6 +72,12 @@
+ 	 * source needs cannot be k_malloc'd at the current size -- see the
+ 	 * note at the allocation site in spi_esp32_spim.c. */
+ 	size_t dma_chunk;
++#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++	bool tx_prefetch_enabled;
++	uint8_t *tx_stages;
++	size_t tx_stage_bytes;
++	uint8_t tx_stage_index;
++#endif
+ #if IS_ENABLED(CONFIG_SPI_ESP32_SLEEP_WAIT)
+ 	/* One DMA block is armed, then the submitting thread sleeps here
+ 	 * until the trans_done ISR gives it. Sized/used for master mode
+--- a/drivers/spi/spi_esp32_spim.c
++++ b/drivers/spi/spi_esp32_spim.c
+@@ -90,6 +90,24 @@
+ 		(unsigned)want, (unsigned)prev, (unsigned)data->dma_chunk);
+ }
+ 
++/* Internal port diagnostics: actual HAL-calculated clock, not request Hz. */
++uint32_t spi_esp32_effective_hz(const struct device *dev)
++{
++ struct spi_esp32_data *data=dev->data;
++ return data->dev_config.timing_conf.real_freq;
++}
++int spi_esp32_tx_prefetch_set(const struct device *dev,bool enabled)
++{
++#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++ struct spi_esp32_data *data=dev->data;
++ /* Caller owns its dedicated panel device and has drained all transfers. */
++ if(data->tx_stages) return -EBUSY;
++ data->tx_prefetch_enabled=enabled;return 0;
++#else
++ return enabled?-ENOTSUP:0;
++#endif
++}
++
+ static bool spi_esp32_transfer_ongoing(struct spi_esp32_data *data)
+ {
+ 	return spi_context_tx_on(&data->ctx) || spi_context_rx_on(&data->ctx);
+@@ -243,6 +261,10 @@
+ 	spi_hal_trans_config_t *hal_trans = &data->trans_config;
+ 	size_t chunk_len_bytes = spi_context_max_continuous_chunk(&data->ctx) * data->dfs;
+ 	size_t max_buf_sz = cfg->dma_enabled ? data->dma_chunk : SOC_SPI_MAXIMUM_BUFFER_SIZE;
++#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++ bool staged=data->tx_stages!=NULL;
++ if(staged) max_buf_sz=data->tx_stage_bytes;
++#endif
+ 	size_t transfer_len_bytes = MIN(chunk_len_bytes, max_buf_sz);
+ 	size_t transfer_len_frames = transfer_len_bytes / data->dfs;
+ 	size_t bit_len = transfer_len_bytes << 3;
+@@ -268,13 +290,20 @@
+ #endif
+ 		if (ctx->tx_buf && !direct_psram && !esp_ptr_dma_capable((uint32_t *)&ctx->tx_buf[0])) {
+ 			LOG_DBG("Tx buffer not DMA capable");
+-			tx_temp = k_malloc(dma_len_tx);
++			#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++            if(staged) tx_temp=data->tx_stages+data->tx_stage_index*data->tx_stage_bytes;
++            else
++#endif
++            tx_temp = k_malloc(dma_len_tx);
+ 			if (!tx_temp) {
+ 				LOG_ERR("Error allocating temp buffer Tx");
+ 				spi_esp32_bounce_shrink(data, dma_len_tx);
+ 				return -ENOMEM;
+ 			}
+-			memcpy(tx_temp, &ctx->tx_buf[0], dma_len_tx);
++#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++            if(!staged)
++#endif
++            memcpy(tx_temp, &ctx->tx_buf[0], dma_len_tx);
+ 		} else if (!ctx->tx_buf && ctx->rx_buf) {
+ 			/* RX-only transfer: allocate zero-filled TX buffer.
+ 			 * In loopback configurations (GPIO matrix or external wire),
+@@ -425,7 +454,19 @@
+ 	spi_hal_user_start(hal);
+ 	spi_context_update_tx(&data->ctx, data->dfs, transfer_len_frames);
+ 
++#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++    if(staged && ctx->tx_buf && ctx->tx_len) {
++        /* Current internal band remains immutable until DMA completion.
++         * spi_context_update_tx above now points to the following source. */
++        uint8_t next=data->tx_stage_index^1u;
++        size_t bytes=MIN(ctx->tx_len*data->dfs,data->tx_stage_bytes);
++        memcpy(data->tx_stages+next*data->tx_stage_bytes,ctx->tx_buf,bytes);
++    }
++#endif
+ 	SPI_ESP32_WAIT_DONE(dev, hal);
++#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++    if(staged) data->tx_stage_index^=1u;
++#endif
+ 
+ #if defined(SOC_GDMA_SUPPORTED)
+ 	if (cfg->dma_enabled) {
+@@ -457,6 +498,9 @@
+ 	spi_context_update_rx(&data->ctx, data->dfs, transfer_len_frames);
+ 
+ free:
++#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++    if(!staged)
++#endif
+ 	k_free(tx_temp);
+ 	k_free(rx_temp);
+ 
+@@ -523,6 +567,9 @@
+ 	 * spi_esp32_bounce_shrink). The driver struct is not zero-initialised
+ 	 * by this point in every configure path, so set it here. */
+ 	data->dma_chunk = SPI_DMA_MAX_BUFFER_SIZE;
++#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++    data->tx_prefetch_enabled=false;data->tx_stages=NULL;data->tx_stage_bytes=0;data->tx_stage_index=0;
++#endif
+ 
+ 	if (!cfg->clock_dev) {
+ 		return -EINVAL;
+@@ -792,6 +839,23 @@
+ 		goto done;
+ 	}
+ 
++#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++    /* By default the pair fits the one-bounce ceiling. Large-band opt-in
++     * doubles that budget; only contiguous TX-only external memory qualifies. */
++    if(data->tx_prefetch_enabled && cfg->dma_enabled && data->ctx.tx_buf &&
++       !data->ctx.rx_buf && data->ctx.tx_count==1 && data->ctx.rx_count==0 &&
++       !esp_ptr_dma_capable(data->ctx.tx_buf) && data->dma_chunk>=8192u) {
++        size_t band=MIN(data->dma_chunk/2u,8192u)&~3u;
++        if(IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH_LARGE_BANDS)) band*=2u;
++        if(data->ctx.tx_len*data->dfs>=2u*band) {
++            data->tx_stages=k_malloc(2u*band);
++            if(data->tx_stages) {
++                data->tx_stage_bytes=band;data->tx_stage_index=0;
++                memcpy(data->tx_stages,data->ctx.tx_buf,band);
++            }
++        }
++    }
++#endif
+ 	spi_context_cs_control(&data->ctx, true);
+ 
+ #ifdef CONFIG_SPI_ESP32_INTERRUPT
+@@ -817,6 +881,9 @@
+ #endif  /* CONFIG_SPI_ESP32_INTERRUPT */
+ 
+ done:
++#if IS_ENABLED(CONFIG_SPI_ESP32_TX_PREFETCH)
++    k_free(data->tx_stages);data->tx_stages=NULL;data->tx_stage_bytes=0;
++#endif
+ 	spi_context_release(&data->ctx, ret);
+ 
+ 	return ret;

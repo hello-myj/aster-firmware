@@ -31,6 +31,56 @@ python tools/firmware.py flash --config boards/waveshare_35b/selection.conf --bu
 SDK 可使用 `aster build APP_DIR --target xtensa --aot`，包位于 APP 工程的 `dist/xtensa/`；部署示例中的路径以 APP 工程为当前目录。屏幕必须通过 `aster_display_get_info()`
 读取实际尺寸，避免将旧板 240×320 写死在 APP 中。
 
+## QSPI 预拷贝与调频验证（2026-10-14）
+
+默认仍为 40 MHz、同步内部 RAM 中转。新增像素时钟和内部 RAM 预拷贝选项
+默认关闭加速，立创板配置不变。启用预拷贝须按 `patches/README.md` 顺序应用
+补丁，最后应用 `aster_zephyr_v4.4.2_tx_prefetch.patch`。
+
+内部 RAM 中转可使用两个最多 8192 B 的 band：当前 DMA 发送一个 band 时，CPU
+预拷贝下一个，等待完成后才交换。数据缓冲合计最多 16384 B，替换原最多
+16384 B 的单缓冲；另有少量状态开销。不增加整屏 DRAM 缓冲，不启用 PSRAM
+直接 DMA。短包、接收、非连续缓冲或分配失败沿用原路径。
+
+同一实机、诊断镜像、测试包下，四种时钟/预拷贝组合共验证 3072 帧，APP 错误
+为零，软件截图像素一致。40 MHz/关闭预拷贝与 80 MHz/开启预拷贝相比：稀疏
+命令场景绘制/提交均值 19.99 → 9.02 ms，复杂完整帧 69.72 → 58.39 ms。
+这是绘制/提交耗时，不能视为实体屏 FPS。两种中转方案观测 DRAM heap 峰值
+均为 41764 B；测试未覆盖所有并发负载。
+
+**80 MHz 日常版实体画面验收失败：用户反馈图形有很多毛刺。** 软件截图来自
+发送前缓冲，不能证明线上传输正确。80 MHz 不作为可用日常配置；40 MHz＋预拷贝对比版则由用户确认“毛刺消失，画面正常”；原国际象棋、2048、
+Gfx Show 启动及短时运行通过。可选配置为 `qspi-prefetch.conf`：
+
+```bash
+python tools/firmware.py build --config boards/waveshare_35b/qspi-prefetch.conf --build-dir build/waveshare-35b-prefetch
+python tools/firmware.py flash --config boards/waveshare_35b/qspi-prefetch.conf --build-dir build/waveshare-35b-prefetch
+```
+
+40 MHz 下仅开启预拷贝，受控测试稀疏命令 19.99 → 16.74 ms（降低约 16.2%），
+复杂完整帧 69.72 → 66.14 ms（降低约 5.1%）。该 40 MHz/双 8 KiB/48 KiB 配置已通过十分钟图形、音频和资源并发及实体确认；IMU 保持禁用，音频实听不在此次范围。详见 `docs/validation/graphics-g5-2026-10-14.md`；稳定回退
+为 `usb-debug.conf`。
+
+### 双 16 KiB band 与 80 KiB 内核堆对照
+
+可选实验配置 `qspi-prefetch16.conf` 将内核动态堆从 48 KiB 增至 80 KiB，启用
+`SPI_ESP32_TX_PREFETCH_LARGE_BANDS`，仍保持 40 MHz、RGB565 和内部 RAM DMA。
+两个 16 KiB band 合计 32 KiB，整屏分块由 38 次降至 19 次；每个 DMA 命令仍
+不超过原 16 KiB ceiling。分配失败、低预算和非适用输入保留回退路径。
+
+相同 80 KiB 堆、时钟和测试包，两个场景各三轮、128 帧，共 1536 帧，软件像素
+一致、APP 错误为零：双 8 KiB / 双 16 KiB 的稀疏绘制均值为 16.49 / 16.25 ms；
+复杂完整帧为 63.00 / 63.40 ms。DRAM heap 观测峰值为 41764 / 58148 B。
+该实验未显示明显、普遍的刷新收益，不能因分块减半就宣称帧率翻倍；常用配置
+仍推荐较省内存的双 8 KiB，双 16 KiB 保留为可选实验。按用户选择，常用 `qspi-prefetch.conf` 已恢复 48 KiB 内核堆＋双 8 KiB。
+上述双 8 KiB 性能对照使用的是独立的 80 KiB 测试堆，不能视为当前 48 KiB 配置数据。
+
+本地 Zephyr 补丁将内核堆置于静态区之后的 SRAM 尾部，链接报告静态 DRAM
+173072 B 不包含这块堆。预留 80 KiB 内核堆后，libc 初始分配区域约 140.7 KiB，
+比 48 KiB 配置减少 32 KiB；`aster_dram_alloc` 等通过 libc 分配，仍需并发压力
+验收。源码默认堆和 LCKFB 配置未变。用户已确认双 16 KiB 版的画面、触摸、上拉返回确认及取消均正常；此为短时
+基础验收，长时并发压力仍待完成。软件截图不能代替屏幕观察。
+
 ## 外设连接
 
 - 屏幕：AXS15231B，原生竖屏 320×480；SPI2 QSPI 40 MHz，CLK=5、D0..D3=1/2/3/4、CS=12。

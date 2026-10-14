@@ -50,6 +50,7 @@ int aster_plat_display_write_app_regions(const uint8_t *buf,uint32_t w,uint32_t 
 uint32_t aster_plat_display_generation(void);
 /* Diagnostic only; software snapshots do not represent the raw window test. */
 int aster_plat_display_window_test(uint32_t *completed);
+int aster_plat_display_qspi_tune(uint32_t mhz,bool prefetch,uint32_t *effective);
 /* same, at a device offset (x,y) -- for band/scrolled paints and hw tests */
 int  aster_plat_display_write_at(const uint8_t *buf, uint32_t x, uint32_t y,
 			       uint32_t w, uint32_t h, uint32_t pitch);

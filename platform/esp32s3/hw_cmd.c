@@ -127,6 +127,17 @@ static int cmd_disp_fill(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_ASTER_QSPI_TUNING)
+static int cmd_disp_qspi(const struct shell *sh,size_t argc,char **argv)
+{
+ ARG_UNUSED(argc);uint32_t mhz=strtoul(argv[1],NULL,10),flag=strtoul(argv[2],NULL,10),effective=0;
+ if(flag>1) return -EINVAL;
+ int err=aster_plat_display_qspi_tune(mhz,flag!=0,&effective);
+ shell_print(sh,"QSPI TUNE result=%d requested=%u MHz effective=%u Hz prefetch=%u",err,mhz,effective,flag);
+ return err;
+}
+#endif
+
 #if IS_ENABLED(CONFIG_ASTER_AXS_WINDOW_TEST)
 static int cmd_disp_windowtest(const struct shell *sh,size_t argc,char **argv)
 {
@@ -263,6 +274,9 @@ static int cmd_disp_orient(const struct shell *sh, size_t argc, char **argv)
 }
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_disp,
+#if IS_ENABLED(CONFIG_ASTER_QSPI_TUNING)
+ SHELL_CMD_ARG(qspi,NULL,"<40|48|60|80 MHz> <prefetch 0|1>",cmd_disp_qspi,3,0),
+#endif
 	SHELL_CMD(info, NULL, "display info", cmd_disp_info),
 	SHELL_CMD(clear, NULL, "fill black", cmd_disp_clear),
 	SHELL_CMD_ARG(fill, NULL, "fill <hex>", cmd_disp_fill, 2, 0),

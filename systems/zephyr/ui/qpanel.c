@@ -199,6 +199,7 @@ static void set_label(lv_obj_t *o, const char *s)
 	if (cur && strcmp(cur, s) == 0) {
 		return;
 	}
+	aster_ui_font_warm(ASTER_FONT_CAPTION_PX, s);
 	lv_label_set_text(o, s);
 }
 
@@ -620,18 +621,11 @@ static void build(void)
 	}
 
 	load_palette();
-#if IS_ENABLED(CONFIG_ASTER_WIFI)
-	aster_wifi_settings_warm();
-#endif
-	aster_ui_font_warm(ASTER_FONT_CAPTION_PX,
-			 "快捷设置音量关闭主题切换断开重连连接中无网络记录上次横竖屏");
-	if (has_theme) {
-		/* The names come from the host, so they cannot be in the literal
-		 * above -- warm whatever it is about to draw. */
-		for (int i = 0; i < s_ops->count(); i++) {
-			aster_ui_font_warm(ASTER_FONT_CAPTION_PX, theme_name(i));
-		}
-	}
+	/* Labels warm their own visible text in mk_label()/set_label().
+	 * Do not warm the Wi-Fi editor's keyboard or every theme here: those
+	 * glyphs are not on this sheet and can evict the visible ones from
+	 * the bounded SD font cache. The Wi-Fi editor prepares itself on open.
+	 */
 
 	/* Scrim, then sheet: children are drawn in creation order and
 	 * searched in reverse, so the second of the two is both on top and
@@ -879,16 +873,20 @@ void aster_qpanel_open(aster_qpanel_host_t host)
 	if (s_sheet || !aster_ui_lvgl_screen()) {
 		return;
 	}
+	uint32_t open_start = k_uptime_get_32();
 	if (host == ASTER_QPANEL_OVER_APP && !snapshot_take()) {
 		return; /* refused: see snapshot_take */
 	}
+	uint32_t snap_ms = k_uptime_get_32() - open_start;
 	build();
 	/* Armed only now that there is a sheet to shield, and only over an
 	 * app: the launcher's own tree is what repaints its band, and freezing
 	 * would stop nothing there anyway -- a guest present is not what puts
 	 * pixels back under the sheet. */
 	s_frozen = (host == ASTER_QPANEL_OVER_APP && s_sheet != NULL);
-	LOG_INF("qpanel: open%s", s_frozen ? " (over app)" : "");
+	LOG_INF("qpanel: open%s (snapshot %u ms, build %u ms)",
+		s_frozen ? " (over app)" : "", snap_ms,
+		k_uptime_get_32() - open_start - snap_ms);
 }
 
 void aster_qpanel_close(bool restore)

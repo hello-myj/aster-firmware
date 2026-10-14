@@ -212,6 +212,34 @@ config ASTER_DISP_TIMING
 	  k_malloc bounce). Shows which half actually caps fps. Prints
 	  "disp timing/64 rects" lines; leave off for normal use.
 
+config ASTER_AXS_PIXEL_CLOCK_MHZ
+	int "AXS15231B pixel stream QSPI clock (MHz)"
+	depends on ASTER_PANEL_AXS15231B
+	range 40 80
+	default 40
+	help
+	  Pixel stream clock; initialization/control commands retain the board
+	  devicetree clock. Requested frequency is quantized by the SPI divider.
+	  Values above the board default require panel-specific hardware checks.
+
+config ASTER_AXS_TX_PREFETCH
+	bool "AXS15231B bounded internal-RAM DMA prefetch"
+	depends on ASTER_PANEL_AXS15231B && SPI_ESP32_SLEEP_WAIT
+	select SPI_ESP32_TX_PREFETCH
+	default n
+	help
+	  Enable the per-device TX lookahead copy only for the panel SPI bus.
+	  Uses two bands within the existing DMA chunk budget; never direct PSRAM DMA.
+
+config ASTER_QSPI_TUNING
+	bool "AXS QSPI clock and bounded prefetch diagnostics"
+	depends on ASTER_PANEL_AXS15231B && SPI_ESP32_SLEEP_WAIT
+	select SPI_ESP32_TX_PREFETCH
+	default n
+	help
+	  Requires the TX-prefetch west-tree patch. Runtime diagnostics control
+	  this dedicated panel bus only; boot remains at the devicetree clock.
+
 config ASTER_AXS_WINDOW_TEST
 	bool "AXS15231B raw QSPI window-addressing diagnostic"
 	depends on ASTER_PANEL_AXS15231B

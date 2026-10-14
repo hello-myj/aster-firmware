@@ -921,6 +921,42 @@ static void glass_materialize(void)
 	s_glass_pinned = false;
 }
 
+/* Ordinary writes cannot borrow their source after returning. Preserve a
+ * bounded panel-order record before banded/partial writes can invalidate the
+ * previous alias. Flip and persistent-UI full-frame paths keep zero-copy aliases.
+ * One PSRAM frame is retained and reused; screenshot drop must not release it. */
+static void glass_prepare_write(uint32_t w, uint32_t h, bool whole)
+{
+	if (IS_ENABLED(CONFIG_ASTER_PANEL_AXS15231B)) return;
+	if (!whole && (!s_glass || s_glass_w != w || s_glass_h != h ||
+		       s_glass_pitch != w)) {
+		glass_forget();
+		return; /* Partial pixels cannot reconstruct an unknown old frame. */
+	}
+	size_t bytes = (size_t)w * h * 2u;
+	if (!s_glass_buf || s_glass_buf_bytes < bytes) {
+		uint8_t *buffer = shared_multi_heap_aligned_alloc(SMH_REG_ATTR_EXTERNAL, 32, bytes);
+		if (!buffer) {
+			glass_forget();
+			return; /* Drawing remains available, snapshot must fail honestly. */
+		}
+		if (s_glass_buf) shared_multi_heap_free(s_glass_buf);
+		s_glass_buf = buffer;
+		s_glass_buf_bytes = bytes;
+	}
+	s_glass_ephemeral = false;
+	if (whole) {
+		s_glass = s_glass_buf;
+		s_glass_w = w;
+		s_glass_h = h;
+		s_glass_pitch = w;
+		s_glass_pinned = false;
+		s_glass_ui = false;
+	} else {
+		glass_materialize();
+	}
+}
+
 /* A whole-panel write replaces every pixel: whatever the record held is
  * dead, so restart it on the shadow (the bands that follow fill it in). */
 static void glass_rebase_full(void)
@@ -1074,6 +1110,11 @@ static void glass_rearm_window(void)
 }
 
 #else /* !CONFIG_ASTER_SCREENSHOT */
+
+static inline void glass_prepare_write(uint32_t w, uint32_t h, bool whole)
+{
+	ARG_UNUSED(w); ARG_UNUSED(h); ARG_UNUSED(whole);
+}
 
 static inline void glass_rebase_full(void)
 {
@@ -2383,6 +2424,20 @@ int aster_plat_display_write_at(const uint8_t *buf, uint32_t x, uint32_t y,
 	return aster_plat_display_write_at_ex(buf, x, y, w, h, pitch, false);
 }
 
+int aster_plat_display_qspi_tune(uint32_t mhz,bool prefetch,uint32_t *effective)
+{
+#if IS_ENABLED(CONFIG_ASTER_QSPI_TUNING)
+ extern int aster_axs15231b_qspi_tune(const struct device *,uint32_t,bool,uint32_t *);
+ if(!effective||!aster_plat_display_count()) return ASTER_ENOTSUP;
+ aster_plat_display_flush_drain();k_mutex_lock(&disp_lock,K_FOREVER);
+ int err=aster_axs15231b_qspi_tune(disp_dev,mhz,prefetch,effective);
+ atomic_inc(&display_generation);k_mutex_unlock(&disp_lock);
+ return err?ASTER_EIO:ASTER_OK;
+#else
+ (void)mhz;(void)prefetch;(void)effective;return ASTER_ENOTSUP;
+#endif
+}
+
 int aster_plat_display_window_test(uint32_t *completed)
 {
 #if IS_ENABLED(CONFIG_ASTER_AXS_WINDOW_TEST)
@@ -2451,6 +2506,7 @@ int aster_plat_display_write_at_ex(const uint8_t *buf, uint32_t x, uint32_t y,
 	 * glass record, which is what keeps a screen-grab true across partial
 	 * writes. `whole_panel` means this rect replaces every pixel. */
 	const bool whole_panel = (prw == pw && prh == ph);
+	glass_prepare_write(pw, ph, whole_panel);
 
 	/* Direct-send fast path: source rows are already in panel byte order
 	 * (LVGL RGB565_SWAPPED), rotation is native and the rect is packed

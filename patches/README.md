@@ -402,3 +402,24 @@ Apply to `modules/hal/espressif`:
 ```sh
 git -C ../../modules/hal/espressif apply "$PWD/patches/aster_zephyr_v4.4.2_esp_task_stacks.patch"
 ```
+
+
+## aster_zephyr_v4.4.2_tx_prefetch.patch
+
+Apply after the existing base, QSPI and PSRAM-DMA patches. Adds internal
+clock diagnostics and default-off `SPI_ESP32_TX_PREFETCH` (S3, sleep-wait DMA).
+Per-device enabling remains explicit. Only contiguous, TX-only, non-DMA-capable
+sources at least two bands long qualify. Two internal 8 KiB bands share the
+previous 16 KiB chunk budget; an adaptively reduced 8 KiB ceiling uses two
+4 KiB bands, while the 4092 B fallback retains the legacy path. Allocation
+failure falls back before sending. Current DMA source stays immutable while
+the next source band is copied; buffers free only after completion/error
+cleanup, under the existing SPI context ownership. RX/short/fragmented transfers
+remain on the previous implementation. Physical tests and tuning results are
+recorded separately; this patch does not enable PSRAM direct DMA.
+
+Optional `SPI_ESP32_TX_PREFETCH_LARGE_BANDS` doubles the pair budget: at the
+16 KiB DMA ceiling, two 16 KiB bands allocate 32 KiB. Each DMA command remains
+at most 16 KiB. A reduced 8 KiB ceiling uses two 8 KiB bands; 4092 B keeps the
+legacy path. The option defaults off and needs an explicitly increased internal
+heap and hardware verification. This is additional memory, not a free increase.
