@@ -1,9 +1,18 @@
 import json,sys,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'tools'))
-from release_check import require_packages
+from release_check import require_packages, require_no_skips
 from quickstart_check import commands
 class ReleaseChecks(unittest.TestCase):
+ def test_release_rejects_skipped_asset_checks(self):
+  with tempfile.TemporaryDirectory() as d:
+   log=Path(d)/'sdk-tests.log'
+   for summary in ('Ran 103 tests\nOK (skipped=3)', 'OK (skipped = 12)'):
+    log.write_text(summary)
+    with self.assertRaisesRegex(ValueError,'requirements-assets'):require_no_skips(log,'install requirements-assets')
+   for summary in ('Ran 103 tests\nOK', 'OK (skipped=0)'):
+    log.write_text(summary);require_no_skips(log,'install requirements-assets')
+
  def test_missing_release_app_is_failure(self):
   with tempfile.TemporaryDirectory() as d:
    p=Path(d)/'missing.ast'

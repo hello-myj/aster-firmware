@@ -11,10 +11,13 @@ def identity(root):
 def require_packages(paths):
     for p in paths:
         if not Path(p).is_file():raise ValueError('Required integration package missing: '+str(p))
+def require_no_skips(log, hint):
+    if re.search(r"\bskipped\s*=\s*[1-9]\d*", Path(log).read_text()):
+        raise ValueError(hint)
 def command(args, cwd, env, log):
     with log.open('w') as f:subprocess.run([str(a) for a in args],cwd=cwd,env=env,stdout=f,stderr=subprocess.STDOUT,check=True,timeout=600)
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--sdk',type=Path,required=True);p.add_argument('--sim',type=Path,required=True);p.add_argument('--node',default='node');p.add_argument('--output',type=Path,default=ROOT/'build/release-check');p.add_argument('--require-clean',action='store_true');p.add_argument('--baseline',type=Path,default=ROOT/'contract/abi-baseline.json')
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--sdk',type=Path,required=True);p.add_argument('--sim',type=Path,required=True);p.add_argument('--node',default='node');p.add_argument('--output',type=Path,default=ROOT/'build/release-check');p.add_argument('--require-clean',action='store_true');p.add_argument('--matrix',type=Path,default=ROOT/'contract/release-matrix.json',help='Reviewed published or local candidate matrix; does not modify the published baseline');p.add_argument('--baseline',type=Path,default=ROOT/'contract/abi-baseline.json')
     a=p.parse_args();sdk=a.sdk.resolve();sim=a.sim.resolve();out=a.output.resolve();out.mkdir(parents=True,exist_ok=True);env=dict(os.environ)
     report={'schema':1,'status':'running','hardware':{'status':'not_run','reason':'Integration does not flash hardware; see docs/reliability-validation.md'},'steps':[]}
     def save(): (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
@@ -22,7 +25,7 @@ def main():
         report['steps'].append({'name':name,'status':'running'});save()
         command(args,cwd,environment,out/(name+'.log'));report['steps'][-1]['status']='passed';save()
     try:
-        lock=json.loads((ROOT/'contract/release-matrix.json').read_text());report['sources']={name:identity(root) for name,root in [('firmware',ROOT),('sdk',sdk),('simulator',sim)]}
+        lock=json.loads(a.matrix.read_text());report['matrix']={'path':str(a.matrix.resolve()),'sha256':digest(a.matrix)};report['sources']={name:identity(root) for name,root in [('firmware',ROOT),('sdk',sdk),('simulator',sim)]}
         for name in ['sdk','simulator']:
             if report['sources'][name]['commit']!=lock[name]['revision']:raise ValueError('Source revision differs from reviewed matrix: '+name)
         if a.require_clean and any(r['dirty'] for r in report['sources'].values()):raise ValueError('Release requires clean checkouts; local dirty validation is not a release')
@@ -45,9 +48,9 @@ def main():
         if bundle_files()['contract/api.json']!=(sdk/'contract/api.json').read_bytes():raise ValueError('Firmware/SDK runtime API mismatch')
         step('host-build',[sys.executable,ROOT/'tools/host.py'])
         step('firmware-tests',[sys.executable,'-m','unittest','discover','-s',ROOT/'tests'])
-        unit_summary=(out/'firmware-tests.log').read_text()
-        if 'skipped=' in unit_summary:raise ValueError('Firmware release tests skipped: install requirements-ci.txt')
+        require_no_skips(out/'firmware-tests.log','Firmware release tests skipped: install requirements-ci.txt')
         step('sdk-tests',[sys.executable,'-m','unittest','discover','-s',sdk/'tests'],sdk)
+        require_no_skips(out/'sdk-tests.log','SDK release tests skipped: install SDK requirements-assets.txt')
         step('fonts',[sys.executable,ROOT/'tools/font_metrics.py','--check'])
         step('resources',[sys.executable,ROOT/'tools/resources.py','--output',out/'sdcard'])
         report['resources']={str(p.relative_to(out/'sdcard')):digest(p) for p in (out/'sdcard').rglob('*') if p.is_file()}
@@ -60,16 +63,19 @@ def main():
             step('quickstart-'+str(i+1),args)
         # Required release APPs are built from SDK source plus a fixed reference source.
         build_env=dict(env,ASTER_WORKSPACE=str(out/'apps'))
-        step('sdk-examples',[sys.executable,sdk/'tools/build.py',sdk/'apps/game.2048',sdk/'apps/imucube',ROOT/'tests/fixtures/compatibility/breakout-source','--target','xtensa','--aot'],sdk,build_env)
+        step('sdk-examples',[sys.executable,sdk/'tools/build.py',sdk/'apps/game.2048',sdk/'apps/imucube',ROOT/'tests/fixtures/compatibility/breakout-source',sdk/'apps/scene-settings',sdk/'apps/scene-sprites','--target','xtensa','--aot'],sdk,build_env)
         packages=out/'apps/dist/xtensa'
-        required={key:packages/name for key,name in lock['required_packages'].items()};require_packages(required.values())
+        required={key:packages/name for key,name in lock['required_packages'].items()}
+        # Scene is mandatory for current SDK even when validating with an older matrix.
+        required.update(ASTER_SIM_SCENE_SETTINGS_AST=packages/'aster.scene.settings.ast',ASTER_SIM_SCENE_SPRITES_AST=packages/'aster.scene.sprites.ast')
+        require_packages(required.values())
         parser_env=dict(env,ASTER_COMPAT_PACKAGES=json.dumps([str(x) for x in required.values()]))
         step('candidate-firmware-parser',[sys.executable,'-m','unittest','discover','-s',ROOT/'tests','-p','test_old_packages.py'],ROOT,parser_env)
         frozen=ROOT/'tests/fixtures/compatibility';inventory=json.loads((frozen/'manifest.json').read_text());require_packages(frozen/x['file'] for x in inventory['packages'])
         for item in inventory['packages']:
             if digest(frozen/item['file'])!=item['sha256']:raise ValueError('Frozen old package changed: '+item['file'])
             step('verify-old-'+Path(item['file']).stem,[sys.executable,sdk/'tools/aster.py','verify',frozen/item['file'],'--target','xtensa'],sdk)
-        test_env=dict(env,ASTER_SIM_REQUIRE_PACKAGES='1',**{key:str(value) for key,value in required.items()})
+        test_env=dict(env,ASTER_SIM_REQUIRE_PACKAGES='1',ASTER_SIM_REQUIRE_SCENE_PACKAGES='1',**{key:str(value) for key,value in required.items()})
         step('simulator-tests',[a.node,'--test',*sorted((sim/'test').glob('*.test.js'))],sim,test_env)
         summary=(out/'simulator-tests.log').read_text()
         skipped=re.search(r'^# skipped (\d+)$',summary,re.M)

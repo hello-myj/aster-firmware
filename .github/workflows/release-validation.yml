@@ -5,6 +5,8 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  ASTER_VALIDATION_MATRIX: contract/graphics-candidate-matrix.json
 jobs:
   integration:
     runs-on: ubuntu-24.04
@@ -18,7 +20,7 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
-          m=json.loads(Path('aster-firmware/contract/release-matrix.json').read_text())
+          m=json.loads((Path('aster-firmware')/os.environ['ASTER_VALIDATION_MATRIX']).read_text())
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               for key in ('sdk','simulator'):
                   f.write(key+'_repo='+m[key]['repository']+'\n')
@@ -42,7 +44,7 @@ jobs:
           node-version: '22.20.0'
           cache: npm
           cache-dependency-path: aster-sim/package-lock.json
-      - run: pip install -r aster-sdk/requirements.txt -r aster-firmware/requirements-ci.txt
+      - run: pip install -r aster-sdk/requirements.txt -r aster-sdk/requirements-assets.txt -r aster-firmware/requirements-ci.txt
       - run: npm ci --prefix aster-sim
       - name: Preserve reviewed baseline from PR base
         env:
@@ -62,6 +64,7 @@ jobs:
         run: >-
           python aster-firmware/tools/release_check.py
           --sdk aster-sdk --sim aster-sim --require-clean
+          --matrix "aster-firmware/$ASTER_VALIDATION_MATRIX"
           --baseline "$RUNNER_TEMP/abi-baseline.json"
           --output "$RUNNER_TEMP/aster-release-check"
       - uses: actions/upload-artifact@v4

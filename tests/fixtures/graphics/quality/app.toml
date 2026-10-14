@@ -1,0 +1,15 @@
+[app]
+id = "test.gfx.g8quality"
+name = "G8 Quality"
+version = "0.1.0"
+abi = "3.7.0"
+abi_min = "3.7"
+aot = true
+initial_memory = 524288
+max_memory = 2097152
+heap = 524288
+stack = 32768
+category = "tool"
+requires = ["display", "touch", "filesystem"]
+permissions = ["fs"]
+assets = ["assets/pixel.bmp", "assets/photo.bmp"]

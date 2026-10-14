@@ -172,6 +172,25 @@ static bool read_at(struct fs_file_t *f, uint32_t off, void *dst, uint32_t len)
 	return aster_fs_read_safe(f, dst, len) == (int)len;
 }
 
+/* A synchronous UI operation may read many glyphs. Keep at most one file
+ * open within that operation, lazily on a miss; never across a frame or yield. */
+static struct fs_file_t s_io_file;
+static slot_t *s_io_slot;
+static uint32_t s_io_depth;
+static void font_io_close(void)
+{
+ if(!s_io_slot) return;
+ uint32_t start=k_cycle_get_32();
+ if(fs_close(&s_io_file)) s_st.load_failures++;
+ s_st.close_us+=k_cyc_to_us_floor64((uint32_t)(k_cycle_get_32()-start));
+ s_io_slot=NULL;
+}
+void aster_font_sd_io_begin(void) {s_io_depth++;}
+void aster_font_sd_io_end(void)
+{
+ if(s_io_depth && --s_io_depth==0) font_io_close();
+}
+
 static bool cache_acquire(slot_t *s)
 {
  if(s->cache) return true;
@@ -206,7 +225,7 @@ static void cache_evict(struct sparse_cache *c)
 
 static const struct sparse_ent *sparse_fetch(slot_t *s, uint32_t cp, int32_t gi)
 {
- struct fs_file_t f;uint8_t raw[16];cp_rec_t rec;
+ struct fs_file_t local,*f=&local;uint8_t raw[16];cp_rec_t rec;
  if(gi<0 || !cache_acquire(s)) return NULL;
  struct sparse_cache *c=s->cache;
  for(uint16_t i=0;i<c->n;i++) if(c->entries[i].cp==cp) {
@@ -214,28 +233,46 @@ static const struct sparse_ent *sparse_fetch(slot_t *s, uint32_t cp, int32_t gi)
  }
  s_st.misses++;
  uint32_t started=k_cycle_get_32();
- fs_file_t_init(&f);
- if(fs_open(&f,s->path,FS_O_READ)!=0) return NULL;
- if(!read_at(&f,s->rec_foff+(uint32_t)gi*CPF_REC,raw,sizeof(raw))) {
-  fs_close(&f);return NULL;
+ if(s_io_depth) {
+  if(s_io_slot!=s) font_io_close();
+  f=&s_io_file;
  }
+ if(!s_io_depth || !s_io_slot) {
+  fs_file_t_init(f);
+  if(fs_open(f,s->path,FS_O_READ)!=0) {s_st.load_failures++;return NULL;}
+  if(s_io_depth) s_io_slot=s;
+ }
+ uint32_t opened=k_cycle_get_32();
+ if(!read_at(f,s->rec_foff+(uint32_t)gi*CPF_REC,raw,sizeof(raw))) {
+  if(s_io_depth) font_io_close();else if(fs_close(f)) s_st.load_failures++;
+  s_st.load_failures++;return NULL;
+ }
+ uint32_t recorded=k_cycle_get_32();
  rd_rec(&rec,raw);
  if(rec.dlen>c->capacity || (uint32_t)rec.w*rec.h>SCRATCH_BYTES ||
     rec.dlen!=((uint32_t)rec.w*rec.h+(s->two_bpp?3u:1u))/(s->two_bpp?4u:2u) ||
     (uint64_t)s->bm_foff+rec.doff+rec.dlen>s->fsize) {
-  fs_close(&f);return NULL;
+  if(s_io_depth) font_io_close();else if(fs_close(f)) s_st.load_failures++;
+  s_st.load_failures++;return NULL;
  }
  while(c->n && (c->n>=SPARSE_N || c->used+rec.dlen>c->capacity)) cache_evict(c);
- if(rec.dlen && !read_at(&f,s->bm_foff+rec.doff,c->mem+c->used,rec.dlen)) {
-  fs_close(&f);return NULL;
+ if(rec.dlen && !read_at(f,s->bm_foff+rec.doff,c->mem+c->used,rec.dlen)) {
+  if(s_io_depth) font_io_close();else if(fs_close(f)) s_st.load_failures++;
+  s_st.load_failures++;return NULL;
  }
- fs_close(&f);
+ uint32_t bitmap_read=k_cycle_get_32();
+ if(!s_io_depth && fs_close(f)) s_st.load_failures++;
+ uint32_t closed=k_cycle_get_32();
+ s_st.open_us+=k_cyc_to_us_floor64((uint32_t)(opened-started));
+ s_st.record_us+=k_cyc_to_us_floor64((uint32_t)(recorded-opened));
+ s_st.bitmap_us+=k_cyc_to_us_floor64((uint32_t)(bitmap_read-recorded));
+ s_st.close_us+=k_cyc_to_us_floor64((uint32_t)(closed-bitmap_read));
  struct sparse_ent *e=&c->entries[c->n++];
  e->px=s->px;e->cp=cp;e->rec=rec;e->off=c->used;e->len=rec.dlen;
  e->touched=++c->clock;c->used+=rec.dlen;
  s->cache_used=c->used;s->cache_glyphs=c->n;s_st.miss_filled++;
  s_st.reads+=rec.dlen?2u:1u;s_st.read_bytes+=sizeof(raw)+rec.dlen;
- uint32_t elapsed=k_cyc_to_us_floor64((uint32_t)(k_cycle_get_32()-started));
+ uint32_t elapsed=k_cyc_to_us_floor64((uint32_t)(closed-started));
  s_st.load_us+=elapsed;if(elapsed>s_st.max_load_us)s_st.max_load_us=elapsed;
  return e;
 }
@@ -486,15 +523,18 @@ void aster_font_sd_warm(uint8_t px,const char *utf8)
  if(!s || s->state!=ST_SPARSE || !utf8) return;
  uint32_t started=k_cycle_get_32();
  s_st.warm_bursts++;
+ aster_font_sd_io_begin();
  const uint8_t *p=(const uint8_t *)utf8;
  while(*p) {uint32_t cp=utf8_next(&p);int32_t gi=iv_find(s,cp);
   if(gi>=0 && sparse_fetch(s,cp,gi)) s_st.warm_glyphs++;
  }
+ aster_font_sd_io_end();
  s_st.warm_us+=k_cyc_to_us_floor64((uint32_t)(k_cycle_get_32()-started));
 }
 void aster_font_sd_stats(aster_font_sd_stats_t *out) {if(out) *out=s_st;}
 void aster_font_sd_cache_drop(void)
 {
+ font_io_close();s_io_depth=0;
  unsigned freed=0;
  for(uint32_t i=0;i<ARRAY_SIZE(s_slots);i++) {
   struct sparse_cache *c=s_slots[i].cache;

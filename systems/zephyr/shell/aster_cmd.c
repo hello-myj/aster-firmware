@@ -200,6 +200,8 @@ static int cmd_sys_fonts(const struct shell *sh,size_t argc,char **argv)
    counters.hits,counters.misses,counters.miss_filled,counters.evictions,counters.reads,counters.read_bytes);
  shell_print(sh,"glyph time load_us=%u max_load_us=%u warm_us=%u warm_calls=%u (synchronous, no queue)",
    counters.load_us,counters.max_load_us,counters.warm_us,counters.warm_bursts);
+ shell_print(sh,"glyph IO open_us=%u record_us=%u bitmap_us=%u close_us=%u failures=%u (close includes scope cleanup)",
+   counters.open_us,counters.record_us,counters.bitmap_us,counters.close_us,counters.load_failures);
 
  return 0;
 }

@@ -39,7 +39,7 @@ int main(void) {
         s=(ROOT/'systems/zephyr/ui/font_sd.c').read_text()
         constants='\n'.join(re.findall(r'^#define (?:SPARSE_(?:BYTES|N)|SCRATCH_BYTES)\s+.+$',s,re.M))
         structs=s[s.index('typedef struct {uint8_t w,h;'):s.index('static const uint8_t LUT2')]
-        code=s[s.index('static bool cache_acquire'):s.index('static bool sd_get_dsc')]
+        code=s[s.index('/* A synchronous UI operation'):s.index('static bool sd_get_dsc')]
         lifetime=s[s.index('void aster_font_sd_cache_drop'):s.index('bool aster_font_sd_cache_status')]
         run_c(r'''
 #include <assert.h>
@@ -62,18 +62,18 @@ typedef struct {int unused;} lv_font_t;
 ''' +structs+r'''
 static slot_t s_slots[2];
 static bool s_inited=true;
-static unsigned s_full_refs,disk_reads,live_allocs,fail_next;
-static struct {unsigned reads,read_bytes,evictions,misses,miss_filled,hits,load_us,max_load_us;} s_st;
+static unsigned s_full_refs,disk_reads,live_allocs,fail_next,io_opens,io_closes,fail_io;
+static struct {unsigned reads,read_bytes,evictions,misses,miss_filled,hits,load_us,max_load_us,open_us,record_us,bitmap_us,close_us,load_failures;} s_st;
 static uint32_t k_cycle_get_32(void){static uint32_t clock;return ++clock;}
 static uint32_t k_cyc_to_us_floor64(uint32_t t){return t;}
 static void *aster_psram_alloc(unsigned n) {if(fail_next && --fail_next==0) return NULL;void *p=malloc(n);if(p) live_allocs++;return p;}
 static void aster_psram_free(void *p) {if(p) {live_allocs--;free(p);}}
 struct fs_file_t {int px;};
 static void fs_file_t_init(struct fs_file_t *f) {memset(f,0,sizeof(*f));}
-static int fs_open(struct fs_file_t *f,const char *p,int flags) {assert(flags==1);f->px=atoi(p);return 0;}
-static void fs_close(struct fs_file_t *f) {(void)f;}
+static int fs_open(struct fs_file_t *f,const char *p,int flags) {assert(flags==1);if(fail_io==1){fail_io=0;return -1;}io_opens++;f->px=atoi(p);return 0;}
+static int fs_close(struct fs_file_t *f) {(void)f;io_closes++;if(fail_io==3){fail_io=0;return -1;}return 0;}
 static bool read_at(struct fs_file_t *f,unsigned off,void *buf,unsigned len) {
- disk_reads++;
+ disk_reads++;if(fail_io==2){fail_io=0;return false;}
  if(len==16) {unsigned index=(off-32)/CPF_REC;memcpy(buf,&index,4);}
  else {assert(len==64 && off>=100000);memset(buf,((off-100000)/64+f->px)&255,len);}
  return true;
@@ -97,7 +97,8 @@ int main(void) {
   if(pass) assert(disk_reads==before);
  }
  assert(s_slots[0].cache->n==50 && s_slots[1].cache->n==50 && live_allocs==6);
- assert(s_st.hits==200 && s_st.miss_filled==100 && s_st.load_us==100 && s_st.max_load_us==1);
+ assert(s_st.open_us==100 && s_st.record_us==100 && s_st.bitmap_us==100 && s_st.close_us==100 && !s_st.load_failures);
+ assert(s_st.hits==200 && s_st.miss_filled==100 && s_st.load_us==400 && s_st.max_load_us==4);
  for(int gi=50;gi<500;gi++) {
   assert(sparse_fetch(s_slots,0x4e00,0));
   assert(sparse_fetch(s_slots,0x4e00+gi,gi));
@@ -115,6 +116,32 @@ int main(void) {
  aster_font_sd_session_begin();aster_font_sd_session_end();assert(live_allocs==3);
  aster_font_sd_session_end();assert(!live_allocs && !s_slots[0].cache);
  assert(sparse_fetch(s_slots+1,0x4e00,0));aster_font_sd_cache_drop();assert(!live_allocs);
+ unsigned opened=io_opens;
+ aster_font_sd_io_begin();aster_font_sd_io_begin();
+ for(int i=0;i<10;i++) assert(sparse_fetch(s_slots,0x5000+i,i));
+ assert(io_opens==opened+1 && io_closes+1==io_opens);
+ aster_font_sd_io_end();assert(io_closes+1==io_opens);
+ aster_font_sd_io_end();assert(io_closes==io_opens);
+ opened=io_opens;aster_font_sd_io_begin();
+ for(int i=0;i<10;i++) assert(sparse_fetch(s_slots,0x5000+i,i));
+ aster_font_sd_io_end();assert(io_opens==opened); /* All hits: no file. */
+ aster_font_sd_io_begin();
+ assert(sparse_fetch(s_slots,0x6000,50));
+ assert(sparse_fetch(s_slots+1,0x6001,51)); /* Switch closes previous face. */
+ assert(io_opens==io_closes+1);
+ fail_io=2;assert(!sparse_fetch(s_slots+1,0x6002,52));
+ assert(io_opens==io_closes && s_st.load_failures==1);
+ assert(sparse_fetch(s_slots+1,0x6002,52)); /* Read error can retry. */
+ aster_font_sd_io_end();assert(io_opens==io_closes);
+ aster_font_sd_io_begin();fail_io=1;
+ assert(!sparse_fetch(s_slots,0x7000,60));assert(io_opens==io_closes);
+ assert(sparse_fetch(s_slots,0x7000,60));
+ aster_font_sd_cache_drop();assert(!live_allocs && io_opens==io_closes);
+ aster_font_sd_io_end(); /* Drop safely cancels an active scope. */
+ unsigned failures=s_st.load_failures;fail_io=3;
+ assert(sparse_fetch(s_slots,0x8000,70));
+ assert(s_st.load_failures==failures+1 && io_opens==io_closes);
+ aster_font_sd_cache_drop();assert(!live_allocs);
  return 0;
 }
 ''')

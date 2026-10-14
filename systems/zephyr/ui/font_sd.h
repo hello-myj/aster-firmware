@@ -41,6 +41,11 @@ const lv_font_t *aster_font_sd_get(uint8_t px);
  * prewarm during boot/init to avoid cold I/O during normal drawing. */
 void aster_font_sd_warm(uint8_t px, const char *utf8);
 
+/* Shared UI worker only: one lazy file handle for a bounded synchronous
+ * operation; nestable, must end before yielding/returning. No I/O on warm hits. */
+void aster_font_sd_io_begin(void);
+void aster_font_sd_io_end(void);
+
 /* Compatibility hook: synchronous glyph reads have no staged completions. */
 bool aster_font_sd_commit(void);
 
@@ -77,6 +82,10 @@ typedef struct {
     uint32_t hits;          /* resident glyph lookups */
     uint32_t load_us;       /* successful cold loads, wrapping sum */
     uint32_t max_load_us;
+    /* Wrapping microsecond sums: acquire/record/bitmap for successful loads.
+     * Seek is part of the read; close also includes scoped/error cleanup.
+     * Failures include open/read/validation/close errors. */
+    uint32_t open_us, record_us, bitmap_us, close_us, load_failures;
     uint32_t warm_us;       /* wrapping sum of synchronous warm time */
 	uint32_t read_bytes;
 	uint32_t warm_bursts;   /* prewarm calls               */

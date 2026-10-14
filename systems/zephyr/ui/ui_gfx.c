@@ -10,13 +10,11 @@
  *
  * Threads: everything here runs on the app worker thread -- which IS the
  * UI thread in this firmware (WAMR and LVGL share it), so the cpfont
- * rings, its per-slot scratch and the sprite cache need no locking.
+ * caches, their per-slot scratch and the sprite cache need no locking.
  *
  * Text goes through the public LVGL font chain: aster_ui_font() snaps to a
- * nearest published native cpfont face with full source-font coverage. aster_font_sd_poll/commit at exec head advance the
- * async glyph-bitmap pipeline, so a cold glyph draws as a correct-size
- * blank for one frame and the real bitmap the next -- same behaviour the
- * LVGL labels have.
+ * nearest published native cpfont face with full source-font coverage. Cold
+ * glyphs load synchronously; a bounded exec scope reuses one file handle.
  *
  * Sprites: aster_gfx_bmp_load decodes (via imgdec, nearest) into one of six
  * owned PSRAM slots; color key 0x0000 = transparent, alpha multiplies
@@ -1424,14 +1422,12 @@ int aster_gfx_exec_into(uint8_t *buf565, uint32_t w, uint32_t h, uint32_t pitch,
 	s_last_pitch = pitch;
 	s_last_be = out_be;
 
-	/* advance the async glyph pipeline: fills land in the ring so the
-	 * second frame shows the real bitmap (white-box protocol) */
+	/* Discover newly mounted font metadata; glyph reads are synchronous. */
 	(void)aster_font_sd_poll();
 	(void)aster_font_sd_commit();
-	/* ...and whatever landed is in this frame, so the guest's next
-	 * aster_gfx_fonts_pending() may answer "no" again. (The draw is what
-	 * clears the request -- see the note on repaint_ack.) */
+	/* This draw acknowledges the repaint requested by new metadata. */
 	aster_font_sd_repaint_ack();
+	aster_font_sd_io_begin();
 
 	for (uint32_t i = 0; i < n; i++) {
 		const aster_gfx_cmd_t *c = &cmds[i];
@@ -1484,6 +1480,7 @@ int aster_gfx_exec_into(uint8_t *buf565, uint32_t w, uint32_t h, uint32_t pitch,
 #endif
 	}
 
+	aster_font_sd_io_end();
 	acc_t acc=total;
 	if (dirty_x) {
 		if (!acc.has) {
