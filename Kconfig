@@ -8,6 +8,22 @@ config ASTER
 	bool "ASTER dynamic application platform"
 	default y
 
+config ASTER_NET
+	bool "Bounded asynchronous IPv4 transport service"
+	depends on NET_SOCKETS && DNS_RESOLVER && NET_TCP
+	default y if ASTER_WIFI
+	help
+	  Two shared TCP/UDP slots, private network worker and CLI diagnostics.
+	  No public APP network ABI is exposed at this stage.
+
+config ASTER_NET_LOOPBACK_TEST
+	bool "Diagnostic loopback echo fixture (never enable in release)"
+	depends on ASTER_NET && NET_LOOPBACK
+	default n
+	help
+	  Build a bounded 127.0.0.1:9000 TCP echo peer for hardware CLI tests.
+	  Closes after 512 echoed bytes. No LAN listener and no APP API.
+
 config ASTER_WAMR
 	bool "Enable WAMR WebAssembly runtime"
 	default y

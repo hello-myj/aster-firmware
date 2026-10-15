@@ -18,6 +18,7 @@
 #define ASTER_PERM_APPMGR  (1u << 2)
 #define ASTER_PERM_SD      (1u << 3) /* /sd → /SD: (no ABI bump) */
 #define ASTER_PERM_WIFI    (1u << 4)
+#define ASTER_PERM_NET     (1u << 5)
 
 /* Map a permission token to its bit (0 if unknown). */
 static inline uint32_t aster_perm_bit(const char *name)
@@ -37,6 +38,7 @@ static inline uint32_t aster_perm_bit(const char *name)
 	if (!strcmp(name, "wifi")) {
 		return ASTER_PERM_WIFI;
 	}
+	if (!strcmp(name, "net")) return ASTER_PERM_NET;
 	return 0;
 }
 

@@ -6,3 +6,7 @@
 target_sources(app PRIVATE
 	aster_cmd.c
 )
+
+if(CONFIG_ASTER_NET)
+  target_sources(app PRIVATE aster_net_cmd.c)
+endif()

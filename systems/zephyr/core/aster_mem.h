@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  * ASTER core memory: PSRAM-backed allocation for WAMR pool, wasm images,
- * surface buffers; internal DRAM via k_malloc for small hot objects.
+ * surface buffers; internal DRAM via the libc tail heap for stacks and small hot objects.
  */
 #ifndef ASTER_MEM_H
 #define ASTER_MEM_H

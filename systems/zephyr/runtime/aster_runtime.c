@@ -900,6 +900,7 @@ static void ctx_cleanup(aster_app_ctx_t *ctx)
 	aster_gfx_drop_all(); /* free sprite-cache slots held by this app */
 #endif
 	aster_native_frame_release(ctx);
+	aster_native_release_network(ctx);
 	aster_native_release_files(ctx);
 
 	if (ctx->exec_env) {

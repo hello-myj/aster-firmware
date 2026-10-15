@@ -24,6 +24,13 @@ typedef enum {
 	ASTER_ENODEV = -16,    /* device / interface not present */
 	ASTER_ESIGN = -17,     /* package signature invalid / alien key */
 	ASTER_EUNSIGNED = -18, /* unsigned package under require-signature policy */
+	ASTER_ECANCELLED = -19, /* operation cancelled */
+	ASTER_EMSGSIZE = -20,   /* UDP capacity/packet size; input preserved */
+	ASTER_EPIPE = -21,      /* TCP write after EOF */
+	ASTER_EDNS = -22,       /* name lookup failed (timeout remains ETIMEDOUT) */
+	ASTER_ECONNRESET = -23,
+	ASTER_ECONNREFUSED = -24,
+	ASTER_ENETUNREACH = -25,
 } aster_error_t;
 
 #endif /* ASTER_ERROR_H */

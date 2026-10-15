@@ -22,6 +22,9 @@
 #include "aster_runtime.h"
 #include "aster_sysinfo.h"
 #include "aster_storage.h"
+#if defined(CONFIG_ASTER_NET)
+#include "aster_net_cmd.h"
+#endif
 #include "aster_logring.h"
 #if IS_ENABLED(CONFIG_ASTER_SCREENSHOT)
 #include "ui_screenshot.h"
@@ -1031,6 +1034,9 @@ static int cmd_display_mode(const struct shell *sh, size_t argc, char **argv)
 #endif
 
 SHELL_STATIC_SUBCMD_SET_CREATE(aster_cmds,
+#if defined(CONFIG_ASTER_NET)
+    SHELL_CMD(net, &aster_net_cmds, "async transport diagnostics", NULL),
+#endif
 #if IS_ENABLED(CONFIG_ASTER_WAMR)
     SHELL_CMD_ARG(display, NULL, "headless|portrait|landscape (same firmware)", cmd_display_mode, 2, 0),
 #endif

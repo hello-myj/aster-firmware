@@ -154,6 +154,8 @@ static int app_str(wasm_exec_env_t env, uint32_t off, uint32_t len, char *out, s
 	return (int)len;
 }
 
+#include "aster_network_bridge.inc"
+
 /* ---- handle decode ---- */
 
 static int handle_index(uint32_t h, uint32_t tag, uint32_t max)
@@ -2816,6 +2818,13 @@ static NativeSymbol syms[] = {
 	{ "aster_wifi_get_saved_ssid", (void *)n_wifi_get_saved_ssid, "(ii)i", NULL },
 	{ "aster_wifi_reconnect", (void *)n_wifi_reconnect, "()i", NULL },
 	{ "aster_wifi_scan_results", (void *)n_wifi_scan_results, "(ii)i", NULL },
+	{ "aster_network_get_info", (void *)n_network_get_info, "(ii)i", NULL },
+	{ "aster_network_open", (void *)n_network_open, "(iiiii)i", NULL },
+	{ "aster_network_send", (void *)n_network_send, "(iiiiii)i", NULL },
+	{ "aster_network_recv", (void *)n_network_recv, "(iiiii)i", NULL },
+	{ "aster_network_status", (void *)n_network_status, "(iii)i", NULL },
+	{ "aster_network_cancel", (void *)n_network_cancel, "(i)i", NULL },
+	{ "aster_network_close", (void *)n_network_close, "(i)i", NULL },
 	{ "aster_wifi_scan_start", (void *)n_wifi_scan_start, "()i", NULL },
 	{ "aster_wifi_status", (void *)n_wifi_status, "(ii)i", NULL },
 };

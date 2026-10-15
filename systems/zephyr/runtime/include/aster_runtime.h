@@ -59,6 +59,7 @@ typedef struct aster_app_ctx {
 	bool     is_aot;
 	void    *f_init, *f_event, *f_start, *f_pause, *f_resume, *f_stop, *f_destroy;
 
+	uint64_t network_owner; /* unique numeric session; 0 until first network call */
 	/* resources owned by this app */
 	aster_surface_t surfaces[ASTER_SURFACE_MAX];
 	aster_frame_state_t gfx_frame;

@@ -1,6 +1,6 @@
 # APP 网络服务实施方案
 
-状态：网络协议尚未实施；内核堆已调整为96 KiB并补充libc运行时统计，构建及实机状态见第16节。本文中的新网络接口、协议限额和ABI版本号仍为实施目标，不表示当前 SDK 已经支持。
+状态（2026-10-15）：N1正在实施。固件TCP/UDP服务和CLI已完成两板首轮检查；工作区ABI3.8已实现APP桥接、独立SDK与Windows/Linux模拟器，两板最终七接口APP收发与交互已验证，系统协议池并发峰值尚待补测。HTTP/HTTPS与MQTT/MQTTS尚未实现。边界见[CLI记录](validation/network-n1-2026-10-15.md)和[APP/SDK记录](validation/network-n1-sdk-2026-10-15.md)。
 
 适用范围：Aster 固件、独立 APP SDK、Windows/Linux 模拟器，以及 LCKFB、微雪 3.5B 两款开发板。本文随固件源码维护；原始日志、抓包、截图和临时镜像留在仓库外。
 
@@ -10,12 +10,12 @@
 
 当前源码基线：
 
-- 公共 ABI 为 3.7.0。
+- 工作区公共ABI为3.8.0（新增有界TCP/UDP，尚未发布）；此前发布的3.7成品不含新导入。
 - SDK 已公开 Wi-Fi station 扫描、连接、断开、重连、状态和已保存 SSID 接口；需要 `wifi` 权限。
 - 固件设置页有个人热点与 DHCP 服务，但 SDK 没有公开个人热点控制接口。
-- 两款板的 `base.conf` 已开启 socket、DNS、SNTP，关闭 IPv6，且显式设置 `CONFIG_NET_TCP=n`。
-- 两款板当前 `CONFIG_NET_MAX_CONTEXTS=4`；这不是可全部分配给 APP 的四个连接名额。
-- SDK 未公开 DNS、TCP/UDP、HTTP/HTTPS、WebSocket、MQTT 接口。
+- 两款板的 `base.conf` 开启 socket、DNS、SNTP 和 TCP，关闭 IPv6；`CONFIG_ASTER_NET` 控制独立 TCP/UDP 服务与诊断 CLI。
+- 两款板当前 `CONFIG_NET_MAX_CONTEXTS=8`、`CONFIG_NET_MAX_CONN=8`、`CONFIG_DNS_NUM_CONCUR_QUERIES=3`。服务最多两槽，CLI 同样占槽；其余为 DNS/SNTP/DHCP 等预留，仍需并发峰值验收。
+- SDK已公开TCP/UDP七个aster_network_*导入，DNS作为连接/发送阶段；HTTP/HTTPS、WebSocket、MQTT未提供。
 - 两款板本轮将内核堆由48 KiB提升到96 KiB；微雪仍使用40 MHz、双8 KiB显示预拷贝。不将已有图形峰值和新增网络峰值混算，内核/libc分池与验收见第16节。
 
 第一批完整网络版本包括 TCP/UDP、HTTP/HTTPS 和 MQTT/MQTTS 客户端，分阶段实施，按第15节硬件预算收敛：以两个活动APP传输连接作为验收目标、一个连接作为明确可选的低资源配置；先验收一个TLS会话，不承诺双TLS。MQTT 从后续候选提升为独立必做阶段；HTTP 服务端、TCP 监听、WebSocket 和其他服务仍按需扩展。
@@ -81,7 +81,7 @@ APP 退出时按顺序执行：停止接受该会话的新请求、使公开句�
 拟议 APP 声明：
 
 ```toml
-# 实施目标示例；当前 SDK 尚不接受下面的新权限/能力。
+# 后续HTTP/TLS实施目标；net权限和network能力已接受，http/tls尚未提供。
 permissions = ["net", "fs"]
 requires = ["network", "http", "tls"]
 ```
@@ -91,18 +91,18 @@ requires = ["network", "http", "tls"]
 ### 4.2 ABI 扩展规则
 
 - 新结构保留 `size`、`version`，使用固定宽度整数、显式长度和保留字段；不跨 ABI 传递宿主指针、`size_t`、`errno` 或原生 fd。
-- 不改变现有错误码、事件值、能力位和导入签名；候选版本可使用 ABI 3.8，最终以契约检查结果为准。
+- 不改变现有错误码、事件值、能力位和导入签名；工作区采用ABI3.8，已与3.7冻结基线检查，无旧布局/签名/枚举破坏。
 - 公共头文件以固件 `contract/include/aster` 为源，通过现有契约导出/导入流程同步 SDK，不手工维护两套接口。
 - 新错误需按兼容流程追加，不能重排旧枚举。初期可用已有稳定错误码加结构化阶段/原因，不能直接泄露平台 errno 作为返回值。
 - 新增能力需同步固件探测、包校验、SDK manifest、模拟器能力与文档。
 
 ## 5. 拟议公共接口
 
-以下是接口职责清单，不是可直接调用的最终 C 头文件。N1 必须先锁定参数、结构布局和完整语义，再编写实现。
+以下保留接口职责草案，不能按草案函数名调用。TCP/UDP本轮已统一为aster_network_get_info/open/send/recv/status/cancel/close，准确签名和规则以contract/include/aster/network.h及SDK开发手册第15节为准。get_info返回只读接口/IPv4快照与限额，status返回指定连接状态，二者独立。
 
 ### 5.1 网络状态
 
-`aster_net_status(...)` 返回可用网络接口、IPv4、链路/地址状态和能力。结果读取服务缓存，不触发扫描、联网或外部“探测网站”。
+已实现的`aster_network_get_info(...)`返回只读接口标志、本机IPv4提示和连接/队列限额，结构44字节；锁忙EAGAIN，没有接口时OK且flags=0。它读取OS缓存，不触发扫描、联网或外部探测。UP只表示启用；ESP载波可能在未关联时保留，不把原始CARRIER标志当作Wi-Fi关联证明。
 
 区分以下情况：没有接口、接口未连接、等待地址、具备本地 IP。具备 IP 不等于互联网可达；个人热点本地通信也不等于具备 NAT 或上网能力。
 
@@ -122,6 +122,7 @@ TCP 语义必须明确：
 - send 成功只表示进入本地队列，不表示远端应用已经处理；状态中区分排队与实际发送统计。
 - `recv` 的容量必须大于 0；已有缓存先读完，对端有序 EOF 且缓存空时才返回 0。
 - 连接异常、超时和正常 EOF 分开表达；是否允许异常后先读完缓存必须固定，并在两端实现一致。
+- Zephyr 4.4.2 原生 TCP 不支持半关闭后继续写；首版所有运行环境在读到 EOF 后拒绝新发送，已缓存接收数据仍先读完，未发完队列遇到 EOF 报失败。真正半关闭写能力另行扩展，不用模拟器的 POSIX 行为冒充设备已支持。
 - 首版不自动重新连接，避免静默重复提交业务数据。需要重连的 APP 自己决定协议恢复和重试。
 
 ### 5.3 UDP
@@ -299,9 +300,9 @@ CLI检查通过只说明该固件服务在所测板型可用。单板通过后�
 - [ ] 网络线程不持有WASM指针，不在后台线程直接回调APP或操作LVGL。
 - [ ] 固件/SDK/模拟器测试和手册同步，CLI通过不能替代以上项目。
 
-#### CLI命令草案（尚未实现，不可作为现有命令执行）
+#### CLI命令与后续草案
 
-建议使用设备shell下的`aster net`命名空间；它不同于主机SDK的`aster`构建/部署命令。
+设备shell使用`aster net`命名空间；它不同于主机SDK的`aster`构建/部署命令。TCP/UDP、status、stats、result、cancel和close已实现，准确语法和边界见[网络CLI说明](network-transport-cli.zh-CN.md)。下面混列的HTTP/MQTT以及`result --operation`仍是后续草案，不可作为现有命令执行。
 
 ```text
 aster net status
@@ -330,16 +331,18 @@ CLI测试连接也受服务总连接/内存上限约束，不能拥有绕过配�
 
 ### N1：契约、资源模型与 TCP/UDP
 
-- [ ] 固定三仓库基线，保存两板生成配置、内存基线和原 APP 状态。
-- [ ] 锁定公共结构、签名、权限、能力、句柄生命周期、错误与所有配额。
-- [ ] 评估现有四个网络上下文及 DNS/SNTP/DHCP 等实际占用，确定系统与 APP 预算。
-- [ ] 先实现平台socket、DNS、独立网络服务与内部owner/session回收，不依赖shell或APP调用栈。
-- [ ] 开启并验证 TCP；实现 UDP 数据报边界与背压/丢包统计。
-- [ ] 增加TCP/UDP设备CLI，通过10.0节G1验收并记录两套堆/PSRAM及队列回收。
-- [ ] 对本模块CLI已通过的实现接入native桥接、APP退出清理和SDK契约导入，再完成echo APP与模拟器；不等待其他协议全部实现。
-- [ ] 覆盖非法/跨 APP/过期句柄、WASM 越界、溢出长度、权限缺失和配额耗尽。
-- [ ] 两板通过局域网 TCP 分段/合并/部分发送/EOF/断连，以及 UDP 来源地址/零包/大包/满队列测试。
-- [ ] 网络等待期间触摸、上下拉、绘制保持响应；APP 退出和重开无陈旧回调。
+当前进度：共享服务与CLI已实现；CLI阶段99项、APP桥接阶段100项固件测试及两板构建通过，微雪与LCKFB实机均覆盖真实TCP/UDP、DNS、超时/取消、断网重连和图形并发，用户交互确认正常。结果与已知限制见 [N1验证记录](validation/network-n1-2026-10-15.md)。公共APP契约/native桥接、SDK与模拟器已实现ABI3.8开发版，两板的权限/越界/会话清理与真实Echo已通过，系统协议池并发峰值仍待补测，因此本标题不标“已完成”。
+
+- [x] 固定三仓库基线，保存两板生成配置、内存基线和原 APP 状态。
+- [x] 锁定公共结构、签名、权限、能力、句柄生命周期、错误与所有配额。ABI3.8：network能力、net权限，七个aster_network_*导入，两槽与CLI共用；详见contract/include/aster/network.h与SDK开发手册第15节。
+- [ ] 评估原四个、当前调整为八个网络上下文及 DNS/SNTP/DHCP 等实际占用，确定系统与 APP 预算。
+- [x] 先实现平台socket、DNS、独立网络服务与内部owner/session回收，不依赖shell或APP调用栈。宿主机测试覆盖清理和陈旧 DNS token；APP生命周期桥接已接入并验证初始化拒绝/trap清理。
+- [x] 开启并验证 TCP；实现 UDP 数据报边界与背压/丢包统计。宿主和两板真实局域网首轮检查已通过；SDK实机已验证1500+548字节部分入队及EAGAIN；持续慢对端背压由后续压力验收覆盖。
+- [x] 增加TCP/UDP设备CLI，完成两板首轮G1检查并记录两套堆/PSRAM及队列回收。覆盖范围、短时并发数据及待测边界见验证记录；不替代后续G2与完整压力验收。
+- [x] 对本模块CLI已通过的实现接入native桥接、APP退出清理和SDK契约导入，完成echo APP与模拟器；两板与Windows/Linux模拟器已验证，两板最终七接口版本复核也已通过。
+- [x] 覆盖非法/跨 APP/过期句柄、WASM 越界、溢出长度、权限缺失和配额耗尽。两板独立SDK AOT fixture及实际native桥接ASan/UBSan测试通过。
+- [x] 两板通过局域网 TCP 分段/合并/部分发送/EOF/断连，以及 UDP 来源地址/零包/大包/满队列测试。分段/EOF及UDP CLI记录与APP部分入队、短缓冲重读记录互补。
+- [x] 网络等待期间触摸、上下拉、绘制保持响应；APP退出和重开无陈旧回调。两板用户交互确认，生命周期fixture与模拟器陈旧DNS回调测试通过。
 
 完成条件：本地可控服务器与两板收发正确；超时、取消、退出和资源归还有记录；SDK 使用方不需要固件环境。此时尚不声称 HTTP/HTTPS 可用。
 
@@ -528,7 +531,7 @@ MQTT 和新增网络服务都只提供通信机制，不替 APP 决定业务主�
 4. **一个MQTT/MQTTS客户端**：3.1.1、QoS 0/1、4个订阅、1 KiB消息、有界队列。它占用两个APP连接名额中的一个；需验收MQTT＋HTTP、MQTTS＋HTTP及MQTT＋HTTPS，双TLS另行评估。
 5. **系统网络统计**：只记录状态和计数，不默认抓包、缓存全量日志或保存请求体。
 
-这里的“共用名额”是资源准入：HTTP/MQTT内部socket也计入总数；两个名额用完后明确返回忙，不能擅自断开长连接或在不可见队列中无限等候。系统DNS/SNTP/DHCP和发现服务另留系统预算。现有NET_MAX_CONTEXTS=4不能直接当作已足够，N1核对网络池、socket描述符和上下文上限，按实测调整。
+这里的“共用名额”是资源准入：HTTP/MQTT内部socket也计入总数；两个名额用完后明确返回忙，不能擅自断开长连接或在不可见队列中无限等候。系统DNS/SNTP/DHCP和发现服务另留系统预算。原NET_MAX_CONTEXTS=4不足以直接承诺该并发；N1现已调整为8，仍需核对网络池、socket描述符和实际系统占用，按实测收敛。
 
 ### 15.3 TLS是单独的资源门槛
 

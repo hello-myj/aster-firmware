@@ -75,6 +75,7 @@ void aster_sysinfo_get(aster_system_info_t *info)
 	if (IS_ENABLED(CONFIG_ASTER_HAS_BT)) {
 		f |= 1ull << ASTER_FEATURE_BLUETOOTH;
 	}
+	if (IS_ENABLED(CONFIG_ASTER_NET)) f |= 1ull << ASTER_FEATURE_NETWORK;
 	info->feature_flags = f;
 }
 
@@ -99,6 +100,7 @@ bool aster_sysinfo_feature_by_name(const char *name)
 		{ "audio-in", ASTER_FEATURE_AUDIO_INPUT },
 		{ "audio-out", ASTER_FEATURE_AUDIO_OUTPUT },
 		{ "wifi", ASTER_FEATURE_WIFI },
+		{ "network", ASTER_FEATURE_NETWORK },
 		{ "bluetooth", ASTER_FEATURE_BLUETOOTH },
 		{ "accelerometer", ASTER_FEATURE_ACCELEROMETER },
 		{ "gyroscope", ASTER_FEATURE_GYROSCOPE },

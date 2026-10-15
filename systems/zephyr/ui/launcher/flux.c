@@ -734,7 +734,7 @@ static void build_system(void)
  text(body,"SYSTEM / ASTER",17,15,280,DIM,16,128);
  text(body,"设备与运行状态",17,38,286,FG,20,280);
  char info[480];
- snprintf(info,sizeof(info),"%s\n\n显示   %u × %u\nABI     3.7.0\n应用   %d 个已安装\nSD       %s\n运行   %llu 秒\n\n启动与错误日志通过 USB shell 查看。",CONFIG_ASTER_BOARD_ID,(unsigned)aster_ui_lvgl_width(),(unsigned)aster_ui_lvgl_height(),aster_app_mgr_count(),aster_storage_mounted()?"已挂载":"未挂载",(unsigned long long)(k_uptime_get()/1000));
+ snprintf(info,sizeof(info),"%s\n\n显示   %u × %u\nABI     3.8.0\n应用   %d 个已安装\nSD       %s\n运行   %llu 秒\n\n启动与错误日志通过 USB shell 查看。",CONFIG_ASTER_BOARD_ID,(unsigned)aster_ui_lvgl_width(),(unsigned)aster_ui_lvgl_height(),aster_app_mgr_count(),aster_storage_mounted()?"已挂载":"未挂载",(unsigned long long)(k_uptime_get()/1000));
  text(body,info,17,100,286,FG,16,256);
 }
 static void show_page(int next)

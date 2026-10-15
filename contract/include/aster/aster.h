@@ -29,6 +29,7 @@
 #include "audio.h"
 #include "time.h"
 #include "wifi.h"
+#include "network.h"
 #include "img.h"
 #include "gfx.h"
 

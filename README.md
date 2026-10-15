@@ -57,6 +57,12 @@ aster sys info
 
 个人热点本机地址为 `192.168.4.1/24`，DHCP 地址池从 `192.168.4.10` 开始。支持 Wi-Fi 与热点同时开启；热点提供局域网连接，目前没有 NAT 或互联网共享。
 
+## TCP/UDP 设备诊断（N1 实施中）
+
+开启 `CONFIG_ASTER_NET` 后，`aster net` 提供异步 TCP/UDP 连接、收发、取消、关闭和资源查询。两款板默认随 Wi-Fi 启用，最多两个共享槽；网络操作在独立线程执行。工作区ABI 3.8已接入APP原生桥接，SDK通过导出契约更新；已发布的SDK 3.7不含这些导入。APP/SDK验收进行中，HTTP/TLS/MQTT尚未接入。
+
+命令、缓冲限制及验证边界见 [网络 CLI 使用说明](docs/network-transport-cli.zh-CN.md)，分阶段计划见 [网络服务实施方案](docs/network-services-implementation.zh-CN.md)。
+
 ## 目录与资源
 
 ```text

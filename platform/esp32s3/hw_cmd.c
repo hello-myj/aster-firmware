@@ -950,6 +950,10 @@ static int cmd_wifi_status(const struct shell *sh, size_t argc, char **argv)
 		    st.ip[0] ? st.ip : "-",
 		    (int)st.rssi,
 		    st.sec_txt ? st.sec_txt : "-");
+    uint32_t operation, last_operation;
+    int result;
+    aster_plat_wifi_operation(&operation, &last_operation, &result);
+    shell_print(sh, "operation=%u last_operation=%u last_result=%d", operation, last_operation, result);
 	return 0;
 }
 
@@ -959,12 +963,12 @@ static int cmd_wifi_reconnect(const struct shell *sh, size_t argc, char **argv)
 
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
-	shell_print(sh, "reconnecting saved network ...");
-	err = aster_plat_wifi_reconnect();
+	shell_print(sh, "queueing saved-network reconnect ...");
+	err = aster_plat_wifi_reconnect_start();
 	if (err) {
 		shell_print(sh, "reconnect failed (%d)", err);
 	} else {
-		shell_print(sh, "reconnected");
+		shell_print(sh, "reconnect queued; query hw wifi status");
 	}
 	return 0;
 }

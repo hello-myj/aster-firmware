@@ -5,7 +5,8 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 3
-#define ASTER_ABI_MINOR 7  /* 3.7 (additive): coherent six-axis IMU info/read.
+#define ASTER_ABI_MINOR 8  /* 3.8 (additive): bounded asynchronous TCP/UDP.
+                          * 3.7 (additive): coherent six-axis IMU info/read.
                           * 3.6 (additive): read-only wall-clock time,
                           * UTC epoch milliseconds plus local calendar fields.
                           * 3.5 (additive): station Wi-Fi scan/connect/status,
@@ -59,6 +60,7 @@
 #define ASTER_FEATURE_RTC          12u
 #define ASTER_FEATURE_PSRAM        13u
 #define ASTER_FEATURE_FRAMEBUFFER  14u
+#define ASTER_FEATURE_NETWORK      15u
 
 /* CPU arch ids */
 #define ASTER_ARCH_XTENSA 1u

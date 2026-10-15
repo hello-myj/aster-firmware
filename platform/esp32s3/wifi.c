@@ -248,6 +248,27 @@ static void fill_ip(char *dst, size_t max)
 	dst[max - 1] = 0;
 }
 
+/* The driver reports CONNECT_RESULT only after DHCP. If the event was
+ * missed, or association survives while DHCP stalls, query the address rather
+ * than treating a saved/associated SSID as a usable connection. Called under
+ * wifi_mu, in a blocking control path (never UI or system workqueue). */
+static int wifi_wait_ipv4(void)
+{
+    char ip[NET_IPV4_ADDR_LEN];
+    fill_ip(ip, sizeof(ip));
+    if (ip[0]) return 0;
+    while (k_sem_take(&dhcp_done, K_NO_WAIT) == 0) {}
+    net_dhcpv4_restart(iface);
+    int64_t deadline = k_uptime_get() + DHCP_TO_MS;
+    do {
+        fill_ip(ip, sizeof(ip));
+        if (ip[0]) return 0;
+        (void)k_sem_take(&dhcp_done, K_MSEC(250));
+    } while (k_uptime_get() < deadline);
+    fill_ip(ip, sizeof(ip));
+    return ip[0] ? 0 : -ETIMEDOUT;
+}
+
 static void wifi_handler(struct net_mgmt_event_callback *cb, uint64_t event,
 			 struct net_if *ift)
 {
@@ -388,7 +409,6 @@ int aster_plat_wifi_connect(const char *ssid, const char *psk)
 	size_t plen;
 	int hit;
 	int err;
-	char ip[16];
 
 	if (!ssid || !ssid[0]) {
 		return -EINVAL;
@@ -424,8 +444,9 @@ int aster_plat_wifi_connect(const char *ssid, const char *psk)
 		if (aster_plat_wifi_status(&current) == 0) {
 			if (current.state == WIFI_STATE_COMPLETED &&
 			    strcmp(current.ssid, join_ssid) == 0) {
+                err = wifi_wait_ipv4();
 				k_mutex_unlock(&wifi_mu);
-				return 0;
+				return err;
 			}
 			/* ESP32 rejects connect while already associated. Switching
 			 * networks must finish disconnect before starting the join. */
@@ -476,15 +497,17 @@ int aster_plat_wifi_connect(const char *ssid, const char *psk)
 	}
 	err = k_sem_take(&conn_done, K_MSEC(CONN_TO_MS));
 	atomic_set(&conn_wait_kind, CONN_WAIT_NONE);
-	if (err) {
-		k_mutex_unlock(&wifi_mu);
-		return -ETIMEDOUT;
-	}
-	if (conn_status) {
-		err = conn_status > 0 ? -EIO : conn_status;
-		k_mutex_unlock(&wifi_mu);
-		return err;
-	}
+    if (err || conn_status) {
+        aster_wifi_status_t current;
+        bool associated = aster_plat_wifi_status(&current) == 0 &&
+            current.state == WIFI_STATE_COMPLETED && !strcmp(current.ssid, join_ssid);
+        if (!associated) {
+            int result = err ? -ETIMEDOUT : conn_status > 0 ? -EIO : conn_status;
+            k_mutex_unlock(&wifi_mu);
+            return result;
+        }
+        LOG_WRN("connect completion missing; checking associated station IPv4");
+    }
 
 	/* Keep the last known-good credentials, not a failed request. The RAM
 	 * copy powers reconnect/qpanel even when the card is later removed. */
@@ -505,13 +528,9 @@ int aster_plat_wifi_connect(const char *ssid, const char *psk)
 		}
 	}
 
-	fill_ip(ip, sizeof(ip));
-	if (!ip[0]) {
-		net_dhcpv4_start(iface);
-		(void)k_sem_take(&dhcp_done, K_MSEC(DHCP_TO_MS));
-	}
+    err = wifi_wait_ipv4();
 	k_mutex_unlock(&wifi_mu);
-	return 0;
+	return err;
 }
 
 int aster_plat_wifi_disconnect(void)
@@ -608,7 +627,8 @@ int aster_plat_wifi_reconnect(void)
 	k_mutex_unlock(&wifi_mu);
 	if (aster_plat_wifi_status(&st) == 0 &&
 	    st.state == WIFI_STATE_COMPLETED && strcmp(st.ssid, ssid) == 0) {
-		return 0;
+        /* Reuse connect's IPv4 recovery without another radio association. */
+		return aster_plat_wifi_connect(ssid, have_psk ? psk : NULL);
 	}
 	/* Re-discover the saved AP's security mode after reboot so WPA3 personal
 	 * networks do not get retried as WPA2 PSK by the fallback path. A failed
