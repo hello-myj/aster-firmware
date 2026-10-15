@@ -31,6 +31,11 @@ typedef enum {
 	ASTER_ECONNRESET = -23,
 	ASTER_ECONNREFUSED = -24,
 	ASTER_ENETUNREACH = -25,
+	ASTER_EPROTO = -26,     /* malformed or truncated protocol response */
+	ASTER_ETLS = -27,       /* TLS handshake/record failure */
+	ASTER_ECERT = -28,      /* certificate chain/name/date rejected */
+	ASTER_ECLOCK = -29,     /* trusted wall clock not synchronized */
+	ASTER_EREDIRECT = -30,  /* redirect limit exceeded */
 } aster_error_t;
 
 #endif /* ASTER_ERROR_H */

@@ -5,6 +5,9 @@
  */
 #if IS_ENABLED(CONFIG_ASTER_NET)
 #include "aster_net.h"
+#if defined(CONFIG_ASTER_HTTP)
+#include "aster_http.h"
+#endif
 #include <errno.h>
 #ifndef ASTER_NET_HOST_TEST
 #include <zephyr/net/socket.h>
@@ -44,7 +47,7 @@ static int32_t network_gate(wasm_exec_env_t env, uint64_t *owner)
     aster_app_ctx_t *ctx = ctx_of(env);
     if (!aster_ctx_perm(ctx, ASTER_PERM_NET)) return ASTER_EPERM;
     if (!ctx->network_owner) {
-        if (network_session == UINT64_MAX) return ASTER_ENOSPC;
+        if (network_session == INT64_MAX) return ASTER_ENOSPC;
         ctx->network_owner = ++network_session;
     }
     *owner = ctx->network_owner;
@@ -179,6 +182,9 @@ void aster_native_release_network(aster_app_ctx_t *ctx)
     /* Wait only for the bounded service critical section, never DNS/socket
      * progress. Accept owner-close before retiring the session. Numeric IDs
      * remain unique while old DNS callbacks finish worker-owned cleanup. */
+#if defined(CONFIG_ASTER_HTTP)
+    while (aster_http_svc_close_owner(ctx->network_owner) == -EAGAIN) k_sleep(K_MSEC(1));
+#endif
     while (aster_net_close_owner(ctx->network_owner) == -EAGAIN) k_sleep(K_MSEC(1));
     ctx->network_owner = 0;
 }

@@ -4,6 +4,8 @@
  */
 #include "aster_sig.h"
 #include "aster_pkg.h"
+#include "aster_crypto.h"
+K_MUTEX_DEFINE(aster_crypto_lock);
 /* Outside the CONFIG_ASTER_SIGNATURE_VERIFY block below on purpose: the header
  * stays available whichever policy is compiled in, so a change of branch can
  * never turn into a surprise build break. */
@@ -123,6 +125,9 @@ int aster_sig_check(const uint8_t *img, size_t size)
 	}
 	const uint8_t *sig = img + size - ASTER_SIG_LEN;
 	size_t rlen = size - ASTER_SIG_LEN;
-	return psa_verify(img, rlen, sig);
+	k_mutex_lock(&aster_crypto_lock, K_FOREVER);
+	int result = psa_verify(img, rlen, sig);
+	k_mutex_unlock(&aster_crypto_lock);
+	return result;
 #endif
 }

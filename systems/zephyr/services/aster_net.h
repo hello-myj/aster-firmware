@@ -44,6 +44,12 @@ struct aster_net_stats {
  * Returns a positive generation handle or negative errno. */
 int aster_net_open(uint64_t owner, enum aster_net_kind kind,
                    const char *host, uint16_t port, uint32_t timeout_ms);
+/* Internal redirect only; retains quota, invalidates old handle immediately.
+ * Requires completed DNS and READY/EOF; never available as a raw APP import. */
+int aster_net_restart(uint64_t owner, uint32_t handle, const char *host,
+                      uint16_t port, uint32_t timeout_ms);
+/* Internal successful HTTP completion: close fd, retain quota/status. */
+int aster_net_finish(uint64_t owner, uint32_t handle);
 int aster_net_snapshot(uint64_t owner, uint32_t handle,
                        struct aster_net_snapshot *out);
 /* TCP partial acceptance is allowed; UDP is atomic, including zero length.

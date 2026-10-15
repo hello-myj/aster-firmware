@@ -2,6 +2,9 @@
  * CLI is a client of the shared service, not a second transport stack.
  */
 #include "aster_net_cmd.h"
+#if defined(CONFIG_ASTER_HTTP)
+#include "aster_http_cmd.h"
+#endif
 #include "aster_net.h"
 #include "aster_mem.h"
 #include <errno.h>
@@ -179,6 +182,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(udp_cmds,
     SHELL_CMD_ARG(recvfrom, NULL, "HANDLE --max-bytes N (0..1200)", cmd_recv, 4, 0),
     SHELL_SUBCMD_SET_END);
 static const struct shell_static_entry net_entries[] = {
+#if defined(CONFIG_ASTER_HTTP)
+    SHELL_CMD(http, &aster_http_cmds, "bounded HTTP/HTTPS requests", NULL),
+#endif
     SHELL_CMD(status, NULL, "link/address and limits; not Internet reachability", cmd_status),
     SHELL_CMD(stats, NULL, "shared service counters", cmd_stats),
     SHELL_CMD(tcp, &tcp_cmds, "async TCP", NULL),

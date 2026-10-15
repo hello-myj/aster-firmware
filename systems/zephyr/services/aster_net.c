@@ -38,7 +38,7 @@ struct slot {
     enum aster_net_state state;
     enum aster_net_phase phase;
     int error, fd;
-    bool closing, cancel, dns_started, dns_done, addr_ready;
+    bool closing, cancel, dns_started, dns_done, addr_ready, restarting, retired;
     uint16_t dns_id, port, local_port;
     uint32_t ip;
     char host[ASTER_NET_HOST_MAX + 1];
@@ -282,14 +282,24 @@ static bool service_tick(void)
     for (int i = 0; i < ASTER_NET_SLOTS; ++i) {
         struct slot *s = &slots[i];
         if (!s->handle) continue;
+        if (s->restarting) {
+            int fd = s->fd;
+            s->fd = -1;
+            if (fd >= 0) {
+                k_mutex_unlock(&net_lock);
+                zsock_close(fd);
+                k_mutex_lock(&net_lock, K_FOREVER);
+            }
+            s->restarting = false;
+        }
         if (s->cancel) fail(s, -ECANCELED);
-        if (!s->closing && !terminal(s)) {
+        if (!s->closing && !s->retired && !terminal(s)) {
             int rc = s->fd < 0 ? make_socket(s) : 0;
             if (rc) fail(s, rc);
             else if (s->kind == ASTER_NET_TCP) tcp_io(s, k_uptime_get());
             else udp_io(s, k_uptime_get());
         }
-        if (s->closing || terminal(s)) {
+        if (s->closing || s->retired || terminal(s)) {
             stop_dns(s);
             if (s->fd >= 0) {
                 /* close may wait for TCP protocol teardown; never hold the
@@ -351,6 +361,57 @@ int aster_net_open(uint64_t owner, enum aster_net_kind kind,
     ++counters.opened; counters.psram_bytes += buffer_size(kind);
     k_mutex_unlock(&net_lock); k_sem_give(&net_wake);
     return handle;
+}
+/* Internal HTTP redirect: preserve admission and buffers while replacing the
+ * completed DNS/connected transport. Generation changes before returning, so
+ * stale users/callbacks cannot address the next connection. */
+int aster_net_restart(uint64_t owner, uint32_t handle, const char *host,
+                      uint16_t port, uint32_t timeout_ms)
+{
+    if (!host || !host[0] || strlen(host) > ASTER_NET_HOST_MAX || !port ||
+        !timeout_ms || timeout_ms > 30000) return -EINVAL;
+    if (k_mutex_lock(&net_lock, K_NO_WAIT)) return -EAGAIN;
+    struct slot *s = lookup(owner, handle);
+    int rc = -EBADF;
+    if (!s) goto out;
+    if (s->kind != ASTER_NET_TCP || s->dns_started || s->restarting ||
+        (s->state != ASTER_NET_READY && s->state != ASTER_NET_EOF)) {
+        rc = -EBUSY; goto out;
+    }
+    if (s->cancel) { rc = -ECANCELED; goto out; }
+    if (generation == INT32_MAX) { rc = -EOVERFLOW; goto out; }
+    uint64_t saved_owner = s->owner;
+    union buffers *saved_buf = s->buf;
+    int saved_fd = s->fd;
+    memset(s, 0, sizeof(*s));
+    s->owner = saved_owner; s->buf = saved_buf; s->fd = saved_fd;
+    s->handle = ++generation; s->kind = ASTER_NET_TCP;
+    s->state = ASTER_NET_OPENING; s->phase = ASTER_NET_SOCKET;
+    s->restarting = true; s->port = port;
+    s->deadline = k_uptime_get() + timeout_ms;
+    strcpy(s->host, host);
+    ++counters.closed; ++counters.opened;
+    rc = s->handle;
+out:
+    k_mutex_unlock(&net_lock); k_sem_give(&net_wake); return rc;
+}
+/* Successful framed HTTP responses can finish before a TCP FIN. Retire the
+ * fd without advertising cancellation or releasing the reserved slot. */
+int aster_net_finish(uint64_t owner, uint32_t handle)
+{
+    if (k_mutex_lock(&net_lock, K_NO_WAIT)) return -EAGAIN;
+    struct slot *s = lookup(owner, handle);
+    int rc = -EBADF;
+    if (s) {
+        if (s->kind != ASTER_NET_TCP || s->dns_started) rc = -EINVAL;
+        else {
+            s->retired = true;
+            s->tx_len = s->rx_len = 0;
+            if (!terminal(s)) s->state = ASTER_NET_EOF;
+            rc = 0;
+        }
+    }
+    k_mutex_unlock(&net_lock); k_sem_give(&net_wake); return rc;
 }
 int aster_net_snapshot(uint64_t owner, uint32_t handle, struct aster_net_snapshot *out)
 {

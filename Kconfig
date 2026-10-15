@@ -16,6 +16,39 @@ config ASTER_NET
 	  Two shared TCP/UDP slots, private network worker and CLI diagnostics.
 	  APP networking is exposed through ABI 3.8 with the net permission.
 
+config ASTER_HTTP
+	bool "Bounded asynchronous HTTP client"
+	depends on ASTER_NET
+	select TIMESLICING
+	select TIMESLICE_PER_THREAD
+	default y
+
+config ASTER_HTTP_TLS
+	bool "Verified HTTPS client"
+	depends on ASTER_HTTP && MBEDTLS
+	select MBEDTLS_CIPHERSUITE_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+	select MBEDTLS_CIPHERSUITE_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+	select MBEDTLS_PEM_PARSE_C
+	select MBEDTLS_SSL_SERVER_NAME_INDICATION
+	select MBEDTLS_HAVE_TIME_DATE
+	select PSA_WANT_ALG_RSA_OAEP
+	select MBEDTLS_X509_RSASSA_PSS_SUPPORT
+	select PSA_WANT_ALG_SHA_384
+	select PSA_WANT_ECC_SECP_R1_384
+	default y
+
+config MBEDTLS_ENABLE_HEAP
+	default y if ASTER_HTTP_TLS
+
+config MBEDTLS_HEAP_SIZE
+	default 98304 if ASTER_HTTP_TLS
+
+config MBEDTLS_HEAP_CUSTOM_SECTION
+	default y if ASTER_HTTP_TLS
+
+config MBEDTLS_INIT
+	default y if ASTER_HTTP_TLS
+
 config ASTER_NET_POOL_MONITOR
 	bool "Diagnostic network context sampler (never enable in release)"
 	depends on ASTER_NET && SHELL

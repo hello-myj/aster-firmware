@@ -1,6 +1,6 @@
 # APP 网络服务实施方案
 
-状态（2026-10-15）：N1已完成。ABI3.8工作区开发版具备TCP/UDP服务、七个APP网络接口、独立SDK与Windows/Linux模拟器；两板CLI、APP边界/生命周期、图形交互与系统协议池并发验证通过，并修复了发送分片池不足。HTTP/HTTPS与MQTT/MQTTS尚未实现，N2尚未开始。本轮未推送或发布新Release。边界见[CLI记录](validation/network-n1-2026-10-15.md)、[APP/SDK记录](validation/network-n1-sdk-2026-10-15.md)及[协议池记录](validation/network-n1-pools-2026-10-15.md)。
+状态（2026-10-16）：N1、N2已完成本阶段实施与双板验收。工作区ABI3.9提供TCP/UDP及六个HTTP/HTTPS导入，SDK契约、JSON/流式下载示例与Windows/Linux模拟器已同步。两板CLI、TLS证书拒绝、断网恢复、图形并发和APP权限/越界/异常退出回收通过，日常固件与原应用已恢复，临时应用、证书和防火墙规则已清理。已本地提交，未推送或发布Release。资源与限制见[CLI记录](validation/network-n2-cli-2026-10-15.md)和[APP/SDK记录](validation/network-n2-sdk-2026-10-15.md)。N3 MQTT尚未开始，N4长时复合验收独立排期。
 
 适用范围：Aster 固件、独立 APP SDK、Windows/Linux 模拟器，以及 LCKFB、微雪 3.5B 两款开发板。本文随固件源码维护；原始日志、抓包、截图和临时镜像留在仓库外。
 
@@ -81,7 +81,7 @@ APP 退出时按顺序执行：停止接受该会话的新请求、使公开句�
 拟议 APP 声明：
 
 ```toml
-# 后续HTTP/TLS实施目标；net权限和network能力已接受，http/tls尚未提供。
+# ABI3.9工作区HTTP/TLS能力已接入，N2尚在验收。
 permissions = ["net", "fs"]
 requires = ["network", "http", "tls"]
 ```
@@ -91,7 +91,7 @@ N1已锁定network能力位15及net权限位5；后续协议的额外能力和�
 ### 4.2 ABI 扩展规则
 
 - 新结构保留 `size`、`version`，使用固定宽度整数、显式长度和保留字段；不跨 ABI 传递宿主指针、`size_t`、`errno` 或原生 fd。
-- 不改变现有错误码、事件值、能力位和导入签名；工作区采用ABI3.8，已与3.7冻结基线检查，无旧布局/签名/枚举破坏。
+- 不改变现有错误码、事件值、能力位和导入签名；工作区采用ABI3.9，保留3.8TCP/UDP及更早接口，已与3.7冻结基线检查，无旧布局/签名/枚举破坏。
 - 公共头文件以固件 `contract/include/aster` 为源，通过现有契约导出/导入流程同步 SDK，不手工维护两套接口。
 - 新错误需按兼容流程追加，不能重排旧枚举。初期可用已有稳定错误码加结构化阶段/原因，不能直接泄露平台 errno 作为返回值。
 - 新增能力需同步固件探测、包校验、SDK manifest、模拟器能力与文档。
@@ -138,7 +138,7 @@ TCP 语义必须明确：
 
 ### 5.4 HTTP/HTTPS
 
-- `aster_http_start(...)`：复制请求配置，校验 URL、方法、请求头和上传体上限，返回请求句柄。
+- `aster_http_request(...)`：复制请求配置，校验 URL、方法、请求头和上传体上限，返回请求句柄。
 - `aster_http_status(...)`：查询解析/连接/握手/响应头/响应体/完成/失败/取消，HTTP 状态码、结果和字节数。
 - `aster_http_header(...)`：按名称、序号获取响应头；保留同名多值，不简单用逗号拼接所有头。
 - `aster_http_read(...)`：分块读取响应体，无数据但尚未结束返回 `ASTER_EAGAIN`。
@@ -218,7 +218,7 @@ N1 先确定取消响应目标，再用慢 DNS、无响应 TCP、慢 TLS、满 R
 
 ## 8. HTTPS 与证书
 
-1. 在固件启用 TLS socket 和所需加密组件，按当前 Zephyr 版本及 Espressif 适配配置编译；不能照搬网上某版本全部 Kconfig。
+1. 在固件启用TLS及所需加密组件，按当前Zephyr版本配置编译。N2首版在N1 TCP服务之上接入Mbed TLS BIO，复用现有队列与两个连接名额，不额外建立TLS socket绕过预算；不要求APP安装Espressif驱动库。
 2. 默认校验证书链、主机名和有效期，设置 SNI。握手阶段纳入超时和取消。
 3. 检查设备墙钟有效性；时间未就绪应明确返回原因。单调计时的超时不受 NTP 校时跳变影响。
 4. 明确 CA 来源、资源版本、安装位置和更新机制，支持本地测试 CA；首版不开放任意忽略校验选项。
@@ -348,17 +348,19 @@ CLI测试连接也受服务总连接/内存上限约束，不能拥有绕过配�
 
 完成条件：本地可控服务器与两板收发正确；超时、取消、退出和资源归还有记录；SDK 使用方不需要固件环境。此时尚不声称 HTTP/HTTPS 可用。
 
-### N2：HTTP/HTTPS 客户端
+### N2：HTTP/HTTPS 客户端（已完成）
 
-- [ ] HTTP 请求状态机、头字段查询、流式响应与有界 POST。
-- [ ] Content-Length、chunked、无长度、HEAD/204/304、错误状态与截断响应。
-- [ ] 重定向上限、认证头隔离、HTTPS 降级规则与非法头输入。
-- [ ] TLS/SNI、证书链与域名验证、设备时间、CA 资源管理。
-- [ ] 取消覆盖 DNS、连接、握手、收发及缓冲区满；不把取消误当成功 EOF。
-- [ ] HTTP/HTTPS设备CLI通过G1：响应体校验、协议状态、取消/异常恢复及TLS峰值均有记录。
-- [ ] CLI通过后封装HTTP SDK与权限/会话桥接，再开发JSON获取和文件下载示例；下载大于缓存容量时内存保持有界。
-- [ ] 两板测试小响应、大响应、慢读、慢服务、Wi-Fi 断开及 HTTP/HTTPS 交替请求。
-- [ ] 单独测量 TLS 握手的 DRAM/PSRAM/栈峰值，据此调整初始限额。
+HTTP/HTTPS已默认随网络服务启用，诊断统计仍使用 `config/diagnostics/network-http.conf` 和协议池片段。公共ABI3.9和SDK接口、两板APP层验收已完成；未发布Release。实现顺序、CLI用法及未完成项见[HTTP CLI开发记录](network-http-cli.zh-CN.md)。
+
+- [x] HTTP 请求状态机、头字段查询、流式响应与有界 POST。
+- [x] Content-Length、chunked、无长度、HEAD/204/304、错误状态与截断响应。
+- [x] 重定向上限、认证头隔离、HTTPS 降级规则与非法头输入。
+- [x] TLS/SNI、证书链与域名验证、设备时间、CA 资源管理。
+- [x] 取消覆盖 DNS、连接、握手、收发及缓冲区满；不把取消误当成功 EOF。
+- [x] HTTP/HTTPS设备CLI通过G1：响应体校验、协议状态、取消/异常恢复及TLS峰值均有记录。
+- [x] CLI通过后封装HTTP SDK与权限/会话桥接，再开发JSON获取和文件下载示例；下载大于缓存容量时内存保持有界。
+- [x] 两板测试小响应、大响应、慢读、慢服务、Wi-Fi 断开及 HTTP/HTTPS 交替请求。
+- [x] 单独测量 TLS 握手的 DRAM/PSRAM/栈峰值，据此调整初始限额。
 
 完成条件：HTTP 和 HTTPS 都有端到端证据，证书失败不会被绕过；异常后仍能建立下一次请求，已有 APP 和 UI 可继续使用。
 

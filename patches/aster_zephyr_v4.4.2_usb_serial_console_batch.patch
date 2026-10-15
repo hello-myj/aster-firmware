@@ -1,17 +1,18 @@
 diff --git a/drivers/serial/serial_esp32_usb.c b/drivers/serial/serial_esp32_usb.c
-index 22e1961..e052e04 100644
+index 22e19616203..28db408d174 100644
 --- a/drivers/serial/serial_esp32_usb.c
 +++ b/drivers/serial/serial_esp32_usb.c
-@@ -46,6 +46,8 @@ struct serial_esp32_usb_data {
+@@ -46,6 +46,9 @@ struct serial_esp32_usb_data {
  	void *irq_cb_data;
  #endif
  	int64_t last_tx_time;
++	struct k_spinlock tx_lock;
 +	struct k_timer tx_flush_timer;
 +	uint32_t tx_flush_retries;
  };
  
  #ifdef CONFIG_UART_INTERRUPT_DRIVEN
-@@ -63,6 +65,42 @@ static int serial_esp32_usb_poll_in(const struct device *dev, unsigned char *p_c
+@@ -63,6 +66,47 @@ static int serial_esp32_usb_poll_in(const struct device *dev, unsigned char *p_c
  	return 0;
  }
  
@@ -34,6 +35,9 @@ index 22e1961..e052e04 100644
 +	struct serial_esp32_usb_data *data =
 +		CONTAINER_OF(timer, struct serial_esp32_usb_data, tx_flush_timer);
 +
++	/* Serialize flush against writable-check + write. A timer interrupt in
++	 * that gap can hand the FIFO to USB and silently lose the next byte. */
++	k_spinlock_key_t key = k_spin_lock(&data->tx_lock);
 +	if (!usb_serial_jtag_ll_txfifo_writable()) {
 +		/* A previously written packet is still in flight (the FIFO
 +		 * auto-flushes at its 64-byte boundary). Wait for it, both
@@ -45,17 +49,24 @@ index 22e1961..e052e04 100644
 +		if (data->tx_flush_retries++ < USBSERIAL_FLUSH_RETRY_LIMIT) {
 +			k_timer_start(timer, K_USEC(USBSERIAL_TAIL_FLUSH_DELAY_US), K_NO_WAIT);
 +		}
++		k_spin_unlock(&data->tx_lock, key);
 +		return;
 +	}
 +	data->tx_flush_retries = 0;
 +	usb_serial_jtag_ll_txfifo_flush();
++	k_spin_unlock(&data->tx_lock, key);
 +}
 +
  static void serial_esp32_usb_poll_out(const struct device *dev, unsigned char c)
  {
  	struct serial_esp32_usb_data *data = dev->data;
-@@ -75,7 +113,17 @@ static void serial_esp32_usb_poll_out(const struct device *dev, unsigned char c)
- 	do {
+@@ -72,15 +116,36 @@ static void serial_esp32_usb_poll_out(const struct device *dev, unsigned char c)
+ 	 * If there is no USB host connected, this function will busy-wait once for the timeout
+ 	 * period, but return immediately for subsequent calls.
+ 	 */
+-	do {
++	for (;;) {
++		k_spinlock_key_t key = k_spin_lock(&data->tx_lock);
  		if (usb_serial_jtag_ll_txfifo_writable()) {
  			usb_serial_jtag_ll_write_txfifo(&c, 1);
 -			usb_serial_jtag_ll_txfifo_flush();
@@ -71,9 +82,26 @@ index 22e1961..e052e04 100644
 +					      K_USEC(USBSERIAL_TAIL_FLUSH_DELAY_US), K_NO_WAIT);
 +			}
  			data->last_tx_time = k_uptime_get();
++			k_spin_unlock(&data->tx_lock, key);
++			return;
++		}
++		/* Decide timeout alongside the failed FIFO check. If we unlock first,
++		 * a long GUI/TLS preemption can make the old wall-clock loop expire
++		 * even though the FIFO became writable while we were off CPU. */
++		int64_t now = k_uptime_get();
++		bool expired = (now - start_time) >= USBSERIAL_POLL_OUT_TIMEOUT_MS ||
++			       (now - data->last_tx_time) >= USBSERIAL_POLL_OUT_TIMEOUT_MS;
++		k_spin_unlock(&data->tx_lock, key);
++		if (expired) {
  			return;
  		}
-@@ -93,6 +141,9 @@ static int serial_esp32_usb_err_check(const struct device *dev)
+-	} while ((k_uptime_get() - start_time) < USBSERIAL_POLL_OUT_TIMEOUT_MS &&
+-		 (k_uptime_get() - data->last_tx_time) < USBSERIAL_POLL_OUT_TIMEOUT_MS);
++	}
+ }
+ 
+ static int serial_esp32_usb_err_check(const struct device *dev)
+@@ -93,6 +158,9 @@ static int serial_esp32_usb_err_check(const struct device *dev)
  static int serial_esp32_usb_init(const struct device *dev)
  {
  	const struct serial_esp32_usb_config *config = dev->config;
@@ -83,3 +111,20 @@ index 22e1961..e052e04 100644
  
  	if (!device_is_ready(config->clock_dev)) {
  		return -ENODEV;
+@@ -124,12 +192,12 @@ static int serial_esp32_usb_init(const struct device *dev)
+ 
+ static int serial_esp32_usb_fifo_fill(const struct device *dev, const uint8_t *tx_data, int len)
+ {
+-	ARG_UNUSED(dev);
+-
++	struct serial_esp32_usb_data *data = dev->data;
++	k_spinlock_key_t key = k_spin_lock(&data->tx_lock);
++	k_timer_stop(&data->tx_flush_timer);
+ 	int ret = usb_serial_jtag_ll_write_txfifo(tx_data, len);
+-
+ 	usb_serial_jtag_ll_txfifo_flush();
+-
++	k_spin_unlock(&data->tx_lock, key);
+ 	return ret;
+ }
+ 

@@ -366,6 +366,17 @@ own when full:
   flush note in `usb_serial_jtag_ll.h`); the retry is bounded so a disconnected
   host cannot leave a timer spinning.
 
+N2 follow-up (2026-10-15): protect TX FIFO writable-check, write, and flush
+with the same per-device spinlock in the polling path, timer callback, and
+interrupt-driven FIFO fill. Without this, the 250us timer can preempt after a
+successful writable check, flush the FIFO, and cause the next write to vanish.
+A sustained HTTP CLI hex capture exposed a missing character. The bounded
+host-drain wait stays outside the critical section. Timeout is decided next to
+the failed FIFO check, before unlocking: a GUI/TLS preemption longer than 50 ms
+otherwise made the old loop return without rechecking a now-writable FIFO. The host regression forces
+10,000 timer interleavings through the actual driver functions; hardware capture
+must still verify the resulting stream. The tracked patch includes this fix.
+
 Measured after (waveshare-35b, cube app running, usb-debug image): the same
 six-line burst costs 4ms wall (~0.7ms/line, all six timestamps in the same
 millisecond), multi-line shell output (`aster app list`) arrives intact, and

@@ -30,6 +30,7 @@
 #include "time.h"
 #include "wifi.h"
 #include "network.h"
+#include "http.h"
 #include "img.h"
 #include "gfx.h"
 

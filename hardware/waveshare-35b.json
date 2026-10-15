@@ -3,7 +3,7 @@
     "schema": 1,
     "id": "waveshare-35b",
     "product": "aster",
-    "abi": "3.8.0",
+    "abi": "3.9.0",
     "system": "zephyr",
     "cpu": "xtensa",
     "aot_target": "xtensa",
@@ -13,13 +13,15 @@
       "keyboard",
       "audio-in",
       "audio-out",
-    "wifi",
+      "wifi",
       "network",
-    "filesystem",
+      "filesystem",
       "storage.app",
       "rtc",
       "psram",
-      "framebuffer"
+      "framebuffer",
+      "http",
+      "tls"
     ],
     "display": {
       "width": 320,
