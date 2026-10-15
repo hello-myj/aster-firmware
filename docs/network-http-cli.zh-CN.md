@@ -61,3 +61,5 @@ ca命令仅管理本次开机的HTTPS信任根；不修改APP包签名根。文�
 - 微雪最终CLI复测21项通过；局部证书矩阵加密池峰值39868 B，HTTP栈3364/8192 B，网络分片RX14/24、TX4/32，清理后请求缓冲和加密分配归零。具体口径、已知限制及复现见[N2 CLI验证记录](validation/network-n2-cli-2026-10-15.md)。
 - LCKFB的21项CLI、TLS/协议池/栈、共享配额和断网恢复自动检查已通过；2048前台并发完整校验64 KiB HTTPS及139轮UDP。实体交互已确认正常，日常固件及原APP已恢复，详细数值见上述验证记录。
 - CLI G1通过后已实施公共ABI3.9、SDK、模拟器和获取/下载示例；两板APP层测试已通过，N2本阶段完成，详细结果见[APP/SDK验收](validation/network-n2-sdk-2026-10-15.md)。
+
+2026-10-16 正式配置修正：`MBEDTLS_SSL_MAX_CONTENT_LEN` 在启用 HTTPS 时默认16384，避免日常固件继承Wi-Fi模块的1500字节默认值而与已验证的TLS配置不一致。微雪直连incompetech HTTPS元数据HEAD返回200、verify=0；本机PC的VPN可达性不作为设备网络验收。

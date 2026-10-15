@@ -11,6 +11,7 @@
 #include <aster/display.h>
 #include <aster/error.h>
 #include <aster/event.h>
+#include <aster/audio_stream.h>
 #include "aster_dirty.h"
 
 #define ASTER_PLAT_MAX_TOUCH 1
@@ -282,6 +283,11 @@ int  aster_plat_audio_get_state(uint32_t *state, uint32_t *total, uint32_t *done
 int  aster_plat_audio_get_clock(uint32_t *msec_done, uint32_t *msec_total);
 int  aster_plat_audio_seek(uint32_t msec);
 int  aster_plat_audio_get_lyrics(char *buf, size_t max);
+int aster_plat_audio_stream_open(uint32_t codec);
+int aster_plat_audio_stream_write(uint32_t handle, const void *data, size_t length);
+int aster_plat_audio_stream_finish(uint32_t handle);
+int aster_plat_audio_stream_status(uint32_t handle, aster_audio_stream_status_t *status);
+int aster_plat_audio_stream_close(uint32_t handle);
 /* True if `buf` looks like MPEG Layer III (ID3 or a frame header). */
 bool aster_plat_audio_is_mp3(const uint8_t *buf, size_t len);
 /* Optional probe: write codec IDs (0 if absent). Used by `hw audio info`. */

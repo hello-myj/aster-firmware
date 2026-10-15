@@ -220,14 +220,22 @@ static void tcp_io(struct slot *s, int64_t now)
     }
     if (s->state == ASTER_NET_EOF || s->rx_len == ASTER_NET_TCP_BUFFER) return;
     s->phase = ASTER_NET_RX;
-    int n = zsock_recv(s->fd, s->buf->tcp.rx + s->rx_len,
-                       ASTER_NET_TCP_BUFFER - s->rx_len, MSG_DONTWAIT);
-    if (n > 0) { s->rx_len += n; s->rx_bytes += n; }
-    else if (!n) {
-        if (s->tx_len) fail(s, -EPIPE);
-        else s->state = ASTER_NET_EOF;
+    /* Native Zephyr recv may return just one small TCP packet. Drain a
+     * bounded batch before sleeping; otherwise one 536B packet per scheduled
+     * tick throttles streaming even while more packets are already queued.
+     * Total copied data remains bounded by the existing 2 KiB service ring. */
+    for (unsigned budget = 0; budget < 4 && s->rx_len < ASTER_NET_TCP_BUFFER; ++budget) {
+        int n = zsock_recv(s->fd, s->buf->tcp.rx + s->rx_len,
+                           ASTER_NET_TCP_BUFFER - s->rx_len, MSG_DONTWAIT);
+        if (n > 0) { s->rx_len += n; s->rx_bytes += n; continue; }
+        if (!n) {
+            if (s->tx_len) fail(s, -EPIPE);
+            else s->state = ASTER_NET_EOF;
+        } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            fail(s, socket_error());
+        }
+        break;
     }
-    else if (errno != EAGAIN && errno != EWOULDBLOCK) fail(s, socket_error());
 }
 static void udp_io(struct slot *s, int64_t now)
 {

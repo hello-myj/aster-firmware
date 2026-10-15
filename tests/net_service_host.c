@@ -59,6 +59,13 @@ static void test_tcp(void)
  assert(aster_net_send(1,h,data,1,NULL,0)==-EAGAIN);tick();
  uint8_t received[4096];assert(recv(remote,received,sizeof(received),0)==2048);
  assert(!memcmp(received,data,2048));assert(snap(h).tx_bytes==2048);
+ /* Simulate native small-packet reads: one tick must drain a bounded batch. */
+ host_recv_limit=536;
+ assert(send(remote,data,2048,0)==2048);tick();
+ assert(snap(h).rx_queued==2048);
+ size_t batch_required;
+ assert(aster_net_recv(1,h,received,2048,&batch_required,NULL,NULL)==2048);
+ assert(!memcmp(received,data,2048));host_recv_limit=0;
  assert(send(remote,data,50,0)==50);assert(send(remote,data+50,100,0)==100);
  assert(!shutdown(remote,SHUT_WR));
  for(int i=0;i<5;i++)tick();

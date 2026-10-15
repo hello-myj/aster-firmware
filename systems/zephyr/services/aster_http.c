@@ -12,7 +12,7 @@
 #include <zephyr/kernel.h>
 #endif
 #define HTTP_STACK 8192
-#define HTTP_IO 1024
+#define HTTP_IO ASTER_HTTP_BODY_BUFFER
 #define HTTP_TX_MAX (ASTER_HTTP_URL_MAX + ASTER_HTTP_HEADERS_MAX + 512)
 struct http_request {
     uint64_t owner, transport_owner;

@@ -1573,6 +1573,8 @@ static int32_t n_audio_get_info(wasm_exec_env_t env, uint32_t off, uint32_t info
 	return ASTER_OK;
 }
 
+#include "aster_audio_stream_bridge.inc"
+
 static int32_t n_audio_record(wasm_exec_env_t env, uint32_t off, uint32_t size)
 {
 	int32_t e = audio_in_gate();
@@ -2768,6 +2770,11 @@ static NativeSymbol syms[] = {
 	{ "aster_audio_seek", (void *)n_audio_seek, "(i)i", NULL },
 	{ "aster_audio_set_volume", (void *)n_audio_set_volume, "(i)i", NULL },
 	{ "aster_audio_start_file", (void *)n_audio_start_file, "(ii)i", NULL },
+	{ "aster_audio_stream_open", (void *)n_audio_stream_open, "(i)i", NULL },
+	{ "aster_audio_stream_write", (void *)n_audio_stream_write, "(iii)i", NULL },
+	{ "aster_audio_stream_finish", (void *)n_audio_stream_finish, "(i)i", NULL },
+	{ "aster_audio_stream_status", (void *)n_audio_stream_status, "(iii)i", NULL },
+	{ "aster_audio_stream_close", (void *)n_audio_stream_close, "(i)i", NULL },
 	{ "aster_audio_stop", (void *)n_audio_stop, "()i", NULL },
 	{ "aster_display_count", (void *)n_display_count, "()i", NULL },
 	{ "aster_display_get_info", (void *)n_display_get_info, "(iii)i", NULL },

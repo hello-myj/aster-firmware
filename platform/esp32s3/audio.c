@@ -22,6 +22,8 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 #include <aster/audio.h>
+#include <aster/audio_stream.h>
+#include "audio_stream_ring.h"
 #include <minimp3.h>
 
 LOG_MODULE_REGISTER(aster_audio, LOG_LEVEL_INF);
@@ -110,12 +112,23 @@ static struct {
 	bool stop;
 	bool mp3;
 	bool from_file;
+	bool from_stream;
 	bool effect_only;
 	bool effect_closing;
 	bool file_open;
 	bool seek_pending;
 	int err;
 } sess;
+
+static struct {
+    struct audio_stream_ring ring;
+    uint32_t handle, state, underruns, played_ms;
+    uint64_t received, consumed;
+    int error;
+    bool eof, buffering, id3_checked;
+    size_t id3_left;
+} input_stream;
+static uint32_t input_generation;
 
 static struct {
 	mp3dec_t dec;
@@ -580,6 +593,12 @@ static bool sess_busy(void)
 
 static void sess_clear_locked(void)
 {
+	if (sess.from_stream) {
+		input_stream.error = sess.stop ? -ECANCELED : sess.err;
+		input_stream.state = input_stream.error ? ASTER_AUDIO_STREAM_FAILED : ASTER_AUDIO_STREAM_DONE;
+		aster_psram_free(input_stream.ring.data);
+		memset(&input_stream.ring, 0, sizeof(input_stream.ring));
+	}
 	if (sess.file_open) {
 		fs_close(&sess_file);
 		sess.file_open = false;
@@ -600,6 +619,7 @@ static void sess_clear_locked(void)
 	sess.stop = false;
 	sess.mp3 = false;
 	sess.from_file = false;
+	sess.from_stream = false;
 	sess.effect_only = false;
 	sess.effect_closing = false;
 	sess.seek_pending = false;
@@ -921,6 +941,55 @@ static int stream_refill(bool *eof)
 	return 0;
 }
 
+/* Worker-only contiguous window, fed from a separately synchronized APP ring.
+ * No filesystem or network call, and no wait while holding audio_lock. */
+static int input_refill(bool *eof, bool *waiting)
+{
+    if (sess.win_off) {
+        memmove(sess.buf, sess.buf + sess.win_off, sess.win_len - sess.win_off);
+        sess.win_len -= sess.win_off;
+        sess.win_off = 0;
+    }
+    k_mutex_lock(&sess_mu, K_FOREVER);
+    sess.win_len += audio_ring_read(&input_stream.ring, sess.buf + sess.win_len,
+                                    STREAM_WIN - sess.win_len);
+    *eof = input_stream.eof && !input_stream.ring.used;
+    k_mutex_unlock(&sess_mu);
+    if (!input_stream.id3_checked) {
+        if (sess.win_len < 10 && !*eof) { *waiting = true; return 0; }
+        input_stream.id3_checked = true;
+        if (sess.win_len >= 10 && !memcmp(sess.buf, "ID3", 3)) {
+            if (sess.buf[3] < 2 || sess.buf[3] > 4 ||
+                ((sess.buf[6]|sess.buf[7]|sess.buf[8]|sess.buf[9]) & 0x80)) return -EPROTO;
+            input_stream.id3_left = 10 + aster_synchsafe32(sess.buf + 6);
+            if (sess.buf[3] == 4 && (sess.buf[5] & 0x10)) input_stream.id3_left += 10;
+            if (input_stream.id3_left > 1024u * 1024u) return -EMSGSIZE;
+        }
+    }
+    if (input_stream.id3_left) {
+        size_t n = MIN(input_stream.id3_left, sess.win_len);
+        sess.win_off += n;
+        input_stream.id3_left -= n;
+        k_mutex_lock(&sess_mu, K_FOREVER);
+        sess.off += n;
+        input_stream.consumed = sess.off;
+        k_mutex_unlock(&sess_mu);
+        if (input_stream.id3_left && *eof) return -EPROTO;
+        *waiting = true;
+        return 0;
+    }
+    k_mutex_lock(&sess_mu, K_FOREVER);
+    size_t ready = sess.win_len - sess.win_off;
+    if (!input_stream.buffering && ready < MP3_NEED && !*eof) {
+        input_stream.buffering = true;
+        if (mp3p.hz) ++input_stream.underruns;
+    }
+    if (input_stream.buffering && (ready + input_stream.ring.used >= 24576 || *eof)) input_stream.buffering = false;
+    *waiting = input_stream.buffering;
+    k_mutex_unlock(&sess_mu);
+    return 0;
+}
+
 static int mp3_align_sync(void)
 {
 	int tries = 0;
@@ -1138,6 +1207,7 @@ static void player_loop(void *a, void *b, void *c)
 		uint8_t *buf = sess.buf;
 		size_t size = sess.size;
 		bool from_file = sess.from_file;
+		bool from_stream = sess.from_stream;
 		bool is_mp3 = sess.mp3;
 		bool effect_only = sess.effect_only;
 		if (sess.stop || size == 0 ||
@@ -1156,7 +1226,7 @@ static void player_loop(void *a, void *b, void *c)
 
 		if (is_mp3) {
 			mp3_reset();
-			if (!from_file) {
+			if (!from_file && !from_stream) {
 				k_mutex_lock(&sess_mu, K_FOREVER);
 				sess.off = id3_skip(buf, size);
 				k_mutex_unlock(&sess_mu);
@@ -1247,8 +1317,9 @@ static void player_loop(void *a, void *b, void *c)
 				continue;
 			}
 			size_t off = sess.off;
+			bool waiting_input = false;
 			k_mutex_unlock(&sess_mu);
-			if (!from_file && !effect_only && off >= size && !(is_mp3 && mp3p.fifo_n)) {
+			if (!from_file && !from_stream && !effect_only && off >= size && !(is_mp3 && mp3p.fifo_n)) {
 				break;
 			}
 			k_mutex_lock(&audio_lock, K_FOREVER);
@@ -1279,6 +1350,17 @@ static void player_loop(void *a, void *b, void *c)
 					k_mutex_unlock(&effect_mu);
 					k_mutex_unlock(&sess_mu);
 				}
+			} else if (from_stream) {
+                bool eof = false;
+                mp3p.wrote = 0;
+                err = input_refill(&eof, &waiting_input);
+                if (!err && !waiting_input) {
+                    size_t before = sess.win_off;
+                    err = mp3_pump(sess.buf, sess.win_len, &sess.win_off, &started, eof);
+                    off = sess.off + sess.win_off - before;
+                    if (err > 0 && !mp3p.hz) err = -EPROTO;
+                } else off = sess.off;
+                if (!err && started && !mp3p.wrote) err = feed_silence(&started);
 			} else if (from_file && is_mp3) {
 				size_t before;
 				bool eof = false;
@@ -1319,7 +1401,12 @@ static void player_loop(void *a, void *b, void *c)
 			k_mutex_unlock(&audio_lock);
 			k_mutex_lock(&sess_mu, K_FOREVER);
 			sess.off = off;
+            if (from_stream) {
+                input_stream.consumed = off;
+                input_stream.played_ms = (uint32_t)((uint64_t)sess.pcm_done * 1000u / CONFIG_ASTER_AUDIO_RATE);
+            }
 			k_mutex_unlock(&sess_mu);
+            if (waiting_input && !started && !err) k_sem_take(&play_wake, K_MSEC(20));
 			if (err > 0) {
 				break; /* mp3 stream finished */
 			}
@@ -2130,6 +2217,10 @@ static bool path_looks_mp3(const char *path)
 
 int aster_plat_audio_start_path(const char *path)
 {
+    k_mutex_lock(&sess_mu, K_FOREVER);
+    bool stream_owned = input_stream.handle != 0;
+    k_mutex_unlock(&sess_mu);
+    if (stream_owned) return -EBUSY;
 	bool mp3 = false;
 	size_t payload = 0;
 	uint8_t *win = NULL;
@@ -2235,6 +2326,10 @@ int aster_plat_audio_seek(uint32_t msec)
 	int err = 0;
 
 	k_mutex_lock(&sess_mu, K_FOREVER);
+    if (sess.from_stream) {
+        k_mutex_unlock(&sess_mu);
+        return -ENOTSUP;
+    }
 	if (sess.state == ASTER_AUDIO_IDLE) {
 		k_mutex_unlock(&sess_mu);
 		return -EAGAIN;
@@ -2254,4 +2349,80 @@ int aster_plat_audio_seek(uint32_t msec)
 int aster_plat_audio_get_lyrics(char *buf, size_t max)
 {
 	return aster_audio_lyrics_copy(buf, max);
+}
+
+int aster_plat_audio_stream_open(uint32_t codec)
+{
+    if (codec != ASTER_AUDIO_STREAM_MP3) return -ENOTSUP;
+    if (k_mutex_lock(&sess_mu, K_NO_WAIT)) return -EAGAIN;
+    if (input_stream.handle || sess.state != ASTER_AUDIO_IDLE) {
+        k_mutex_unlock(&sess_mu); return -EBUSY;
+    }
+    if (input_generation == INT32_MAX) { k_mutex_unlock(&sess_mu); return -ENOSPC; }
+    uint8_t *ring = aster_psram_alloc(ASTER_AUDIO_STREAM_CAPACITY);
+    uint8_t *window = aster_psram_alloc(STREAM_WIN);
+    if (!ring || !window) {
+        aster_psram_free(ring);aster_psram_free(window);k_mutex_unlock(&sess_mu);return -ENOMEM;
+    }
+    memset(&input_stream, 0, sizeof(input_stream));
+    input_stream.ring = (struct audio_stream_ring){.data=ring,.cap=ASTER_AUDIO_STREAM_CAPACITY};
+    input_stream.handle = ++input_generation;
+    input_stream.state = ASTER_AUDIO_STREAM_BUFFERING;
+    input_stream.buffering = true;
+    sess.buf=window;sess.size=SIZE_MAX;sess.off=0;sess.win_len=0;sess.win_off=0;
+    sess.pcm_done=0;sess.msec_total=0;sess.err=0;sess.pause=false;sess.stop=false;
+    sess.mp3=true;sess.from_file=false;sess.from_stream=true;sess.effect_only=false;
+    sess.seek_pending=false;sess.state=ASTER_AUDIO_PLAYING;
+    uint32_t handle=input_stream.handle;
+    k_mutex_unlock(&sess_mu);
+    int rc=wake_player();
+    if(rc){
+        k_mutex_lock(&sess_mu,K_FOREVER);sess.err=rc;sess_clear_locked();input_stream.handle=0;
+        k_mutex_unlock(&sess_mu);return rc;
+    }
+    return (int)handle;
+}
+int aster_plat_audio_stream_write(uint32_t handle,const void *data,size_t length)
+{
+    if(!data||!length||length>ASTER_AUDIO_STREAM_WRITE_MAX)return -EINVAL;
+    if(k_mutex_lock(&sess_mu,K_NO_WAIT))return -EAGAIN;
+    int rc;
+    if(!handle||handle!=input_stream.handle)rc=-EBADF;
+    else if(input_stream.error)rc=input_stream.error;
+    else if(input_stream.eof||input_stream.state>=ASTER_AUDIO_STREAM_DONE)rc=-EPIPE;
+    else {
+        rc=(int)audio_ring_write(&input_stream.ring,data,length);
+        input_stream.received+=(unsigned)rc;
+        if(!rc)rc=-EAGAIN;
+    }
+    k_mutex_unlock(&sess_mu);k_sem_give(&play_wake);return rc;
+}
+int aster_plat_audio_stream_finish(uint32_t handle)
+{
+    if(k_mutex_lock(&sess_mu,K_NO_WAIT))return -EAGAIN;
+    int rc=(!handle||handle!=input_stream.handle)?-EBADF:0;
+    if(!rc)input_stream.eof=true;
+    k_mutex_unlock(&sess_mu);k_sem_give(&play_wake);return rc;
+}
+int aster_plat_audio_stream_status(uint32_t handle,aster_audio_stream_status_t *out)
+{
+    if(!out)return -EINVAL;
+    if(k_mutex_lock(&sess_mu,K_NO_WAIT))return -EAGAIN;
+    if(!handle||handle!=input_stream.handle){k_mutex_unlock(&sess_mu);return -EBADF;}
+    uint32_t state=input_stream.state;
+    if(sess.from_stream)state=sess.pause?ASTER_AUDIO_STREAM_PAUSED:
+        input_stream.buffering?ASTER_AUDIO_STREAM_BUFFERING:ASTER_AUDIO_STREAM_PLAYING;
+    *out=(aster_audio_stream_status_t){.size=sizeof(*out),.version=1,.state=state,
+        .error=input_stream.error,.queued=input_stream.ring.used,.capacity=ASTER_AUDIO_STREAM_CAPACITY,
+        .underruns=input_stream.underruns,.flags=input_stream.eof?ASTER_AUDIO_STREAM_F_EOF:0,
+        .received=input_stream.received,.consumed=input_stream.consumed,.played_ms=input_stream.played_ms};
+    k_mutex_unlock(&sess_mu);return 0;
+}
+int aster_plat_audio_stream_close(uint32_t handle)
+{
+    if(k_mutex_lock(&sess_mu,K_NO_WAIT))return -EAGAIN;
+    if(!handle||handle!=input_stream.handle){k_mutex_unlock(&sess_mu);return -EBADF;}
+    input_stream.handle=0;
+    if(sess.from_stream){sess.stop=true;sess.pause=false;}
+    k_mutex_unlock(&sess_mu);k_sem_give(&play_wake);return 0;
 }

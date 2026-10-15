@@ -3,7 +3,7 @@
     "schema": 1,
     "id": "waveshare-35b",
     "product": "aster",
-    "abi": "3.9.0",
+    "abi": "3.10.0",
     "system": "zephyr",
     "cpu": "xtensa",
     "aot_target": "xtensa",
@@ -21,7 +21,8 @@
       "psram",
       "framebuffer",
       "http",
-      "tls"
+      "tls",
+      "audio-stream"
     ],
     "display": {
       "width": 320,

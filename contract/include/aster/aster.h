@@ -31,6 +31,7 @@
 #include "wifi.h"
 #include "network.h"
 #include "http.h"
+#include "audio_stream.h"
 #include "img.h"
 #include "gfx.h"
 

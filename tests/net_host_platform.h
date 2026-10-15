@@ -25,7 +25,13 @@ static const struct in_addr *net_if_ipv4_get_global_addr(struct net_if *iface,in
 #define zsock_close close
 #define zsock_bind bind
 #define zsock_connect connect
-#define zsock_recv recv
+static size_t host_recv_limit;
+static ssize_t host_recv(int fd,void *data,size_t length,int flags)
+{
+    if(host_recv_limit&&length>host_recv_limit)length=host_recv_limit;
+    return recv(fd,data,length,flags);
+}
+#define zsock_recv host_recv
 #define zsock_send host_send
 #define zsock_sendto sendto
 #define zsock_recvfrom recvfrom

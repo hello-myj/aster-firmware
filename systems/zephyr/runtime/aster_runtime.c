@@ -901,6 +901,7 @@ static void ctx_cleanup(aster_app_ctx_t *ctx)
 #endif
 	aster_native_frame_release(ctx);
 	aster_native_release_network(ctx);
+	aster_native_release_audio_stream(ctx);
 	aster_native_release_files(ctx);
 
 	if (ctx->exec_env) {

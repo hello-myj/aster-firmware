@@ -162,7 +162,8 @@ static int cmd_sys_features(const struct shell *sh, size_t argc, char **argv)
 	static const char *names[] = {
 		"display", "touch", "mouse", "keyboard", "camera", "audio-in",
 		"audio-out", "wifi", "bluetooth", "accelerometer", "gyroscope",
-		"filesystem", "rtc", "psram", "framebuffer" };
+		"filesystem", "rtc", "psram", "framebuffer", "network", "http",
+        "tls", "audio-stream" };
 	shell_print(sh, "features:");
 	for (size_t b = 0; b < ARRAY_SIZE(names); b++) {
 		if (i.feature_flags & (1ull << b)) {

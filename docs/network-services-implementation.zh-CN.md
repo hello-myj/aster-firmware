@@ -1,7 +1,8 @@
 # APP 网络服务实施方案
 
-状态（2026-10-16）：N1、N2已完成本阶段实施与双板验收。工作区ABI3.9提供TCP/UDP及六个HTTP/HTTPS导入，SDK契约、JSON/流式下载示例与Windows/Linux模拟器已同步。两板CLI、TLS证书拒绝、断网恢复、图形并发和APP权限/越界/异常退出回收通过，日常固件与原应用已恢复，临时应用、证书和防火墙规则已清理。已本地提交，未推送或发布Release。资源与限制见[CLI记录](validation/network-n2-cli-2026-10-15.md)和[APP/SDK记录](validation/network-n2-sdk-2026-10-15.md)。N3 MQTT尚未开始，N4长时复合验收独立排期。
+状态（2026-10-16）：N1、N2已完成本阶段实施与双板验收。N2验收基线ABI3.9提供TCP/UDP及六个HTTP/HTTPS导入，SDK契约、JSON/流式下载示例与Windows/Linux模拟器已同步。两板CLI、TLS证书拒绝、断网恢复、图形并发和APP权限/越界/异常退出回收通过，日常固件与原应用已恢复，临时应用、证书和防火墙规则已清理。已本地提交，未推送或发布Release。资源与限制见[CLI记录](validation/network-n2-cli-2026-10-15.md)和[APP/SDK记录](validation/network-n2-sdk-2026-10-15.md)。N3 MQTT尚未开始，N4长时复合验收独立排期。
 
+后续工作区增量（2026-10-16，本地提交）：ABI3.10新增分段MP3输入与在线音乐示例，国内直连与网络窗口优化已通过微雪本轮验证，LCKFB已构建、实机待测；参见[流式音频实施与验证](audio-streaming.zh-CN.md)。N1/N2既有验收数据属于此前配置，不能作为新增接收窗口配置的完整双板峰值复测结果。
 适用范围：Aster 固件、独立 APP SDK、Windows/Linux 模拟器，以及 LCKFB、微雪 3.5B 两款开发板。本文随固件源码维护；原始日志、抓包、截图和临时镜像留在仓库外。
 
 ## 1. 目标与当前基线
@@ -10,12 +11,12 @@
 
 当前源码基线：
 
-- 工作区公共ABI为3.8.0（新增有界TCP/UDP，尚未发布）；此前发布的3.7成品不含新导入。
+- 工作区公共ABI为3.10.0（含有界TCP/UDP、HTTP/HTTPS和MP3分段输入，尚未发布）；此前发布的3.7成品不含新导入。
 - SDK 已公开 Wi-Fi station 扫描、连接、断开、重连、状态和已保存 SSID 接口；需要 `wifi` 权限。
 - 固件设置页有个人热点与 DHCP 服务，但 SDK 没有公开个人热点控制接口。
 - 两款板的 `base.conf` 开启 socket、DNS、SNTP 和 TCP，关闭 IPv6；`CONFIG_ASTER_NET` 控制独立 TCP/UDP 服务与诊断 CLI。
 - 两款板当前 `CONFIG_NET_MAX_CONTEXTS=8`、`CONFIG_NET_MAX_CONN=8`、`CONFIG_DNS_NUM_CONCUR_QUERIES=3`。服务最多两槽，CLI 同样占槽；其余为 DNS/SNTP/DHCP 等预留，仍需并发峰值验收。
-- SDK已公开TCP/UDP七个aster_network_*导入，DNS作为连接/发送阶段；HTTP/HTTPS、WebSocket、MQTT未提供。
+- SDK已公开TCP/UDP七个aster_network_*导入，DNS作为连接/发送阶段；HTTP/HTTPS六个导入已提供，WebSocket、MQTT未提供。
 - 两款板本轮将内核堆由48 KiB提升到96 KiB；微雪仍使用40 MHz、双8 KiB显示预拷贝。不将已有图形峰值和新增网络峰值混算，内核/libc分池与验收见第16节。
 
 第一批完整网络版本包括 TCP/UDP、HTTP/HTTPS 和 MQTT/MQTTS 客户端，分阶段实施，按第15节硬件预算收敛：以两个活动APP传输连接作为验收目标、一个连接作为明确可选的低资源配置；先验收一个TLS会话，不承诺双TLS。MQTT 从后续候选提升为独立必做阶段；HTTP 服务端、TCP 监听、WebSocket 和其他服务仍按需扩展。

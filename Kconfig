@@ -49,6 +49,9 @@ config MBEDTLS_HEAP_CUSTOM_SECTION
 config MBEDTLS_INIT
 	default y if ASTER_HTTP_TLS
 
+config MBEDTLS_SSL_MAX_CONTENT_LEN
+	default 16384 if ASTER_HTTP_TLS
+
 config ASTER_NET_POOL_MONITOR
 	bool "Diagnostic network context sampler (never enable in release)"
 	depends on ASTER_NET && SHELL
