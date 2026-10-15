@@ -3,7 +3,7 @@
  * Owners are session IDs, never APP pointers. Owner 1 is reserved for CLI.
  * All entry points return EAGAIN if the worker holds the service lock; callers
  * retry later rather than waiting for network progress. Owner cleanup must be
- * retried before retiring the session. This is not yet wired into the APP ABI.
+ * retried before retiring the session. The native bridge maps APP ABI errors.
  */
 #ifndef ASTER_NET_SERVICE_H
 #define ASTER_NET_SERVICE_H

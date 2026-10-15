@@ -1,6 +1,6 @@
-# N1 APP/SDK 验证记录（2026-10-15，进行中）
+# N1 APP/SDK 验证记录（已完成，2026-10-15）
 
-结论：ABI3.8工作区开发版已实现七个网络导入、net权限、会话退出清理、SDK契约及示例、Windows/Linux模拟器真实socket支持。两板最终七接口版本均已完成APP检查；用户已确认两板网络与图形并发交互正常。系统协议池并发峰值仍待补测，N1不标已完成。HTTP/TLS/MQTT未实现。本次未提交、推送或发布Release；已有3.7发布包不含新导入。
+结论：ABI3.8工作区开发版已实现七个网络导入、net权限、会话退出清理、SDK契约及示例、Windows/Linux模拟器真实socket支持。两板最终七接口版本均已完成APP检查；用户已确认两板网络与图形并发交互正常。两板系统协议池并发验证已完成并修复分片池不足，N1已完成；见[协议池补测](network-n1-pools-2026-10-15.md)。HTTP/TLS/MQTT未实现。首轮实现已本地提交（固件1a74791、SDK24cd0d8、模拟器8d64b4c）；协议池补测与修复纳入后续本地版本记录，未推送或发布新Release，已有3.7发布包不含新导入。
 
 ## 契约与资源
 
@@ -66,10 +66,10 @@
 - 临时7个APP及根目录AST已删除，原17个APP保留；原2048启停正常，恢复主页、保留原网络和音量。串口已释放。
 
 
-## 剩余验收范围
+## 完成边界与后续验收
 
-- 两板最终APP桥接结果已写入本记录，公共接口及G2边界项已关闭；系统DHCP/DNS/SNTP与双连接的**完整协议池占用峰值**尚缺运行时计数证据，不能把服务自己的active=2当成全系统仅2个socket。
-- 当前应用/CLI共享两槽；系统总上下文8，DNS并发3并不等于固定3个socket；DNS服务器上限1。DHCP客户端使用平台内部路径，SNTP及个人热点DHCP服务另有开销，TCP关闭后也可能保留协议状态。保留该项待测，后续再据系统峰值调整预算。
+- 两板最终APP桥接结果已写入本记录，公共接口及G2边界项已关闭；系统DHCP/DNS/SNTP与双连接的协议池占用已完成两板后台采样与分配高水位检查，不能把服务自己的active=2当成全系统仅2个socket。
+- 当前应用/CLI共享两槽；系统总上下文8，DNS并发3并不等于固定3个socket；DNS服务器上限1。DHCP客户端使用平台内部路径，SNTP及个人热点DHCP服务另有开销，TCP关闭后也可能保留协议状态。两板补测均通过，分片池已据实际分配失败调整为256字节RX24/TX32，阶段资源项关闭。
 - 完整长时、TLS、HTTP、MQTT不在本轮通过范围；HTTP/TLS/MQTT仍属N2/N3，N4统一验收尚未执行。不以本次通过推断所有启动重连异常均已修复。
 
 复现入口：固件`python -m unittest discover -s tests`；SDK同名测试命令；模拟器`node --test test/*.test.js`及`node scripts/check-sdk.js ../aster-sdk`。设备fixture在SDK `tests/fixtures/network_probe.c`，配置和构建产物由测试驱动写入仓库外。APP示例与独立Node服务在SDK `apps/network-echo/`、`tools/network_echo_server.cjs`，完整开发手册已包含全部公开声明及事件驱动源码。原始串口日志、镜像和截图只保存在仓库外diagnostics目录。

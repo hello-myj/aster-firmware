@@ -20,3 +20,7 @@ endif()
 if(CONFIG_ASTER_NET_LOOPBACK_TEST)
   target_sources(app PRIVATE ${ASTER_ROOT}/tests/zephyr/net_loopback_fixture.c)
 endif()
+
+if(CONFIG_ASTER_NET_POOL_MONITOR)
+  target_sources(app PRIVATE ${ASTER_ROOT}/tests/zephyr/net_pool_monitor.c)
+endif()

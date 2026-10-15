@@ -14,7 +14,16 @@ config ASTER_NET
 	default y if ASTER_WIFI
 	help
 	  Two shared TCP/UDP slots, private network worker and CLI diagnostics.
-	  No public APP network ABI is exposed at this stage.
+	  APP networking is exposed through ABI 3.8 with the net permission.
+
+config ASTER_NET_POOL_MONITOR
+	bool "Diagnostic network context sampler (never enable in release)"
+	depends on ASTER_NET && SHELL
+	default n
+	help
+	  Sample native network contexts every 5 ms on a private 2 KiB stack.
+	  The netpool command reports observed maxima and overlap with SNTP.
+	  This is diagnostic sampling, not an allocation-hook absolute peak.
 
 config ASTER_NET_LOOPBACK_TEST
 	bool "Diagnostic loopback echo fixture (never enable in release)"
