@@ -8,6 +8,10 @@
 
 接口使用 `aster_*` 和固定宽度 ABI 类型。命名空间、产品身份和固定宽度标识都已改为 Aster：ASTP 包、ASTI 图标、ASTR 资源块、ASTERFS 文件传输协议。旧 MJX 拼写一律不再接受（改名前的包和固件互相拒绝），旧 APP 需重新编译。当前 ABI 为 3.7.0。
 
+## 内部动态内存
+
+两款ESP32-S3板的默认内核堆现为96 KiB。项目底层补丁在SRAM尾部分出内核堆，剩余区域交给libc `malloc`；后者用于APP执行和系统服务等动态线程栈。`aster sys mem`分别报告两套堆的使用、空闲与峰值。SRAM尾部地址差包含内核预留，不能全部作为libc容量。WAMR、APP线性内存及LVGL主池另走PSRAM，不能将不同池的容量和余量直接相加。网络协议及资源规划见[网络服务实施方案](network-services-implementation.zh-CN.md)。
+
 ## 硬件型号与工作模式
 
 当前支持以下硬件型号，具体状态与能力以 `hardware/` 的公开描述和设备握手为准：

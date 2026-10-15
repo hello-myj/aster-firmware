@@ -13,6 +13,9 @@
 #include <zephyr/multi_heap/shared_multi_heap.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/sys/sys_heap.h>
+#if defined(CONFIG_COMMON_LIBC_MALLOC) && defined(CONFIG_SYS_HEAP_RUNTIME_STATS)
+#include <sys_malloc.h>
+#endif
 #include <aster/aster.h>
 #include "aster_app_mgr.h"
 #include "aster_mem.h"
@@ -218,11 +221,25 @@ static int cmd_sys_mem(const struct shell *sh, size_t argc, char **argv)
 			    (unsigned)st.max_allocated_bytes,
 			    (unsigned)st.allocated_bytes,
 			    (unsigned)st.free_bytes);
-		shell_print(sh, "            (AOT text is a PSRAM alloc; this heap is DMA/stacks)");
+		shell_print(sh, "            (kernel allocations; libc worker stacks reported separately)");
 	} else {
 		shell_print(sh, "dram heap:  size=%u (no runtime stats)",
 			    (unsigned)CONFIG_HEAP_MEM_POOL_SIZE);
 	}
+#if defined(CONFIG_COMMON_LIBC_MALLOC) && defined(CONFIG_SYS_HEAP_RUNTIME_STATS)
+	/* This pool shares the SRAM tail with the kernel heap. Report its own
+	 * statistics: _heap_sentry - _end includes the kernel reservation and
+	 * must not be mistaken for the libc arena. Size excludes heap metadata. */
+	struct sys_memory_stats libc_st = { 0 };
+	if (malloc_runtime_stats_get(&libc_st) == 0) {
+		shell_print(sh, "libc heap:  usable=%u peak=%u used=%u free=%u",
+			    (unsigned)(libc_st.allocated_bytes + libc_st.free_bytes),
+			    (unsigned)libc_st.max_allocated_bytes,
+			    (unsigned)libc_st.allocated_bytes,
+			    (unsigned)libc_st.free_bytes);
+		shell_print(sh, "            (malloc/calloc; APP, Wi-Fi, audio and service worker stacks)");
+	}
+#endif
 	aster_system_info_t i;
 
 	aster_sysinfo_get(&i);

@@ -72,14 +72,20 @@ python tools/firmware.py flash --config boards/waveshare_35b/qspi-prefetch.conf 
 一致、APP 错误为零：双 8 KiB / 双 16 KiB 的稀疏绘制均值为 16.49 / 16.25 ms；
 复杂完整帧为 63.00 / 63.40 ms。DRAM heap 观测峰值为 41764 / 58148 B。
 该实验未显示明显、普遍的刷新收益，不能因分块减半就宣称帧率翻倍；常用配置
-仍推荐较省内存的双 8 KiB，双 16 KiB 保留为可选实验。按用户选择，常用 `qspi-prefetch.conf` 已恢复 48 KiB 内核堆＋双 8 KiB。
+仍推荐较省内存的双 8 KiB，双 16 KiB 保留为可选实验。按用户当时选择，G5期间的 `qspi-prefetch.conf` 曾恢复48 KiB内核堆＋双8 KiB；当前堆配置见下节。
 上述双 8 KiB 性能对照使用的是独立的 80 KiB 测试堆，不能视为当前 48 KiB 配置数据。
 
 本地 Zephyr 补丁将内核堆置于静态区之后的 SRAM 尾部，链接报告静态 DRAM
 173072 B 不包含这块堆。预留 80 KiB 内核堆后，libc 初始分配区域约 140.7 KiB，
 比 48 KiB 配置减少 32 KiB；`aster_dram_alloc` 等通过 libc 分配，仍需并发压力
-验收。源码默认堆和 LCKFB 配置未变。用户已确认双 16 KiB 版的画面、触摸、上拉返回确认及取消均正常；此为短时
+验收。该历史实验时源码默认堆和LCKFB配置未变。用户已确认双 16 KiB 版的画面、触摸、上拉返回确认及取消均正常；此为短时
 基础验收，长时并发压力仍待完成。软件截图不能代替屏幕观察。
+
+### 当前内核堆与libc统计
+
+两板基础配置及本板常用`qspi-prefetch.conf`现将内核堆设为96 KiB，为后续网络服务预留空间；本板继续40 MHz、RGB565、双8 KiB预拷贝，未切换双16 KiB实验。上述G5数据仍是当时48/80 KiB配置的历史结果，不改写成96 KiB实测。
+
+`aster sys mem`分别输出内核`dram heap`和libc `usable/peak/used/free`。项目的SRAM尾部先扣除内核堆预留，再交给libc；不能将`_heap_sentry - _end`全部称为libc容量。扩容后本板libc arena约125 KiB，最终以新构建和运行时统计为准。本轮微雪仅编译，尚未实机补测；详情见[网络服务实施方案](../../docs/network-services-implementation.zh-CN.md)。
 
 ## 外设连接
 

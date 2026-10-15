@@ -100,4 +100,6 @@ APP 从独立工程到设备的步骤见 [快速入门](docs/quickstart.md)，AB
 
 固定图形场景的真机数据、合批收益及测量边界见 [图形基准](docs/graphics-benchmark.md)。模拟器确定性回放与故障诊断说明在 aster-sim/docs/replay.md。
 
+APP 的 TCP/UDP、HTTP/HTTPS、MQTT/MQTTS 分阶段接口、资源与三仓库验收规划见 [网络服务实施方案](docs/network-services-implementation.zh-CN.md)；该文档是实施计划，尚未提供新的网络 API。
+
 构建工具会拒绝构建目录根部未显式选择的 `.conf` 文件：Zephyr 会把这些文件自动追加到配置末尾，可能覆盖板型或遗留诊断开关。请将独立配置放在构建目录之外并通过 `--config` 指定。镜像校验同时核对 Kconfig 板型与设备树目标，避免同 CPU 的不同开发板配置混用。
