@@ -67,7 +67,7 @@ ASTER_I("aster_audio_get_info") int32_t aster_audio_get_info(aster_audio_info_t 
 /* ---- 1.7 ---- */
 
 /* DAC volume 0..100 (0 = mute). The quality ES8311 port caps DAC gain at
- * 0 dB at 100 (older firmware used +6 dB). This is a loudness control,
+ * +6 dB at 100. This is a loudness control,
  * not a linear amplitude scale. Applies immediately. */
 ASTER_I("aster_audio_set_volume") int32_t aster_audio_set_volume(int32_t percent);
 /* Returns 0..100, or a negative aster_error_t. */
