@@ -127,6 +127,11 @@ uint32_t aster_plat_wifi_security_class(uint8_t security)
 	switch (security) {
 	case WIFI_SECURITY_TYPE_NONE:
 		return ASTER_PLAT_WIFI_SECURITY_OPEN;
+	/* ESP32 scan reports unhandled mixed personal modes as UNKNOWN.
+     * Match sta_security(): offer password entry and try PSK, rather than
+     * reject before association. This is a connection attempt, not proof
+     * that every unknown authentication mode is supported. */
+    case WIFI_SECURITY_TYPE_UNKNOWN:
 	case WIFI_SECURITY_TYPE_PSK:
 	case WIFI_SECURITY_TYPE_PSK_SHA256:
 	case WIFI_SECURITY_TYPE_SAE:

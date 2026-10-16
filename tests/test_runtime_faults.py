@@ -56,11 +56,12 @@ int main(void){
 #define CONFIG_ASTER_LVGL 1
 #define IS_ENABLED(x) (x)
 typedef struct {void *exec_env,*module_inst,*module,*img;} aster_app_ctx_t;
-static int files=1,sprites=1,frames=1,network=1,env=1,instance=1,module=1,image=1;
+static int files=1,sprites=1,frames=1,network=1,audio=1,env=1,instance=1,module=1,image=1;
 static void aster_gfx_drop_all(void){sprites=0;}
 static void aster_native_frame_release(aster_app_ctx_t *ctx){(void)ctx;frames=0;}
 static void aster_native_release_network(aster_app_ctx_t *ctx){(void)ctx;assert(!frames);network=0;}
-static void aster_native_release_files(aster_app_ctx_t *ctx){(void)ctx;assert(!frames&&!network);files=0;}
+static void aster_native_release_audio_stream(aster_app_ctx_t *ctx){(void)ctx;assert(!frames&&!network);audio=0;}
+static void aster_native_release_files(aster_app_ctx_t *ctx){(void)ctx;assert(!frames&&!network&&!audio);files=0;}
 static void wasm_runtime_destroy_exec_env(void *p){assert(p&&!files&&!sprites&&env);env--;}
 static void wasm_runtime_deinstantiate(void *p){assert(p&&!env&&instance);instance--;}
 static void wasm_runtime_unload(void *p){assert(p&&!instance&&module);module--;}
@@ -69,7 +70,7 @@ static void aster_psram_free(void *p){assert(p&&!module&&image);image--;}
 int main(void){
  aster_app_ctx_t c={(void*)1,(void*)2,(void*)3,(void*)4};
  ctx_cleanup(&c);ctx_cleanup(&c);ctx_cleanup(NULL);
- assert(!files&&!sprites&&!frames&&!network&&!env&&!instance&&!module&&!image);
+ assert(!files&&!sprites&&!frames&&!network&&!audio&&!env&&!instance&&!module&&!image);
  assert(!c.exec_env&&!c.module_inst&&!c.module&&!c.img);return 0;
 }
 ''')

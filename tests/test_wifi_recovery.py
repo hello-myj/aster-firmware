@@ -98,3 +98,30 @@ int main(void) {
  return 0;
 }
 ''')
+
+    def test_scan_security_and_join_policy_agree(self):
+        import re
+        source = (ROOT / 'platform/esp32s3/wifi.c').read_text()
+        helpers = source[source.index('static int sta_security('):
+                         source.index('uint32_t aster_plat_wifi_state_class(')]
+        names = sorted(set(re.findall(r'WIFI_SECURITY_TYPE_[A-Z0-9_]+', helpers)))
+        prefix = '#include <stdint.h>\n#include <assert.h>\n#include <errno.h>\n'
+        prefix += 'enum wifi_security_type {' + ','.join(names) + '};\n'
+        classes = ['OPEN', 'PERSONAL', 'ENTERPRISE', 'WEP', 'OTHER']
+        prefix += ''.join('#define ASTER_PLAT_WIFI_SECURITY_' + name + ' ' + str(i) + '\n' for i, name in enumerate(classes))
+        run_c(prefix + helpers + r'''
+int main(void) {
+ enum wifi_security_type mode;
+ assert(aster_plat_wifi_security_class(WIFI_SECURITY_TYPE_UNKNOWN)==ASTER_PLAT_WIFI_SECURITY_PERSONAL);
+ assert(!sta_security(WIFI_SECURITY_TYPE_UNKNOWN,&mode)&&mode==WIFI_SECURITY_TYPE_PSK);
+ assert(aster_plat_wifi_security_class(WIFI_SECURITY_TYPE_PSK)==ASTER_PLAT_WIFI_SECURITY_PERSONAL);
+ assert(aster_plat_wifi_security_class(WIFI_SECURITY_TYPE_NONE)==ASTER_PLAT_WIFI_SECURITY_OPEN);
+ assert(!sta_security(WIFI_SECURITY_TYPE_NONE,&mode)&&mode==WIFI_SECURITY_TYPE_NONE);
+ assert(aster_plat_wifi_security_class(WIFI_SECURITY_TYPE_EAP)==ASTER_PLAT_WIFI_SECURITY_ENTERPRISE);
+ assert(sta_security(WIFI_SECURITY_TYPE_EAP,&mode)==-ENOTSUP);
+ assert(aster_plat_wifi_security_class(WIFI_SECURITY_TYPE_WEP)==ASTER_PLAT_WIFI_SECURITY_WEP);
+ assert(sta_security(WIFI_SECURITY_TYPE_WEP,&mode)==-ENOTSUP);
+ assert(!sta_security(WIFI_SECURITY_TYPE_SAE,&mode)&&mode==WIFI_SECURITY_TYPE_SAE);
+ return 0;
+}
+''')

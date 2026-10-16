@@ -383,7 +383,8 @@ int aster_net_restart(uint64_t owner, uint32_t handle, const char *host,
     int rc = -EBADF;
     if (!s) goto out;
     if (s->kind != ASTER_NET_TCP || s->dns_started || s->restarting ||
-        (s->state != ASTER_NET_READY && s->state != ASTER_NET_EOF)) {
+        (s->state != ASTER_NET_READY && s->state != ASTER_NET_EOF &&
+         s->state != ASTER_NET_FAILED)) {
         rc = -EBUSY; goto out;
     }
     if (s->cancel) { rc = -ECANCELED; goto out; }

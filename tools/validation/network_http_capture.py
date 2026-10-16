@@ -40,7 +40,7 @@ class Client:
                 out.extend(chunk)
                 last_data = time.monotonic()
             text = re.sub(r'\x1b\[[0-9;?]*[A-Za-z]', '', out.decode(errors='replace'))
-            prefix = 'HTTP' if line.startswith('aster net http ') else 'NET' if line.startswith('aster net ') else None
+            prefix = 'MQTT' if line.startswith('aster net mqtt ') else 'HTTP' if line.startswith('aster net http ') else 'NET' if line.startswith('aster net ') else None
             response = re.search(r'^'+prefix+r' ', text, re.M) if prefix else None
             # Terminal wraps can split command echo across physical lines.
             echoed = ''.join(line.split()) in re.sub(r'\s+', '', text)

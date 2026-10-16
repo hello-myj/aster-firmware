@@ -77,6 +77,7 @@ void aster_sysinfo_get(aster_system_info_t *info)
 	}
 	if (IS_ENABLED(CONFIG_ASTER_NET)) f |= 1ull << ASTER_FEATURE_NETWORK;
 	if (IS_ENABLED(CONFIG_ASTER_HTTP)) f |= 1ull << ASTER_FEATURE_HTTP;
+	if (IS_ENABLED(CONFIG_ASTER_MQTT)) f |= 1ull << ASTER_FEATURE_MQTT;
 	if (IS_ENABLED(CONFIG_ASTER_HTTP_TLS)) f |= 1ull << ASTER_FEATURE_TLS;
 	if (IS_ENABLED(CONFIG_ASTER_AUDIO)) f |= 1ull << ASTER_FEATURE_AUDIO_STREAM;
 	info->feature_flags = f;
@@ -105,6 +106,7 @@ bool aster_sysinfo_feature_by_name(const char *name)
 		{ "wifi", ASTER_FEATURE_WIFI },
 		{ "network", ASTER_FEATURE_NETWORK },
 		{ "http", ASTER_FEATURE_HTTP },
+		{ "mqtt", ASTER_FEATURE_MQTT },
 		{ "tls", ASTER_FEATURE_TLS },
 		{ "audio-stream", ASTER_FEATURE_AUDIO_STREAM },
 		{ "bluetooth", ASTER_FEATURE_BLUETOOTH },

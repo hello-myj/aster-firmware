@@ -35,7 +35,7 @@ static int sess_mu,effect_mu,wakes,locked,g_vol=70,wake_error,clears;
 static int k_mutex_lock(int *mu,int wait) {(void)mu;assert(wait==0 || wait==-1);return locked;}
 static void k_mutex_unlock(int *mu) {(void)mu;}
 static struct {bool effect_closing,stop,effect_only;size_t size,off;int err,state;} sess;
-static struct {const int16_t *pcm;size_t frames,off;unsigned gain,priority;} ui_voice;
+static struct {const int16_t *pcm;size_t frames,off;uint32_t fraction;unsigned gain,priority;} ui_voice;
 static int wake_player(void) {wakes++;return wake_error;}
 static void sess_clear_locked(void) {clears++;sess.state=ASTER_AUDIO_IDLE;sess.effect_only=false;}
 ''' + code + r'''
@@ -111,6 +111,10 @@ int main(void) {
 #define AUDIO_BLOCK 16
 #define ASTER_PLAT_AUDIO_FRAME 4
 #define CONFIG_ASTER_AUDIO_CHANNELS 2
+#define CONFIG_ASTER_AUDIO_RATE 16000
+#include "esp32s3/audio_rate.h"
+static size_t output_block=AUDIO_BLOCK;
+static uint32_t output_rate=CONFIG_ASTER_AUDIO_RATE;
 #define EFFECT_SLOTS 4
 #define K_FOREVER -1
 #define MIN(a,b) ((a)<(b)?(a):(b))
@@ -121,8 +125,8 @@ static void k_mutex_unlock(int *a) {(void)a;}
 static int i2s_write(int dev,void *blk,int bytes) {(void)dev;(void)blk;assert(bytes==AUDIO_BLOCK);return 0;}
 static void k_mem_slab_free(int *slab,void *blk) {(void)slab;(void)blk;}
 static int i2s_kick(bool *started,bool force) {(void)force;*started=true;return 0;}
-static struct {uint8_t *pcm;size_t size,off;bool playing;} effects[EFFECT_SLOTS];
-static struct {const int16_t *pcm;size_t frames,off;unsigned gain;} ui_voice;
+static struct {uint8_t *pcm;size_t size,off;uint32_t fraction;bool playing;} effects[EFFECT_SLOTS];
+static struct {const int16_t *pcm;size_t frames,off;uint32_t fraction;unsigned gain;} ui_voice;
 ''' + code + r'''
 int main(void) {
  static int16_t mono[]={2000,-2000,30000}, app[]={30000,30000,0,0,30000,30000,123,456};

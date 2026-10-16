@@ -19,6 +19,7 @@ LOG_MODULE_REGISTER(aster_input, LOG_LEVEL_INF);
 static struct {
 	uint16_t x;
 	uint16_t y;
+	uint16_t down_x, down_y; /* immutable until pending DOWN is consumed */
 	bool     down;
 	bool     pending_down;
 	bool     pending_up;
@@ -102,6 +103,7 @@ static void input_cb(struct input_event *evt, void *user_data)
 			if (evt->value) { /* pressed */
 				if (!pt.down) {
 					pt.down = true;
+					if (!pt.pending_down) { pt.down_x = pt.x; pt.down_y = pt.y; }
 					pt.pending_down = true;
 				}
 				pt.pending_move = true;
@@ -109,7 +111,6 @@ static void input_cb(struct input_event *evt, void *user_data)
 				if (pt.down) {
 					pt.down = false;
 					pt.pending_up = true;
-					pt.pending_move = false;
 				}
 			}
 		} else if (evt->code < 0xFFFF) {
@@ -161,13 +162,15 @@ int aster_plat_input_poll(aster_touch_evt_t *evt, int max)
 	int n = 0;
 	k_mutex_lock(&pt_lock, K_FOREVER);
 	if (pt.pending_down && n < max) {
-		evt[n].x = pt.x;
-		evt[n].y = pt.y;
+		evt[n].x = pt.down_x;
+		evt[n].y = pt.down_y;
 		evt[n].action = ASTER_TOUCH_DOWN;
 		pt.pending_down = false;
 		n++;
 	}
-	if (pt.pending_move && !pt.pending_down && !pt.pending_up && n < max) {
+	/* Preserve the last MOVE before UP, even if a whole swipe arrived
+	 * while the APP was drawing. The next poll drains UP when max is 1/2. */
+	if (pt.pending_move && !pt.pending_down && n < max) {
 		evt[n].x = pt.x;
 		evt[n].y = pt.y;
 		evt[n].action = ASTER_TOUCH_MOVE;
@@ -281,6 +284,7 @@ void aster_plat_input_touch_inject(uint32_t x, uint32_t y, uint32_t action)
 	if (action == ASTER_TOUCH_DOWN) {
 		if (!pt.down) {
 			pt.down = true;
+			if (!pt.pending_down) { pt.down_x = pt.x; pt.down_y = pt.y; }
 			pt.pending_down = true;
 		}
 		pt.pending_move = true;
@@ -291,7 +295,6 @@ void aster_plat_input_touch_inject(uint32_t x, uint32_t y, uint32_t action)
 	} else if (pt.down) {
 		pt.down = false;
 		pt.pending_up = true;
-		pt.pending_move = false;
 	}
 	k_mutex_unlock(&pt_lock);
 }

@@ -5,6 +5,9 @@
 #if defined(CONFIG_ASTER_HTTP)
 #include "aster_http_cmd.h"
 #endif
+#if defined(CONFIG_ASTER_MQTT)
+#include "aster_mqtt_cmd.h"
+#endif
 #include "aster_net.h"
 #include "aster_mem.h"
 #include <errno.h>
@@ -182,6 +185,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(udp_cmds,
     SHELL_CMD_ARG(recvfrom, NULL, "HANDLE --max-bytes N (0..1200)", cmd_recv, 4, 0),
     SHELL_SUBCMD_SET_END);
 static const struct shell_static_entry net_entries[] = {
+#if defined(CONFIG_ASTER_MQTT)
+    SHELL_CMD(mqtt, &aster_mqtt_cmds, "bounded MQTT/MQTTS", NULL),
+#endif
 #if defined(CONFIG_ASTER_HTTP)
     SHELL_CMD(http, &aster_http_cmds, "bounded HTTP/HTTPS requests", NULL),
 #endif

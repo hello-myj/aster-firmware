@@ -23,6 +23,14 @@ config ASTER_HTTP
 	select TIMESLICE_PER_THREAD
 	default y
 
+config ASTER_MQTT
+	bool "Bounded MQTT 3.1.1 client (shared HTTP worker)"
+	depends on ASTER_HTTP
+	default y
+	help
+	  QoS 0/1, clean sessions, bounded queues, reconnect and resubscribe.
+	  MQTTS reuses the verified TLS backend when ASTER_HTTP_TLS is enabled.
+
 config ASTER_HTTP_TLS
 	bool "Verified HTTPS client"
 	depends on ASTER_HTTP && MBEDTLS

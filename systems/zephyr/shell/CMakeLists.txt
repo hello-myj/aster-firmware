@@ -14,3 +14,7 @@ endif()
 if(CONFIG_ASTER_HTTP)
   target_sources(app PRIVATE aster_http_cmd.c)
 endif()
+
+if(CONFIG_ASTER_MQTT)
+  target_sources(app PRIVATE aster_mqtt_cmd.c)
+endif()

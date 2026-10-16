@@ -2,6 +2,9 @@
 #include "aster_http.h"
 #include "aster_mem.h"
 #include "aster_net.h"
+#if defined(CONFIG_ASTER_MQTT)
+#include "aster_mqtt.h"
+#endif
 #if defined(CONFIG_ASTER_HTTP_TLS)
 #include "aster_http_tls.h"
 #endif
@@ -43,9 +46,11 @@ K_MUTEX_DEFINE(http_lock);
 K_SEM_DEFINE(http_wake, 0, 1);
 #if defined(CONFIG_ASTER_HTTP_TLS)
 static char *custom_ca;
+static bool external_tls_reserved;
 static size_t custom_ca_length;
 static bool tls_busy(void)
 {
+    if (external_tls_reserved) return true;
     for (unsigned i = 0; i < ASTER_NET_SLOTS; ++i)
         if (requests[i] && requests[i]->tls_reserved)
             return true;
@@ -409,8 +414,64 @@ static void http_worker(void *a, void *b, void *c)
 #endif
     for (;;) {
         bool active = http_tick();
+#if defined(CONFIG_ASTER_MQTT)
+        active |= aster_mqtt_svc_tick();
+#endif
         k_sem_take(&http_wake, active ? K_MSEC(5) : K_FOREVER);
     }
+}
+static int http_worker_ensure(void)
+{
+    if (http_stack) return 0;
+    http_stack = aster_dram_alloc(K_KERNEL_STACK_LEN(HTTP_STACK));
+    if (!http_stack) return -ENOMEM;
+    k_thread_create(&http_thread, http_stack, HTTP_STACK, http_worker, NULL,
+                    NULL, NULL, K_PRIO_PREEMPT(7), 0, K_NO_WAIT);
+    k_thread_name_set(&http_thread, "aster_http");
+    return 0;
+}
+void aster_http_svc_worker_signal(void) { k_sem_give(&http_wake); }
+int aster_http_svc_worker_wake(void)
+{
+    if (k_mutex_lock(&http_lock, K_NO_WAIT)) return -EAGAIN;
+    int rc = http_worker_ensure();
+    k_mutex_unlock(&http_lock);
+    k_sem_give(&http_wake);
+    return rc;
+}
+int aster_http_svc_tls_acquire(char **pem, size_t *length)
+{
+#if defined(CONFIG_ASTER_HTTP_TLS)
+    if (!pem || !length || *pem) return -EINVAL;
+    if (k_mutex_lock(&http_lock, K_NO_WAIT)) return -EAGAIN;
+    int rc = -EBUSY;
+    if (!tls_busy()) {
+        size_t n;
+        const char *source = custom_ca ? custom_ca : aster_http_tls_default_ca(&n);
+        if (custom_ca) n = custom_ca_length;
+        char *copy = aster_psram_alloc(n);
+        if (!copy) rc = -ENOMEM;
+        else {
+            memcpy(copy, source, n); *pem = copy; *length = n;
+            external_tls_reserved = true; rc = 0;
+        }
+    }
+    k_mutex_unlock(&http_lock);
+    return rc;
+#else
+    (void)pem; (void)length; return -ENOTSUP;
+#endif
+}
+int aster_http_svc_tls_release(char **pem)
+{
+#if defined(CONFIG_ASTER_HTTP_TLS)
+    if (!pem || !*pem) return -EINVAL;
+    if (k_mutex_lock(&http_lock, K_NO_WAIT)) return -EAGAIN;
+    aster_psram_free(*pem); *pem = NULL; external_tls_reserved = false;
+    k_mutex_unlock(&http_lock); return 0;
+#else
+    (void)pem; return -ENOTSUP;
+#endif
 }
 int aster_http_svc_start(uint64_t owner, const struct aster_http_options *o)
 {
@@ -476,17 +537,8 @@ int aster_http_svc_start(uint64_t owner, const struct aster_http_options *o)
         aster_psram_free(r);
         goto out;
     }
-    if (!http_stack) {
-        http_stack = aster_dram_alloc(K_KERNEL_STACK_LEN(HTTP_STACK));
-        if (!http_stack) {
-            aster_psram_free(r);
-            rc = -ENOMEM;
-            goto out;
-        }
-        k_thread_create(&http_thread, http_stack, HTTP_STACK, http_worker, NULL,
-                        NULL, NULL, K_PRIO_PREEMPT(7), 0, K_NO_WAIT);
-        k_thread_name_set(&http_thread, "aster_http");
-    }
+    rc = http_worker_ensure();
+    if (rc) { aster_psram_free(r); goto out; }
     rc = aster_net_open(r->transport_owner, ASTER_NET_TCP, url.host, url.port,
                         o->timeout_ms > 30000 ? 30000 : o->timeout_ms);
     if (rc < 0) {

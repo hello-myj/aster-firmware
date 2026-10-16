@@ -53,4 +53,13 @@ int aster_http_svc_close_owner(uint64_t owner);
  * Denied while a TLS request (including a terminal unclosed one) owns quota. */
 int aster_http_svc_ca_set(const char *pem, size_t length);
 int aster_http_svc_get_stats(struct aster_http_stats *out);
+/* Shared bounded protocol worker. Not an APP API. Allocates its stack once. */
+int aster_http_svc_worker_wake(void);
+void aster_http_svc_worker_signal(void);
+/* Reserve the single verified TLS quota and obtain a worker-owned CA copy.
+ * HTTP admission and administrative CA changes honor this reservation.
+ * Release only after freeing the TLS context. Zero-length password/CA data
+ * never enters logs. A lease remains charged through MQTT reconnect. */
+int aster_http_svc_tls_acquire(char **pem, size_t *length);
+int aster_http_svc_tls_release(char **pem);
 #endif

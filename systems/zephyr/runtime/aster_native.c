@@ -156,6 +156,7 @@ static int app_str(wasm_exec_env_t env, uint32_t off, uint32_t len, char *out, s
 
 #include "aster_network_bridge.inc"
 #include "aster_http_bridge.inc"
+#include "aster_mqtt_bridge.inc"
 
 /* ---- handle decode ---- */
 
@@ -2839,6 +2840,15 @@ static NativeSymbol syms[] = {
 	{ "aster_http_header", (void *)n_http_header, "(iiiiiii)i", NULL },
 	{ "aster_http_cancel", (void *)n_http_cancel, "(i)i", NULL },
 	{ "aster_http_close", (void *)n_http_close, "(i)i", NULL },
+	{ "aster_mqtt_connect", (void *)n_mqtt_connect, "(ii)i", NULL },
+	{ "aster_mqtt_status", (void *)n_mqtt_status, "(iii)i", NULL },
+	{ "aster_mqtt_publish", (void *)n_mqtt_publish, "(iiiiiii)i", NULL },
+	{ "aster_mqtt_subscribe", (void *)n_mqtt_subscribe, "(iiii)i", NULL },
+	{ "aster_mqtt_unsubscribe", (void *)n_mqtt_unsubscribe, "(iii)i", NULL },
+	{ "aster_mqtt_operation", (void *)n_mqtt_operation, "(iii)i", NULL },
+	{ "aster_mqtt_recv", (void *)n_mqtt_recv, "(iii)i", NULL },
+	{ "aster_mqtt_cancel", (void *)n_mqtt_cancel, "(i)i", NULL },
+	{ "aster_mqtt_close", (void *)n_mqtt_close, "(i)i", NULL },
 	{ "aster_wifi_scan_start", (void *)n_wifi_scan_start, "()i", NULL },
 	{ "aster_wifi_status", (void *)n_wifi_status, "(ii)i", NULL },
 };
