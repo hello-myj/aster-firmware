@@ -8,7 +8,7 @@
  * through the background session (start_file streams a sandboxed path —
  * the old in-memory copy route could not exceed 2 MiB) or the blocking
  * aster_audio_record capture. MP3 is decoded in firmware; playback sessions
- * are start_file only.
+ * also accept compressed input through audio_stream.h since ABI 3.10.
  *
  * 3.2: aster_audio_get_info is back. 2.0 dropped it because the native format
  * was "fixed at compile time" — but fixed *per board*, and this header is
@@ -30,7 +30,8 @@
 #define ASTER_AUDIO_PLAYING 1u
 #define ASTER_AUDIO_PAUSED  2u
 
-/* Native format descriptor (asked for with aster_audio_get_info). The reference
+/* Raw PCM/record/effect format (asked for with aster_audio_get_info). MP3
+ * playback may use its source rate without changing this input contract. The reference
  * port answers 16000/2/16 -- little-endian signed 16-bit, interleaved stereo
  * -- but read it from here rather than assuming: another board's codec may
  * run at 48 kHz, and its samples are the ones your buffer will meet. */
@@ -50,7 +51,7 @@ typedef struct {
 	uint32_t bytes_total;
 	uint32_t bytes_done;
 	uint32_t volume;      /* 0..100 */
-	uint32_t msec_done;   /* [1.13] elapsed, native PCM clock */
+	uint32_t msec_done;   /* [1.13] elapsed, output PCM clock */
 	uint32_t msec_total;  /* [1.13] duration estimate, 0 if unknown */
 } aster_audio_state_t;
 
@@ -65,8 +66,8 @@ ASTER_I("aster_audio_get_info") int32_t aster_audio_get_info(aster_audio_info_t 
 
 /* ---- 1.7 ---- */
 
-/* DAC volume 0..100 (0 = mute). The reference ES8311 port reaches +6 dB at
- * 100; loud sources may distort at the high end. This is a loudness control,
+/* DAC volume 0..100 (0 = mute). The quality ES8311 port caps DAC gain at
+ * 0 dB at 100 (older firmware used +6 dB). This is a loudness control,
  * not a linear amplitude scale. Applies immediately. */
 ASTER_I("aster_audio_set_volume") int32_t aster_audio_set_volume(int32_t percent);
 /* Returns 0..100, or a negative aster_error_t. */

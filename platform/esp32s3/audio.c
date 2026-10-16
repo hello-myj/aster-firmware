@@ -24,6 +24,7 @@
 #include <aster/audio.h>
 #include <aster/audio_stream.h>
 #include "audio_stream_ring.h"
+#include "audio_rate.h"
 #include <minimp3.h>
 
 LOG_MODULE_REGISTER(aster_audio, LOG_LEVEL_INF);
@@ -32,6 +33,7 @@ LOG_MODULE_REGISTER(aster_audio, LOG_LEVEL_INF);
 #define ADC_ADDR 0x41 /* ES7210 (AD0 high); 0x40 tried as fallback */
 
 #define AUDIO_BLOCK     512
+#define AUDIO_TX_MAX    1536
 #define AUDIO_NBLOCKS   6
 #define AUDIO_TIMEOUT   2000
 #define AUDIO_VOL_DEF   70
@@ -70,6 +72,9 @@ static bool pa_on;
 static enum i2s_dir active_dir;
 static uint8_t i2s_queued;
 static uint8_t g_vol = AUDIO_VOL_DEF;
+/* Protected by audio_lock; raw PCM/record stay at the ABI native format. */
+static uint32_t output_rate = CONFIG_ASTER_AUDIO_RATE;
+static size_t output_block = AUDIO_BLOCK;
 static K_MUTEX_DEFINE(audio_lock);
 static K_MUTEX_DEFINE(sess_mu);
 static K_MUTEX_DEFINE(effect_mu);
@@ -87,6 +92,7 @@ static struct {
 	uint8_t *pcm;
 	size_t size;
 	size_t off;
+	uint32_t fraction;
 	bool playing;
 } effects[EFFECT_SLOTS];
 
@@ -95,6 +101,7 @@ static struct {
  const int16_t *pcm;
  size_t frames, off;
  unsigned gain, priority;
+ uint32_t fraction;
 } ui_voice;
 
 static struct {
@@ -105,6 +112,7 @@ static struct {
 	size_t win_off;
 	size_t file_base;
 	uint32_t pcm_done;
+	uint32_t pcm_rate;
 	uint32_t msec_total;
 	uint32_t seek_msec;
 	uint32_t state;
@@ -135,13 +143,12 @@ static struct {
 	int16_t frame[MINIMP3_MAX_SAMPLES_PER_FRAME];
 	int16_t fifo[MP3_FIFO_SAMP];
 	unsigned fifo_n;
-	uint32_t frac;
 	int hz;
 	int ch;
 	unsigned wrote;
 } mp3p __attribute__((section(".ext_ram.bss.mp3p"), aligned(16)));
 
-K_MEM_SLAB_DEFINE_STATIC(tx_slab, AUDIO_BLOCK, AUDIO_NBLOCKS, 32);
+K_MEM_SLAB_DEFINE_STATIC(tx_slab, AUDIO_TX_MAX, AUDIO_NBLOCKS, 32);
 K_MEM_SLAB_DEFINE_STATIC(rx_slab, AUDIO_BLOCK, AUDIO_NBLOCKS, 32);
 
 /* Half-scale 64-sample sine (one period). */
@@ -168,10 +175,8 @@ static int codec_rd(uint8_t addr, uint8_t reg, uint8_t *val)
 
 static uint8_t vol_to_reg(uint8_t percent)
 {
-	/* REG32 is linear in dB: 0x00 = -95.5 dB, 0xBF = 0 dB, 0xFF = +32 dB.
-	 * Preserve the old mapping through 80 (80 = -8 dB), then extend the top
-	 * of the 0..100 ABI scale to +6 dB. Hot mastered tracks can distort at
-	 * the high end; no software gain is applied to the PCM samples. */
+	/* Keep <=80 unchanged; map 80..100 from -8dB to 0dB. Positive DAC
+     * gain clips normally mastered music and is not a quality control. */
 	int db10;
 	int reg;
 
@@ -179,13 +184,13 @@ static uint8_t vol_to_reg(uint8_t percent)
 		return 0;
 	}
 	db10 = percent <= 80 ? -400 + (int)percent * 4 :
-		-80 + ((int)percent - 80) * 7;
+		-80 + ((int)percent - 80) * 4;
 	reg = (db10 * 2) / 10 + 191;
 	if (reg < 1) {
 		reg = 1;
 	}
-	if (reg > 0xCB) {
-		reg = 0xCB;
+	if (reg > 0xBF) {
+		reg = 0xBF;
 	}
 	return (uint8_t)reg;
 }
@@ -446,9 +451,9 @@ static int i2s_apply(enum i2s_dir dir, struct k_mem_slab *slab)
 		.channels = CONFIG_ASTER_AUDIO_CHANNELS,
 		.format = I2S_FMT_DATA_FORMAT_I2S,
 		.options = I2S_OPT_FRAME_CLK_CONTROLLER | I2S_OPT_BIT_CLK_CONTROLLER,
-		.frame_clk_freq = CONFIG_ASTER_AUDIO_RATE,
+		.frame_clk_freq = dir == I2S_DIR_TX ? output_rate : CONFIG_ASTER_AUDIO_RATE,
 		.mem_slab = slab,
-		.block_size = AUDIO_BLOCK,
+		.block_size = dir == I2S_DIR_TX ? output_block : AUDIO_BLOCK,
 		.timeout = AUDIO_TIMEOUT,
 	};
 	int err = i2s_configure(i2s_dev, dir, &cfg);
@@ -458,19 +463,24 @@ static int i2s_apply(enum i2s_dir dir, struct k_mem_slab *slab)
 	return err;
 }
 
+/* ES8311 MCLK=256fs clock ratios, matching Espressif's coefficient table.
+ * 22.05..48k DAC OSR is 0x10; 8..16k uses 0x20. I2S supplies MCLK/BCLK. */
+static int i2s_setup_rate(enum i2s_dir dir, uint32_t rate)
+{
+    if (active_dir) i2s_shutdown();
+    output_rate = rate;
+    output_block = audio_rate_block(rate);
+    int err = codec_wr(DAC_ADDR, 0x04, rate > 16000 ? 0x10 : 0x20);
+    if (err) return err;
+    err = i2s_apply(dir, dir == I2S_DIR_TX ? &tx_slab : &rx_slab);
+    if (err) return err;
+    active_dir = dir;
+    i2s_queued = 0;
+    return 0;
+}
 static int i2s_setup(enum i2s_dir dir)
 {
-	if (active_dir) {
-		i2s_shutdown();
-	}
-
-	int err = i2s_apply(dir, (dir == I2S_DIR_TX) ? &tx_slab : &rx_slab);
-	if (err) {
-		return err;
-	}
-	active_dir = dir;
-	i2s_queued = 0;
-	return 0;
+    return i2s_setup_rate(dir, CONFIG_ASTER_AUDIO_RATE);
 }
 
 /* START only after two blocks are queued: one is pulled into DMA, the
@@ -503,36 +513,32 @@ static int i2s_submit(void *blk, bool *started)
 	 * Separate voices let a movement cue finish underneath an eat cue. */
 	k_mutex_lock(&effect_mu, K_FOREVER);
 	int16_t *dst = blk;
-	size_t bytes[EFFECT_SLOTS];
-	for (int slot = 0; slot < EFFECT_SLOTS; slot++) {
-		bytes[slot] = effects[slot].playing ?
-			MIN(effects[slot].size - effects[slot].off, (size_t)AUDIO_BLOCK) : 0;
-	}
- size_t ui_frames = ui_voice.pcm ? MIN(ui_voice.frames-ui_voice.off,
-                                      AUDIO_BLOCK/ASTER_PLAT_AUDIO_FRAME) : 0;
-	for (size_t i = 0; i < AUDIO_BLOCK / sizeof(int16_t); i++) {
-		int32_t value = dst[i];
-		for (int slot = 0; slot < EFFECT_SLOTS; slot++) {
-			if (i * sizeof(int16_t) < bytes[slot]) {
-				const int16_t *src = (const int16_t *)(effects[slot].pcm +
-									effects[slot].off);
-				value += src[i];
-			}
-		}
-  size_t frame=i/CONFIG_ASTER_AUDIO_CHANNELS;
-  if(frame<ui_frames) value += (int32_t)ui_voice.pcm[ui_voice.off+frame]*(int32_t)ui_voice.gain/1000;
-		dst[i] = (int16_t)CLAMP(value, -32768, 32767);
-	}
-	for (int slot = 0; slot < EFFECT_SLOTS; slot++) {
-		effects[slot].off += bytes[slot];
-		if (effects[slot].off >= effects[slot].size) {
-			effects[slot].playing = false;
-		}
-	}
- ui_voice.off += ui_frames;
- if(ui_voice.off>=ui_voice.frames) ui_voice.pcm=NULL;
+    for (size_t i = 0; i < output_block / ASTER_PLAT_AUDIO_FRAME; ++i) {
+        int32_t l = dst[2*i], r = dst[2*i+1];
+        for (int slot = 0; slot < EFFECT_SLOTS; ++slot) {
+            if (!effects[slot].playing) continue;
+            size_t frame = effects[slot].off / ASTER_PLAT_AUDIO_FRAME;
+            size_t frames = effects[slot].size / ASTER_PLAT_AUDIO_FRAME;
+            const int16_t *pcm = (const int16_t *)effects[slot].pcm;
+            l += audio_rate_sample(pcm, frames, 2, 0, frame, effects[slot].fraction, output_rate);
+            r += audio_rate_sample(pcm, frames, 2, 1, frame, effects[slot].fraction, output_rate);
+            audio_rate_advance(&frame, &effects[slot].fraction, CONFIG_ASTER_AUDIO_RATE, output_rate);
+            effects[slot].off = MIN(frame * ASTER_PLAT_AUDIO_FRAME, effects[slot].size);
+            if (effects[slot].off == effects[slot].size) effects[slot].playing = false;
+        }
+        if (ui_voice.pcm) {
+            int32_t v = audio_rate_sample(ui_voice.pcm, ui_voice.frames, 1, 0,
+                                         ui_voice.off, ui_voice.fraction, output_rate);
+            v = v * (int32_t)ui_voice.gain / 1000;
+            l += v; r += v;
+            audio_rate_advance(&ui_voice.off, &ui_voice.fraction, CONFIG_ASTER_AUDIO_RATE, output_rate);
+            if (ui_voice.off >= ui_voice.frames) ui_voice.pcm = NULL;
+        }
+        dst[2*i] = (int16_t)CLAMP(l, -32768, 32767);
+        dst[2*i+1] = (int16_t)CLAMP(r, -32768, 32767);
+    }
 	k_mutex_unlock(&effect_mu);
-	int err = i2s_write(i2s_dev, blk, AUDIO_BLOCK);
+	int err = i2s_write(i2s_dev, blk, output_block);
 
 	if (err) {
 		k_mem_slab_free(&tx_slab, blk);
@@ -560,7 +566,7 @@ static int feed_silence(bool *started)
 	if (err) {
 		return err;
 	}
-	memset(blk, 0, AUDIO_BLOCK);
+	memset(blk, 0, output_block);
 	return i2s_submit(blk, started);
 }
 
@@ -613,6 +619,7 @@ static void sess_clear_locked(void)
 	sess.win_off = 0;
 	sess.file_base = 0;
 	sess.pcm_done = 0;
+	sess.pcm_rate = CONFIG_ASTER_AUDIO_RATE;
 	sess.msec_total = 0;
 	sess.seek_msec = 0;
 	sess.pause = false;
@@ -674,7 +681,7 @@ static uint32_t mp3_msec_est(const uint8_t *h, size_t payload)
 
 static uint32_t sess_msec_now(void)
 {
-	uint32_t ms = (uint32_t)((uint64_t)sess.pcm_done * 1000u / CONFIG_ASTER_AUDIO_RATE);
+	uint32_t ms = (uint32_t)((uint64_t)sess.pcm_done * 1000u / (sess.pcm_rate ? sess.pcm_rate : CONFIG_ASTER_AUDIO_RATE));
 
 	if (sess.msec_total && ms > sess.msec_total) {
 		ms = sess.msec_total;
@@ -739,7 +746,6 @@ static void mp3_reset(void)
 {
 	mp3dec_init(&mp3p.dec);
 	mp3p.fifo_n = 0;
-	mp3p.frac = 0;
 	mp3p.hz = 0;
 	mp3p.ch = 0;
 	mp3p.wrote = 0;
@@ -748,7 +754,7 @@ static void mp3_reset(void)
 static int fifo_write_block(bool *started)
 {
 	void *blk = NULL;
-	unsigned n = AUDIO_BLOCK / sizeof(int16_t);
+	unsigned n = output_block / sizeof(int16_t);
 	int err;
 
 	if (mp3p.fifo_n < n) {
@@ -758,7 +764,7 @@ static int fifo_write_block(bool *started)
 	if (err) {
 		return err;
 	}
-	memcpy(blk, mp3p.fifo, AUDIO_BLOCK);
+	memcpy(blk, mp3p.fifo, output_block);
 	mp3p.fifo_n -= n;
 	if (mp3p.fifo_n) {
 		memmove(mp3p.fifo, mp3p.fifo + n, mp3p.fifo_n * sizeof(int16_t));
@@ -774,7 +780,7 @@ static int fifo_flush_blocks(bool *started)
 {
 	int err = 0;
 
-	while (mp3p.fifo_n >= (AUDIO_BLOCK / sizeof(int16_t))) {
+	while (mp3p.fifo_n >= (output_block / sizeof(int16_t))) {
 		err = fifo_write_block(started);
 		if (err) {
 			return err;
@@ -790,7 +796,7 @@ static int fifo_drain(bool *started)
 	if (err || mp3p.fifo_n == 0) {
 		return err;
 	}
-	while (mp3p.fifo_n < (AUDIO_BLOCK / sizeof(int16_t))) {
+	while (mp3p.fifo_n < (output_block / sizeof(int16_t))) {
 		mp3p.fifo[mp3p.fifo_n++] = 0;
 	}
 	err = fifo_write_block(started);
@@ -818,40 +824,31 @@ static int fifo_push_stereo(int16_t l, int16_t r, bool *started)
 	return 0;
 }
 
-static int resample_frame(const int16_t *src, int samples, int ch, int hz,
+static int output_mp3_frame(const int16_t *src, int samples, int ch, int hz,
 			  bool *started)
 {
-	uint32_t step;
-	int err = 0;
-
-	if (samples <= 0 || ch < 1 || hz < 8000) {
-		return 0;
-	}
-	mp3p.hz = hz;
-	mp3p.ch = ch;
-	step = ((uint32_t)hz << 16) / CONFIG_ASTER_AUDIO_RATE;
-	if (step == 0) {
-		step = 1;
-	}
-	while ((mp3p.frac >> 16) < (uint32_t)samples) {
-		unsigned i = mp3p.frac >> 16;
-		int16_t l;
-		int16_t r;
-
-		if (ch == 1) {
-			l = r = src[i];
-		} else {
-			l = src[2 * i];
-			r = src[2 * i + 1];
-		}
-		err = fifo_push_stereo(l, r, started);
-		if (err) {
-			return err;
-		}
-		mp3p.frac += step;
-	}
-	mp3p.frac -= (uint32_t)samples << 16;
-	return 0;
+    if (samples <= 0 || ch < 1 || ch > 2 || !audio_mp3_rate(hz)) return -EPROTO;
+    if (!mp3p.hz) {
+        if (*started && output_rate != (uint32_t)hz) return -EPROTO;
+        int err = output_rate == (uint32_t)hz ? 0 : i2s_setup_rate(I2S_DIR_TX, (uint32_t)hz);
+        if (err) return err;
+        k_mutex_lock(&sess_mu, K_FOREVER);
+        sess.pcm_rate = (uint32_t)hz;
+        k_mutex_unlock(&sess_mu);
+        LOG_INF("MP3 native output: %d Hz %d channels, I2S block=%u", hz, ch, (unsigned)output_block);
+    } else if (mp3p.hz != hz) {
+        /* A stream cannot change clocks after DMA starts; reject safely. */
+        return -EPROTO;
+    }
+    mp3p.hz = hz;
+    mp3p.ch = ch;
+    for (int i = 0; i < samples; ++i) {
+        int16_t l = src[ch == 1 ? i : 2*i];
+        int16_t r = src[ch == 1 ? i : 2*i+1];
+        int err = fifo_push_stereo(l, r, started);
+        if (err) return err;
+    }
+    return 0;
 }
 
 /* Decode at most one MP3 frame into the PCM fifo, then push full I2S blocks.
@@ -878,7 +875,7 @@ static int mp3_pump(const uint8_t *buf, size_t size, size_t *off, bool *started,
 				      mp3p.frame, &info);
 	if (samples > 0 && info.frame_bytes > 0) {
 		*off += (size_t)info.frame_bytes;
-		err = resample_frame(mp3p.frame, samples, info.channels, info.hz,
+		err = output_mp3_frame(mp3p.frame, samples, info.channels, info.hz,
 				     started);
 		if (err) {
 			return err;
@@ -1177,7 +1174,7 @@ static int apply_seek_io(uint32_t msec)
 	sess.off = off;
 	sess.win_len = 0;
 	sess.win_off = 0;
-	sess.pcm_done = (uint32_t)((uint64_t)msec * CONFIG_ASTER_AUDIO_RATE / 1000u);
+	sess.pcm_done = (uint32_t)((uint64_t)msec * (sess.pcm_rate ? sess.pcm_rate : CONFIG_ASTER_AUDIO_RATE) / 1000u);
 	if (sess.mp3) {
 		mp3_reset();
 		(void)mp3_align_sync();
@@ -1312,7 +1309,7 @@ static void player_loop(void *a, void *b, void *c)
 				k_mutex_lock(&audio_lock, K_FOREVER);
 				(void)es8311_dac_on();
 				pa_set(true);
-				(void)i2s_setup(I2S_DIR_TX);
+				(void)i2s_setup_rate(I2S_DIR_TX, output_rate);
 				k_mutex_unlock(&audio_lock);
 				continue;
 			}
@@ -1403,7 +1400,7 @@ static void player_loop(void *a, void *b, void *c)
 			sess.off = off;
             if (from_stream) {
                 input_stream.consumed = off;
-                input_stream.played_ms = (uint32_t)((uint64_t)sess.pcm_done * 1000u / CONFIG_ASTER_AUDIO_RATE);
+                input_stream.played_ms = (uint32_t)((uint64_t)sess.pcm_done * 1000u / (sess.pcm_rate ? sess.pcm_rate : CONFIG_ASTER_AUDIO_RATE));
             }
 			k_mutex_unlock(&sess_mu);
             if (waiting_input && !started && !err) k_sem_take(&play_wake, K_MSEC(20));
@@ -1566,7 +1563,7 @@ static int record_blocks(uint8_t *pcm, size_t size)
 
 	i2s_shutdown();
 	/* TX first: RX then becomes clock slave and shares BCK/WS. */
-	err = i2s_apply(I2S_DIR_TX, &tx_slab);
+	err = i2s_setup(I2S_DIR_TX);
 	if (err) {
 		return err;
 	}
@@ -1650,10 +1647,9 @@ static int record_blocks(uint8_t *pcm, size_t size)
 	return (off >= size) ? 0 : -EIO;
 }
 
-/* The native PCM format, reported rather than assumed. These are the same
- * numbers this file programs into the codec and the I2S registers -- which is
- * the point: there is one source (the board's Kconfig) and both the hardware
- * bring-up and every caller read it from there. */
+/* Raw PCM, recording and effect asset format. MP3 playback uses the decoded
+ * sample rate privately; never expose a transient music rate as the format
+ * required for the next raw-PCM call. */
 int aster_plat_audio_info(uint32_t *rate, uint32_t *channels, uint32_t *bits)
 {
 	if (rate) {
@@ -1938,7 +1934,7 @@ int aster_plat_audio_ui_play(const int16_t *pcm, size_t frames, unsigned gain,
  if(ui_voice.pcm && ui_voice.priority>priority) {
   k_mutex_unlock(&effect_mu);k_mutex_unlock(&sess_mu);return -EAGAIN;
  }
- ui_voice.pcm=pcm;ui_voice.frames=frames;ui_voice.off=0;
+ ui_voice.pcm=pcm;ui_voice.frames=frames;ui_voice.off=0;ui_voice.fraction=0;
  ui_voice.gain=gain;ui_voice.priority=priority;
  k_mutex_unlock(&effect_mu);
  if(sess.state==ASTER_AUDIO_IDLE) {
@@ -1997,6 +1993,7 @@ retry:
 		return -EINVAL;
 	}
 	effects[handle - 1].off = 0;
+	effects[handle - 1].fraction = 0;
 	effects[handle - 1].playing = true;
 	k_mutex_unlock(&effect_mu);
 	if (sess.state == ASTER_AUDIO_IDLE) {
@@ -2026,6 +2023,7 @@ int aster_plat_audio_effect_unload(uint32_t handle)
 	k_mutex_lock(&effect_mu, K_FOREVER);
 	effects[handle - 1].playing = false;
 	effects[handle - 1].off = 0;
+	effects[handle - 1].fraction = 0;
 	if (effects[handle - 1].pcm) {
 		aster_psram_free(effects[handle - 1].pcm);
 		effects[handle - 1].pcm = NULL;
@@ -2041,6 +2039,7 @@ void aster_plat_audio_effect_reset(void)
 	for (int i = 0; i < EFFECT_SLOTS; i++) {
 		effects[i].playing = false;
 		effects[i].off = 0;
+	effects[i].fraction = 0;
 		if (effects[i].pcm) {
 			aster_psram_free(effects[i].pcm);
 			effects[i].pcm = NULL;
@@ -2057,6 +2056,7 @@ int aster_plat_audio_stop(void)
 	for (int i = 0; i < EFFECT_SLOTS; i++) {
 		effects[i].playing = false;
 		effects[i].off = 0;
+	effects[i].fraction = 0;
 	}
 	k_mutex_unlock(&effect_mu);
 	if (sess.state == ASTER_AUDIO_IDLE) {
@@ -2251,6 +2251,7 @@ int aster_plat_audio_start_path(const char *path)
 	sess.win_len = 0;
 	sess.win_off = 0;
 	sess.pcm_done = 0;
+	sess.pcm_rate = CONFIG_ASTER_AUDIO_RATE;
 	sess.seek_pending = false;
 	sess.pause = false;
 	sess.stop = false;
@@ -2370,7 +2371,7 @@ int aster_plat_audio_stream_open(uint32_t codec)
     input_stream.state = ASTER_AUDIO_STREAM_BUFFERING;
     input_stream.buffering = true;
     sess.buf=window;sess.size=SIZE_MAX;sess.off=0;sess.win_len=0;sess.win_off=0;
-    sess.pcm_done=0;sess.msec_total=0;sess.err=0;sess.pause=false;sess.stop=false;
+    sess.pcm_done=0;sess.pcm_rate=CONFIG_ASTER_AUDIO_RATE;sess.msec_total=0;sess.err=0;sess.pause=false;sess.stop=false;
     sess.mp3=true;sess.from_file=false;sess.from_stream=true;sess.effect_only=false;
     sess.seek_pending=false;sess.state=ASTER_AUDIO_PLAYING;
     uint32_t handle=input_stream.handle;
