@@ -175,8 +175,10 @@ static int codec_rd(uint8_t addr, uint8_t reg, uint8_t *val)
 
 static uint8_t vol_to_reg(uint8_t percent)
 {
-	/* Keep <=80 unchanged; map 80..100 from -8dB to 0dB. Positive DAC
-     * gain clips normally mastered music and is not a quality control. */
+	/* REG32 is linear in dB: 0x00 = -95.5 dB, 0xBF = 0 dB, 0xFF = +32 dB.
+	 * Preserve the old mapping through 80 (80 = -8 dB), then extend the top
+	 * of the 0..100 ABI scale to +6 dB. Hot mastered tracks can distort at
+	 * the high end; no software gain is applied to the PCM samples. */
 	int db10;
 	int reg;
 
@@ -184,13 +186,13 @@ static uint8_t vol_to_reg(uint8_t percent)
 		return 0;
 	}
 	db10 = percent <= 80 ? -400 + (int)percent * 4 :
-		-80 + ((int)percent - 80) * 4;
+		-80 + ((int)percent - 80) * 7;
 	reg = (db10 * 2) / 10 + 191;
 	if (reg < 1) {
 		reg = 1;
 	}
-	if (reg > 0xBF) {
-		reg = 0xBF;
+	if (reg > 0xCB) {
+		reg = 0xCB;
 	}
 	return (uint8_t)reg;
 }
