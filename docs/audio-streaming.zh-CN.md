@@ -5,7 +5,7 @@
 ## 实现边界
 
 - 公共契约：`contract/include/aster/audio_stream.h`，open/write/finish/status/close五接口，feature18 `audio-stream`。正数会话句柄属于当前APP；数据先复制后返回，不保留WASM指针。退出、trap与初始化失败统一回收。
-- 后端：32 KiB PSRAM输入环＋16 KiB连续解码窗口，复用minimp3、16kHz立体声重采样和I²S输出。预缓冲约24 KiB或EOF后播放，欠载重新缓冲。按窗口跳过ID3，不整首复制或写SD。
+- 后端：32 KiB PSRAM输入环＋16 KiB连续解码窗口，复用minimp3和I²S输出；音质优化分支按MP3源采样率输出，详见[音质验证](audio-quality.zh-CN.md)。预缓冲约24 KiB或EOF后播放，欠载重新缓冲。按窗口跳过ID3，不整首复制或写SD。
 - SDK示例：`apps/online-music`，申请公开128kbps MP3地址，固定2KiB待写块，保存部分写入尾部；成功HTTP EOF才finish，等待DONE，失败直接close。切歌先回收旧会话。
 - SDK/开发手册同步ABI3.10；模拟器识别五个导入但不宣告此可选能力，返回ENODEV，没有用整文件播放冒充流播放。
 
