@@ -1419,7 +1419,22 @@ bool aster_plat_display_canvas_ready(void)
 
 uint8_t *aster_plat_display_canvas_back(void)
 {
-	return aster_plat_display_canvas_ready() ? s_front[s_flip] : NULL;
+	if (!aster_plat_display_canvas_ready()) {
+		return NULL;
+	}
+#if IS_ENABLED(CONFIG_ASTER_DISP_ASYNC)
+	/* The rasterizer writes immediately after this returns. Its selected
+	 * buffer may still be read by the display worker two presents earlier;
+	 * waiting in canvas_present() is too late to protect those pixels.
+	 * There is one poster, so after this wait nobody can re-arm the slot
+	 * until that same poster presents. Return the token for present/drain
+	 * and repeated back() calls; do not wait for the OTHER buffer. */
+	uint8_t slot = (uint8_t)(ASTER_DISP_FLIP_SLOT0 + s_flip);
+
+	disp_slot_acquire(slot);
+	k_sem_give(&s_slots[slot].free);
+#endif
+	return s_front[s_flip];
 }
 
 int aster_plat_display_canvas_present(void)
@@ -1433,10 +1448,9 @@ int aster_plat_display_canvas_present(void)
 
 	panel_geom(&pw, &ph);
 #if IS_ENABLED(CONFIG_ASTER_DISP_ASYNC)
-	/* Wait for this slot's previous send before the engine draws into the
-	 * buffer again -- i.e. acquire happens one frame ahead of the draw, so
-	 * the caller never stalls right after rendering. The other slot keeps
-	 * streaming meanwhile; it is reading the other buffer. */
+	/* back() already waited before rasterization. Take ownership for this
+	 * post; its token was returned so repeated back()/drain remain valid.
+	 * The other slot can continue streaming its different buffer. */
 	disp_slot_acquire(slot);
 #endif
 	/* The engine's stores left panel-order bytes dirty in the write-back

@@ -43,9 +43,21 @@ class Client:
             prefix = 'MQTT' if line.startswith('aster net mqtt ') else 'HTTP' if line.startswith('aster net http ') else 'NET' if line.startswith('aster net ') else None
             response = re.search(r'^'+prefix+r' ', text, re.M) if prefix else None
             # Terminal wraps can split command echo across physical lines.
-            echoed = ''.join(line.split()) in re.sub(r'\s+', '', text)
-            prompt_after = text.rfind('aster:~$') > (response.start() if response else -1)
-            if echoed and prompt_after and (not prefix or response) and time.monotonic()-last_data >= .12:
+            compact = re.sub(r'\s+', '', text)
+            compact_line = ''.join(line.split())
+            echo_at = compact.find(compact_line)
+            echoed = echo_at >= 0
+            # Async APP logs can print a prompt before the command echo. That
+            # prompt is not completion; require one after the entire echo.
+            prompt_after = (compact.rfind('aster:~$') >= echo_at + len(compact_line)
+                            and text.rfind('aster:~$') > (response.start() if response else -1))
+            ready_prompt = re.search(r'aster:~\$\s*$', text) is not None
+            # A log redraw can repeat the entire still-editing command after
+            # the prompt. It is not an idle prompt, and touch injection also
+            # has an explicit acknowledgement to wait for.
+            touch_done = (not line.startswith('hw touch ') or
+                          'injected touch ' in text or 'usage:' in text)
+            if echoed and prompt_after and ready_prompt and touch_done and (not prefix or response) and time.monotonic()-last_data >= .12:
                 self.log.write('\n> '+line+'\n'+text+'\n')
                 self.log.flush()
                 return text

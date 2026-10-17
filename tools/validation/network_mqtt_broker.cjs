@@ -58,7 +58,7 @@ for (const [name,port] of [['server',8883],['wrong',8884],['expired',8885]]) {
 servers.push(track(http.createServer((req,res)=>{
   const data=Buffer.from('aster-mqtt-http-coexist');
   res.writeHead(200,{'Content-Length':data.length});res.end(data);
-}),9080));
+}),Number(process.env.ASTER_MQTT_HTTP_PORT || 9080)));
 const control=http.createServer((req,res)=>{
   let body='';req.on('data',b=>{body+=b;if(body.length>8192)req.destroy();});
   req.on('end',()=>{

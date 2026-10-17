@@ -1,0 +1,18 @@
+[app]
+id="aster.validation.networkstress"
+name="Network Stress"
+description="本地N4复合验收，完成后卸载。"
+version="1.0.0"
+abi="3.11.0"
+abi_min="3.11"
+aot=true
+stack=24576
+initial_memory=524288
+max_memory=1048576
+heap=131072
+requires=["network","http","tls","mqtt","display","audio-out","filesystem"]
+permissions=["net","fs"]
+sources=["src/main.c"]
+assets=["bed.wav","cue.wav","tile.bmp"]
+[build]
+defines=['N4_HOST="127.0.0.1"']

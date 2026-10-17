@@ -32,6 +32,13 @@ static uint32_t s_band_bytes;
 static uint32_t s_w, s_h;
 static int32_t s_tx, s_ty;
 static int s_tpressed;
+/* The touch poll preserves DOWN/UP even across a busy render. Preserve them
+ * through the LVGL timer boundary too; latest-state-only loses short taps.
+ * Same-state motion is coalesced. All producers/reads run on the UI worker. */
+#define POINTER_QUEUE_SIZE 16u
+struct pointer_sample { int32_t x, y; int pressed; };
+static struct pointer_sample s_pointer_queue[POINTER_QUEUE_SIZE];
+static unsigned s_pointer_head, s_pointer_count;
 static int s_ready;
 static bool s_band_warned;	/* a rejected band is already in the log */
 
@@ -148,6 +155,15 @@ static void flush_wait_cb(lv_display_t *disp)
 static void pointer_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
 	ARG_UNUSED(indev);
+	if (s_pointer_count) {
+		struct pointer_sample p = s_pointer_queue[s_pointer_head];
+		s_pointer_head = (s_pointer_head + 1u) % POINTER_QUEUE_SIZE;
+		s_pointer_count--;
+		s_tx = p.x;
+		s_ty = p.y;
+		s_tpressed = p.pressed;
+	}
+	data->continue_reading = s_pointer_count != 0;
 	data->point.x = s_tx;
 	data->point.y = s_ty;
 	data->state = s_tpressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
@@ -307,9 +323,23 @@ void aster_ui_lvgl_resync_window(void)
 
 void aster_ui_lvgl_pointer(uint32_t x, uint32_t y, int pressed)
 {
-	s_tx = (int32_t)x;
-	s_ty = (int32_t)y;
-	s_tpressed = pressed ? 1 : 0;
+	struct pointer_sample p = { (int32_t)x, (int32_t)y, pressed ? 1 : 0 };
+	if (s_pointer_count) {
+		unsigned tail = (s_pointer_head + s_pointer_count - 1u) % POINTER_QUEUE_SIZE;
+		if (s_pointer_queue[tail].pressed == p.pressed) {
+			s_pointer_queue[tail] = p;
+			return;
+		}
+	}
+	if (s_pointer_count == POINTER_QUEUE_SIZE) {
+		/* Bounded overload: retain the newest state, including release,
+		 * rather than let a full queue leave the pointer stuck down. */
+		s_pointer_head = (s_pointer_head + 1u) % POINTER_QUEUE_SIZE;
+		s_pointer_count--;
+	}
+	unsigned tail = (s_pointer_head + s_pointer_count) % POINTER_QUEUE_SIZE;
+	s_pointer_queue[tail] = p;
+	s_pointer_count++;
 }
 
 void aster_ui_lvgl_request_frame(void)
