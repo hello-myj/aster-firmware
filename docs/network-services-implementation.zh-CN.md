@@ -404,6 +404,10 @@ N5按子项独立实施和验收，不把所有可选协议默认加入。每项
 
 #### N5.1 WebSocket/WSS客户端
 
+接续实施与测试操作见[Cursor交接文档](network-n5-cursor-handoff.zh-CN.md)。本轮本地检查点提交不表示阶段完成。
+
+当前进度（2026-10-17）：实施固件内部协议、共享worker服务及CLI，默认配置未启用，公共ABI仍3.11。固件122项主机检查通过，微雪15类LAN CLI、断网新建连接、WSS/HTTP图形并发内容校验及实体交互通过；LCKFB G1及SDK/APP G2尚未验收；详见[WebSocket CLI记录](network-websocket-cli.zh-CN.md)。
+
 - [ ] SDK提供异步connect/status/send/recv/close，保留文本/二进制消息边界。
 - [ ] 初始一条WebSocket、单消息最多4 KiB、有界分片；共用两个APP传输名额和一个TLS名额。
 - [ ] 实现客户端掩码、ping/pong、关闭握手、分片与慢消费，测消息重组峰值；不能为远端长度分配无限缓存。

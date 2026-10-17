@@ -70,6 +70,13 @@ class NetworkCapture(unittest.TestCase):
         ], 'aster net http stats')
         self.assertIn('HTTP active=0 closing=0', result)
 
+    def test_websocket_command_requires_ws_response(self):
+        result, _ = self.run_command([
+            b'aster:~$ aster net ws stats\r\n', b'',
+            b'WS active=0 closing=0\r\naster:~$ ', b'', b'',
+        ], 'aster net ws stats')
+        self.assertIn('WS active=0 closing=0', result)
+
     def test_missing_completion_prompt_times_out(self):
         clock = Clock()
         serial = Serial(clock, [b'aster:~$ hw touch tap 1 2\r\n'])

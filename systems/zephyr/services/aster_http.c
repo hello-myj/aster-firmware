@@ -2,6 +2,9 @@
 #include "aster_http.h"
 #include "aster_mem.h"
 #include "aster_net.h"
+#if defined(CONFIG_ASTER_WEBSOCKET)
+#include "aster_ws.h"
+#endif
 #if defined(CONFIG_ASTER_MQTT)
 #include "aster_mqtt.h"
 #endif
@@ -414,6 +417,9 @@ static void http_worker(void *a, void *b, void *c)
 #endif
     for (;;) {
         bool active = http_tick();
+#if defined(CONFIG_ASTER_WEBSOCKET)
+        active |= aster_ws_svc_tick();
+#endif
 #if defined(CONFIG_ASTER_MQTT)
         active |= aster_mqtt_svc_tick();
 #endif

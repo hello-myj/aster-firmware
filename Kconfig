@@ -31,6 +31,15 @@ config ASTER_MQTT
 	  QoS 0/1, clean sessions, bounded queues, reconnect and resubscribe.
 	  MQTTS reuses the verified TLS backend when ASTER_HTTP_TLS is enabled.
 
+config ASTER_WEBSOCKET
+	bool "Bounded WebSocket client (shared protocol worker)"
+	depends on ASTER_HTTP
+	select CSPRNG_NEEDED
+	default n
+	help
+	  One client, 4 KiB messages, RFC 6455 upgrade and verified WSS.
+	  Shares TCP slots, TLS admission and the existing HTTP/MQTT worker.
+
 config ASTER_HTTP_TLS
 	bool "Verified HTTPS client"
 	depends on ASTER_HTTP && MBEDTLS

@@ -9,6 +9,9 @@
 #include "aster_mqtt_cmd.h"
 #endif
 #include "aster_net.h"
+#if defined(CONFIG_ASTER_WEBSOCKET)
+#include "aster_ws_cmd.h"
+#endif
 #include "aster_mem.h"
 #include <errno.h>
 #include <stdlib.h>
@@ -185,6 +188,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(udp_cmds,
     SHELL_CMD_ARG(recvfrom, NULL, "HANDLE --max-bytes N (0..1200)", cmd_recv, 4, 0),
     SHELL_SUBCMD_SET_END);
 static const struct shell_static_entry net_entries[] = {
+#if defined(CONFIG_ASTER_WEBSOCKET)
+    SHELL_CMD(ws, &aster_ws_cmds, "bounded WebSocket/WSS", NULL),
+#endif
 #if defined(CONFIG_ASTER_MQTT)
     SHELL_CMD(mqtt, &aster_mqtt_cmds, "bounded MQTT/MQTTS", NULL),
 #endif
