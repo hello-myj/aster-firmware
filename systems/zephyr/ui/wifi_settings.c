@@ -7,6 +7,7 @@
 #include "font_sd.h"
 #include "ui_lvgl.h"
 #include "ui_wifi.h"
+#include "aster_mdns.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -521,6 +522,9 @@ static void deleted(lv_event_t *e)
 	root = NULL;
 	owner_close = NULL;
 	reset_view();
+#if IS_ENABLED(CONFIG_ASTER_MDNS)
+	(void)aster_mdns_svc_release(ASTER_MDNS_OWNER_UI);
+#endif
 }
 bool aster_wifi_settings_is_open(void) { return root != NULL; }
 void aster_wifi_settings_warm(void)
@@ -553,6 +557,10 @@ void aster_wifi_settings_open(lv_obj_t *parent, void (*close_owner)(void))
 	aster_wifi_settings_warm();
 	show(WIFI_LIST, NULL);
 	scan_cb(NULL);
+#if IS_ENABLED(CONFIG_ASTER_MDNS)
+	/* Plan A: publishing follows the settings page, no persistent toggle. */
+	(void)aster_mdns_svc_acquire(ASTER_MDNS_OWNER_UI);
+#endif
 }
 void aster_wifi_settings_tick(void)
 {

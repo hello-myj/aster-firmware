@@ -22,3 +22,7 @@ endif()
 if(CONFIG_ASTER_WEBSOCKET)
   target_sources(app PRIVATE aster_ws_cmd.c)
 endif()
+
+if(CONFIG_ASTER_MDNS)
+  target_sources(app PRIVATE aster_mdns_cmd.c)
+endif()

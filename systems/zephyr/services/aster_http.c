@@ -8,6 +8,9 @@
 #if defined(CONFIG_ASTER_MQTT)
 #include "aster_mqtt.h"
 #endif
+#if defined(CONFIG_ASTER_MDNS)
+#include "aster_mdns.h"
+#endif
 #if defined(CONFIG_ASTER_HTTP_TLS)
 #include "aster_http_tls.h"
 #endif
@@ -422,6 +425,9 @@ static void http_worker(void *a, void *b, void *c)
 #endif
 #if defined(CONFIG_ASTER_MQTT)
         active |= aster_mqtt_svc_tick();
+#endif
+#if defined(CONFIG_ASTER_MDNS)
+        active |= aster_mdns_svc_tick();
 #endif
         k_sem_take(&http_wake, active ? K_MSEC(5) : K_FOREVER);
     }

@@ -39,3 +39,7 @@ endif()
 if(CONFIG_ASTER_WEBSOCKET)
   target_sources(app PRIVATE aster_ws.c aster_ws_codec.c)
 endif()
+
+if(CONFIG_ASTER_MDNS)
+  target_sources(app PRIVATE aster_mdns.c)
+endif()

@@ -40,6 +40,15 @@ config ASTER_WEBSOCKET
 	  One client, 4 KiB messages, RFC 6455 upgrade and verified WSS.
 	  Shares TCP slots, TLS admission and the existing HTTP/MQTT worker.
 
+config ASTER_MDNS
+	bool "Bounded mDNS name publisher (shared HTTP worker)"
+	depends on ASTER_HTTP
+	default n
+	help
+	  One system-owned multicast socket publishing <hostname>.local A
+	  records only while the Wi-Fi settings page or the diagnostic CLI
+	  holds it. No APP API, no new thread: ticked by the HTTP worker.
+
 config ASTER_HTTP_TLS
 	bool "Verified HTTPS client"
 	depends on ASTER_HTTP && MBEDTLS
