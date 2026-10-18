@@ -2,6 +2,10 @@
 
 交接日期：2026-10-17。本文件随固件源码提交；状态以本文件、实施方案和验证记录共同为准。当前提交是阶段性检查点，不是 N5.1 完成版本。不要仅因已提交就将阶段标题标为“已完成”。
 
+> 交接后进展（同日晚，feature/network-n5 分支）：第 5 节“补齐 LCKFB 的 G1”已完成——LCKFB 经 usbipd 接入（控制台 /dev/ttyUSB0、数据口 /dev/ttyACM1），CLI 15 类、断网恢复、图形并发（85 轮 WSS 回环 + 6 轮完整 16 KiB HTTP）与用户实体反馈通过，双板 WS/WSS 私有 PSRAM 样本一致；双板另各通过 13 项 G1 补充边界门禁（DNS/端口/各阶段取消/陈旧句柄/慢帧/慢消费/控制帧/耗尽/停滞期限/生命周期回收）。双板已恢复日常固件并核对哈希，测试句柄、CA、Node 对端与临时防火墙规则均已清理核实。证据见 `docs/validation/network-n5-ws-cli-2026-10-17-lckfb-g1.md` 与仓库外 `../diagnostics/network-n5-lckfb-20261017/`。
+
+> 第二轮进展（2026-10-18，三仓本地提交于 `feature/network-n5`，未推送）：第 6 节 G2 公共链路已实施——ABI 选定并实现为 3.12.0（ws.h 契约、WAMR 桥接与 owner 回收、固件 123 项主机检查含新增桥接 fixture、SDK 导入与 apps/ws-echo、模拟器真实 WS/WSS 95 项 Linux 通过含证书 fixture）。LCKFB 与微雪双板 APP 实机 G2 各自独立通过：明文与 WSS 真实回环内容校验、5 项 ABI 边界探针、CLI 预算争用明确拒绝、停 APP 自动回收、用户实体反馈确认；双板均恢复日常固件并核对哈希，CA/测试包/Node 对端已清理。模拟器双平台复跑完成：Windows 原生 Node v24.14.0 与 Linux Node v20.18.0 各 95 项全通过、0 跳过（含真实 SDK ws-echo 包与 HTTPS/MQTTS/WSS 证书夹具）。实机取消/trap 专项已双板执行（握手中取消受理、完成消息先于终态交付、trap 后 CRASHED 且配额即时回收），并记录一项 cancel 可见性偏差待评审（cancel 受理后至 worker 下一 tick 前 status 仍显示握手前状态；详见 G2 记录"实机取消/trap 专项"节）。剩余：逐项复核实施方案后方可标注阶段完成；N5.1 与第 6 节整体仍为实施中。证据见 `docs/validation/network-n5-ws-app-g2-2026-10-18.md` 与仓库外 `../diagnostics/network-n5-g2-20261017/`。主机收尾已全部完成：`Aster N5.1 local validation` 临时规则经管理员删除并核实计数 0，双平台复跑所用夹具 node 进程已按命令行精确停止并核实端口监听归零，开发板串口本轮未触碰。
+
 ## 1. 可以直接交给 Cursor 的任务指示
 
 > 请读取本文件、`docs/network-services-implementation.zh-CN.md`、`docs/network-websocket-cli.zh-CN.md` 和 `docs/validation/network-n5-ws-cli-2026-10-17.md`，接着实施网络计划。先核实工作区及开发板型号，补齐 LCKFB 的 N5.1 WebSocket/WSS CLI、异常恢复、资源和图形并发验收；随后封装 SDK/APP，完成 Windows/Linux 模拟器和双板 APP 验收。审查现有代码，有问题可以修改，但需要保留失败证据、补做受影响的回归。遵守实施方案 10.0 节 G1/G2 门槛，不能把构建或 CLI 成功当成完整交付。当前公共 ABI 为 3.11，尚无 WS APP 导入。按 N5 子项依次推进，N6 才统一网络 ABI 并移除旧网络兼容层。硬件需要切换、管理员操作或实体屏确认时明确通知我；反馈之前保持被验收 APP 运行。只做本地实施，不擅自推送、发布 Release、改 tag 或提交测试日志/图片/证书。

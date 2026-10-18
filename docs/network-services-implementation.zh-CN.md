@@ -406,12 +406,12 @@ N5按子项独立实施和验收，不把所有可选协议默认加入。每项
 
 接续实施与测试操作见[Cursor交接文档](network-n5-cursor-handoff.zh-CN.md)。本轮本地检查点提交不表示阶段完成。
 
-当前进度（2026-10-17）：实施固件内部协议、共享worker服务及CLI，默认配置未启用，公共ABI仍3.11。固件122项主机检查通过，微雪15类LAN CLI、断网新建连接、WSS/HTTP图形并发内容校验及实体交互通过；LCKFB G1及SDK/APP G2尚未验收；详见[WebSocket CLI记录](network-websocket-cli.zh-CN.md)。
+当前进度（2026-10-18）：实施固件内部协议、共享worker服务及CLI，默认配置未启用。双板G1（固件服务/CLI）已验收：两板15类LAN CLI、断网恢复、图形并发与实体反馈，各自再加13项补充边界门禁，WS/WSS私有PSRAM样本一致（18040/19887B）。G2已实施公共契约ABI 3.12.0（ws.h、六个aster_ws_*导入、websocket能力、WAMR桥接与会话回收）、SDK示例apps/ws-echo与模拟器真实WS/WSS，并在LCKFB与微雪各自通过APP实机门槛（明文与WSS回环内容+边界探针、CLI预算争用拒绝、停APP自动回收、实体反馈）；固件123项主机检查、SDK 105项、模拟器Windows/Linux各95项零跳过（Node v24.14/v20.18，含真实SDK ws-echo包与HTTPS/MQTTS/WSS证书）通过。实机取消/trap专项已双板执行：握手中取消受理、完成消息先于终态交付、trap后CRASHED且配额/句柄/PSRAM即时回收；发现并如实记录一项可见性偏差（cancel受理后至worker下一tick前，status仍显示握手前状态；G1 CLI用例因轮询到终态而未暴露），待与N5.2一并评审契约文案或同步置终态。剩余：双板逐项复核后方可标注阶段完成；N5.2–N5.5与N6尚未开始，未发布Release。详见G2记录的专项小节。详见[WebSocket CLI记录](network-websocket-cli.zh-CN.md)、[双板G1记录](validation/network-n5-ws-cli-2026-10-17-lckfb-g1.md)与[双板APP G2记录](validation/network-n5-ws-app-g2-2026-10-18.md)。
 
-- [ ] SDK提供异步connect/status/send/recv/close，保留文本/二进制消息边界。
-- [ ] 初始一条WebSocket、单消息最多4 KiB、有界分片；共用两个APP传输名额和一个TLS名额。
-- [ ] 实现客户端掩码、ping/pong、关闭握手、分片与慢消费，测消息重组峰值；不能为远端长度分配无限缓存。
-- [ ] 远程控制示例，测试断线/取消及与HTTP的配额竞争。
+- [x] SDK提供异步connect/status/send/recv/close，保留文本/二进制消息边界。（ABI 3.12.0 ws.h六导入+WAMR桥接；双板真实AOT包回环逐字节校验，见APP G2记录）
+- [x] 初始一条WebSocket、单消息最多4 KiB、有界分片；共用两个APP传输名额和一个TLS名额。（双板G1证实：单客户端耗尽、共享两槽/一TLS及回收有记录；G2双板CLI与APP争用同一预算各自明确拒绝）
+- [x] 实现客户端掩码、ping/pong、关闭握手、分片与慢消费，测消息重组峰值；不能为远端长度分配无限缓存。（双板G1证实：自动pong闭环、黑洞/停滞期限、慢帧/慢消费/空消息及4096边界有记录；峰值样本非原子快照）
+- [ ] 远程控制示例，测试断线/取消及与HTTP的配额竞争。（ws-echo示例与配额竞争双板已过；APP内断线/取消专项仍缺实机记录，不能只凭CLI级结果勾选）
 
 #### N5.2 mDNS/DNS-SD设备发现
 

@@ -3,7 +3,7 @@
     "schema": 1,
     "id": "waveshare-35b",
     "product": "aster",
-    "abi": "3.11.0",
+    "abi": "3.12.0",
     "system": "zephyr",
     "cpu": "xtensa",
     "aot_target": "xtensa",
@@ -23,7 +23,8 @@
       "http",
       "tls",
       "audio-stream",
-      "mqtt"
+      "mqtt",
+      "websocket"
     ],
     "display": {
       "width": 320,
@@ -46,7 +47,7 @@
       "package_dir": "/SD:"
     },
     "status": "experimental",
-    "name": "微雪 ESP32-S3-Touch-LCD-3.5B"
+    "name": "\u5fae\u96ea ESP32-S3-Touch-LCD-3.5B"
   },
   "build": {
     "system": "zephyr",

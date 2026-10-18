@@ -157,6 +157,7 @@ static int app_str(wasm_exec_env_t env, uint32_t off, uint32_t len, char *out, s
 #include "aster_network_bridge.inc"
 #include "aster_http_bridge.inc"
 #include "aster_mqtt_bridge.inc"
+#include "aster_ws_bridge.inc"
 
 /* ---- handle decode ---- */
 
@@ -2849,6 +2850,12 @@ static NativeSymbol syms[] = {
 	{ "aster_mqtt_recv", (void *)n_mqtt_recv, "(iii)i", NULL },
 	{ "aster_mqtt_cancel", (void *)n_mqtt_cancel, "(i)i", NULL },
 	{ "aster_mqtt_close", (void *)n_mqtt_close, "(i)i", NULL },
+	{ "aster_ws_connect", (void *)n_ws_connect, "(iii)i", NULL },
+	{ "aster_ws_status", (void *)n_ws_status, "(iii)i", NULL },
+	{ "aster_ws_send", (void *)n_ws_send, "(iiii)i", NULL },
+	{ "aster_ws_recv", (void *)n_ws_recv, "(iii)i", NULL },
+	{ "aster_ws_cancel", (void *)n_ws_cancel, "(i)i", NULL },
+	{ "aster_ws_close", (void *)n_ws_close, "(i)i", NULL },
 	{ "aster_wifi_scan_start", (void *)n_wifi_scan_start, "()i", NULL },
 	{ "aster_wifi_status", (void *)n_wifi_status, "(ii)i", NULL },
 };

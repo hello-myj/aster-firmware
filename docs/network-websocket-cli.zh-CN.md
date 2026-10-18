@@ -1,6 +1,6 @@
 # N5.1 WebSocket/WSS 内部服务与 CLI（实施中）
 
-基线为N4本地提交固件`8a71fd2`、SDK`cbbd5ec`、模拟器`5e34c85`。当前先实施固件内部服务和G1 CLI；公共ABI仍3.11，SDK尚未提供WebSocket导入。N5.2–N5.5未实施，N6接口统一尚未开始。本阶段按用户要求本地提交检查点，不推送或发布；不表示N5.1已完成。后续见[Cursor实施交接](network-n5-cursor-handoff.zh-CN.md)。
+基线为N4本地提交固件`8a71fd2`、SDK`cbbd5ec`、模拟器`5e34c85`。双板G1与G2公共链路已实施并本地提交于`feature/network-n5`（未推送）：公共ABI选定3.12.0，SDK已提供六个`aster_ws_*`导入、`apps/ws-echo`示例与模拟器实现；均未发布Release，N5.2–N5.5未实施，N6接口统一尚未开始，模拟器Windows/Linux各95项零跳过已复跑，实机取消/trap专项已双板执行并记录一项cancel可见性待评审偏差；阶段完成仍需逐项复核，不表示N5.1已完成。详见[双板G1记录](validation/network-n5-ws-cli-2026-10-17-lckfb-g1.md)、[双板APP G2记录](validation/network-n5-ws-app-g2-2026-10-18.md)与[Cursor实施交接](network-n5-cursor-handoff.zh-CN.md)。
 
 ## 固定范围及资源
 
@@ -40,5 +40,5 @@ recv返回0表示一条完整消息，包含合法空消息；`-EAGAIN`表示暂
 
 - 新增RFC示例nonce/accept向量、升级头、0..4096长度及每个截断边界、mask、非规范长度、UTF-8和关闭码检查，ASan/UBSan执行真实C代码。
 - 服务fixture用真实POSIX TCP、实际网络/HTTP/WS服务及手动worker；检查分片中文/控制帧、短缓冲保留、空消息、4KiB实际masked发送、慢取消息、非法帧拒绝、随机源失败及100轮取消/关闭回收。TLS fixture验证共享准入与失败收尾，不替代实机证书/加密验证。
-- 固件122项主机检查通过；微雪CLI固件已构建并刷入，离线核实WS客户端未打开时PSRAM为0、非法URL拒绝、原14个APP/音量53/网络保留。微雪15类真实局域网WS/WSS、证书拒绝及共享配额/内容校验已通过；微雪断网恢复、图形/实体交互及修正后的WSS/HTTP并发内容校验已通过；LCKFB尚待验证。详见[CLI验证记录](validation/network-n5-ws-cli-2026-10-17.md)。完成G1后再添加SDK/APP和模拟器，不能仅凭构建通过宣称N5.1完成。
+- 固件主机检查现123项全部通过（含新增WS桥接fixture，覆盖权限门、guest边界与复制、所有权、终态先交付、预算耗尽与回收）。G1：微雪与LCKFB各自通过15类局域网CLI、断网恢复、WSS/HTTP图形并发与实体反馈及13项补充边界门禁，双板WS/WSS私有PSRAM样本一致（18040/19887B）；详见[CLI验证记录](validation/network-n5-ws-cli-2026-10-17.md)与[双板G1补充记录](validation/network-n5-ws-cli-2026-10-17-lckfb-g1.md)。G2：双板真实AOT包APP门槛已通过（明文+WSS回环内容、5项边界探针、CLI与APP预算争用、停APP回收、实体反馈），见[双板APP G2记录](validation/network-n5-ws-app-g2-2026-10-18.md)；模拟器Windows/Linux各95项零跳过复跑已完成（Windows原生Node v24.14.0、Linux Node v20.18.0，含真实SDK ws-echo包与HTTPS/MQTTS/WSS证书夹具），双平台不构成缺口；实机取消/trap专项与逐项复核完成前，不能宣称N5.1整体完成。
 - 测试对端`tools/validation/network_ws_peer.cjs`使用已有Node ws依赖，原生Windows Node服务端口17880–17885；CA/私钥及日志只留仓库外。需要临时Windows Private/LocalSubnet规则，结束后停止对端并删除规则；恢复原应用/音量/网络和日常固件、移除SD测试CA。

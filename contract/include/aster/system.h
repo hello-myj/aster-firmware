@@ -5,7 +5,8 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 3
-#define ASTER_ABI_MINOR 11 /* 3.11 (additive): bounded MQTT/MQTTS client.
+#define ASTER_ABI_MINOR 12 /* 3.12 (additive): bounded WebSocket/WSS client.
+                          * 3.11 (additive): bounded MQTT/MQTTS client.
                           * 3.10 (additive): bounded MP3 stream input.
                           * 3.9 (additive): bounded HTTP/HTTPS client.
                           * 3.8 (additive): bounded asynchronous TCP/UDP.
@@ -68,6 +69,7 @@
 #define ASTER_FEATURE_TLS          17u
 #define ASTER_FEATURE_MQTT         19u
 #define ASTER_FEATURE_AUDIO_STREAM 18u
+#define ASTER_FEATURE_WEBSOCKET    20u
 
 /* CPU arch ids */
 #define ASTER_ARCH_XTENSA 1u

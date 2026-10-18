@@ -8,6 +8,9 @@
 #if defined(CONFIG_ASTER_MQTT)
 #include "aster_mqtt.h"
 #endif
+#if defined(CONFIG_ASTER_WEBSOCKET)
+#include "aster_ws.h"
+#endif
 #if defined(CONFIG_ASTER_HTTP)
 #include "aster_http.h"
 #endif
@@ -185,6 +188,9 @@ void aster_native_release_network(aster_app_ctx_t *ctx)
     /* Wait only for the bounded service critical section, never DNS/socket
      * progress. Accept owner-close before retiring the session. Numeric IDs
      * remain unique while old DNS callbacks finish worker-owned cleanup. */
+#if defined(CONFIG_ASTER_WEBSOCKET)
+    while (aster_ws_svc_close_owner(ctx->network_owner) == -EAGAIN) k_sleep(K_MSEC(1));
+#endif
 #if defined(CONFIG_ASTER_MQTT)
     while (aster_mqtt_svc_close_owner(ctx->network_owner) == -EAGAIN) k_sleep(K_MSEC(1));
 #endif

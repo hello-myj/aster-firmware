@@ -32,6 +32,7 @@
 #include "network.h"
 #include "http.h"
 #include "mqtt.h"
+#include "ws.h"
 #include "audio_stream.h"
 #include "img.h"
 #include "gfx.h"
