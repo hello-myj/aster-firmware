@@ -142,7 +142,7 @@ class Gate:
         try:
             h=self.ready('tls');assert self.status(h)['tls_verify']==0
             response=self.cmd('connect /SD:/n3-tls.profile');assert 'MQTT result=' in response and 'MQTT handle=' not in response,response
-            response=self.c.command('aster net http start GET https://192.168.110.76:8883/ 1000 100')
+            response=self.c.command('aster net http start GET https://192.0.2.10:8883/ 1000 100')
             assert 'HTTP result=' in response and 'HTTP handle=' not in response,response
             response=self.c.command('aster net http ca default');assert 'HTTP result=0' not in response,response
             self.done(h,self.op(f'subscribe {h} aster/n3/tls 1'))

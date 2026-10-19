@@ -2,7 +2,6 @@
  * Bounded network state-change notifications (N5.5). Internal service; the
  * APP sees them as ASTER_EVENT_SYS + ASTER_SYS_NET_STATE carrying only
  * handle/state/kind. No payload is copied and no pointer survives a call.
- * Design: docs/network-n55-design.zh-CN.md.
  */
 #ifndef ASTER_NET_EVENT_H
 #define ASTER_NET_EVENT_H

@@ -4,7 +4,7 @@
  * system-owned UDP socket. Publish is requested/withdrawn by owner bits (the
  * Wi-Fi settings UI, or the diagnostic CLI); while OFF nothing is allocated
  * and no socket exists. Question parsing is non-recursive and length-checked;
- * every response carries at most one A record. Design: docs/network-mdns-design.zh-CN.md.
+ * every response carries at most one A record.
  */
 #include "aster_mdns.h"
 #include "aster_http.h"

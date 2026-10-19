@@ -8,7 +8,7 @@
 
 ```sh
 python tools/validation/prepare_network_stress.py \
-  --output ../diagnostics/n4/app --host 192.168.1.10 \
+  --output ../diagnostics/n4/app --host <设备可访问的IPv4> \
   --certs ../diagnostics/n4/certs
 ../aster-sdk/bin/aster build ../diagnostics/n4/app --target xtensa --aot
 ```
@@ -21,7 +21,7 @@ python tools/validation/prepare_network_stress.py \
 
 ```sh
 python tools/validation/network_n4_capture.py \
-  --port /dev/ttyACM0 --sdk-tools ../aster-sdk/tools \
+  --port <串口> --sdk-tools ../aster-sdk/tools \
   --package ../diagnostics/n4/app/dist/xtensa/aster.validation.networkstress.ast \
   --ca ../diagnostics/n4/certs/ca.pem --output ../diagnostics/n4/wave \
   --seconds 600 --width 320 --height 480 --gestures

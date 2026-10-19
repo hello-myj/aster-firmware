@@ -1,9 +1,0 @@
-{
-  "status": "passed",
-  "firmware_sha256": "6039062b4e7a40390ef91ff7dcc54db4d2df1695bdf2d577d3adac3c66219060",
-  "profiling": false,
-  "fault_injection": false,
-  "test_apps_removed": true,
-  "original_13_aot_apps_preserved": true,
-  "snake_linear_peak_bytes": 286720
-}

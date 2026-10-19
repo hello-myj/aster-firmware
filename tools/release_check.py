@@ -19,7 +19,7 @@ def command(args, cwd, env, log):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--sdk',type=Path,required=True);p.add_argument('--sim',type=Path,required=True);p.add_argument('--node',default='node');p.add_argument('--output',type=Path,default=ROOT/'build/release-check');p.add_argument('--require-clean',action='store_true');p.add_argument('--matrix',type=Path,default=ROOT/'contract/release-matrix.json',help='Reviewed published or local candidate matrix; does not modify the published baseline');p.add_argument('--baseline',type=Path,default=ROOT/'contract/abi-baseline.json')
     a=p.parse_args();sdk=a.sdk.resolve();sim=a.sim.resolve();out=a.output.resolve();out.mkdir(parents=True,exist_ok=True);env=dict(os.environ)
-    report={'schema':1,'status':'running','hardware':{'status':'not_run','reason':'Integration does not flash hardware; see docs/reliability-validation.md'},'steps':[]}
+    report={'schema':1,'status':'running','hardware':{'status':'not_run','reason':'Integration does not flash hardware.'},'steps':[]}
     def save(): (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
     def step(name,args,cwd=ROOT,environment=env):
         report['steps'].append({'name':name,'status':'running'});save()

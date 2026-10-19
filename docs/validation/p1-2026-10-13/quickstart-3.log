@@ -1,5 +1,0 @@
-OK  /home/myj/zephyrproject/aster/aster-firmware/build/p1-verified/quickstart-app/dist/xtensa/test.quickstart.ast
-    id=test.quickstart name=quickstart-app ver=1.0.0 abi={'min': '3.4', 'target': '3.4.0'} requires=['display', 'touch', 'audio-out']
-    manifest=494B wasm=16546B aot=42396B(target 1) icon=27664B assets=72624B(4 files) hdr=72 total=159800B
-    imports: 10 aster_* + 1 libc-builtin (all resolvable), exports: 10
-    signature: none

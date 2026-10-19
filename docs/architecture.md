@@ -10,7 +10,7 @@
 
 ## 内部动态内存
 
-两款ESP32-S3板的默认内核堆现为96 KiB。项目底层补丁在SRAM尾部分出内核堆，剩余区域交给libc `malloc`；后者用于APP执行和系统服务等动态线程栈。`aster sys mem`分别报告两套堆的使用、空闲与峰值。SRAM尾部地址差包含内核预留，不能全部作为libc容量。WAMR、APP线性内存及LVGL主池另走PSRAM，不能将不同池的容量和余量直接相加。网络协议及资源规划见[网络服务实施方案](network-services-implementation.zh-CN.md)。
+两款 ESP32-S3 板的内核堆为 96 KiB，位于 SRAM 尾部；其余区域交给 libc `malloc`。`aster sys mem` 分别报告内核堆和 libc 堆。WAMR、APP 线性内存和 LVGL 主池使用 PSRAM。网络传输使用六个导入：`aster_net_info`、`aster_net_open`、`aster_net_io`、`aster_net_status`、`aster_net_cancel`、`aster_net_close`。
 
 ## 硬件型号与工作模式
 
@@ -58,9 +58,7 @@
 
 APP 名称、介绍与图标来自安装包元数据和资源。桌面的动态 APP 文字使用通用 SD 字库，固定系统界面可以使用已有内置 UI 字体；安装、改名或升级 APP 不要求将其文字加入固件字体，也不要求重新编译固件。桌面的字形和光带缓存属于固件渲染层，不改变 APP 的字体接口或资源边界。
 
-实机屏幕、触摸、音频等验收仍需要开发板。编译通过和核心 ABI 主机测试不能替代实机验证。
-
-真实设备的 Zephyr 运行时仅启用 AOT，不编译 WASM 解释器。安装必须含匹配 CPU 的 AOT，缺失、写入失败或加载错误均明确失败，不降级到 WASM，也不因为加载错误删除安装的 AOT 文件。模拟器和独立 POSIX 开发测试程序保留 WASM 支持。公开 APP ABI 不因此改变。
+设备固件只运行匹配 CPU 的 AOT。安装缺少 AOT、CPU 不匹配或加载失败时直接报错，并保留已安装的 AOT 文件。模拟器和 POSIX 主机测试程序执行 WASM。
 
 ## 原生字号与字形缓存生命周期
 
@@ -72,8 +70,6 @@ SD 资源提供源字体全覆盖的 12/14/16/18/20/24/28/32/40/48px 字库；�
 
 冷字形目前同步读 SD，启动预热减少常见场景的冷读；大量新字符首次显示仍有加载成本。`aster sys fonts` 报告每档资源覆盖和缓存占用。Native USB 的 stop-and-wait 文件传输保持 512-byte ACK 协议，等待下一 USB packet 时短轮询并让出 CPU，避免每个 64-byte packet 产生 1ms 等待。
 
-发布前运行 `python tools/check_docs.py`。契约导出入口自动执行该检查，对照公开 ABI 头文件、硬件清单和 CPU 平台核对操作文档；ABI、硬件列表或 SDK 命令过期时拒绝导出。历史 ABI 变更记录不作为当前版本声明。
+发布前运行 `python tools/check_docs.py`。契约导出前同样执行该检查。
 
-APP 升级采用两个程序版本槽和带 CRC 的独立提交记录，用户数据保留在稳定目录。代码与资源选择同一版本，启动、安装、卸载和扫描使用文件锁协调；真实 SD/FAT 断电语义仍待硬件验证。详见 [安装与恢复](package-installation.md)。
-
-APP 回调期限和异常恢复策略见 [运行时恢复](runtime-recovery.md)。普通 Xtensa AOT 计算循环不提供可靠软终止；超过期限采用完整芯片复位恢复，并记录阶段和 APP。该策略不宣称强隔离或所有驱动失锁场景可恢复。
+安装与升级见 [安装与恢复](package-installation.md)。回调期限见 [运行时恢复](runtime-recovery.md)。

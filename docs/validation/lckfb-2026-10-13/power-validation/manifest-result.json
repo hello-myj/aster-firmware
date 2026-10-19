@@ -1,7 +1,0 @@
-{
-  "stage": "manifest",
-  "operation": "close",
-  "supply_removed_by_user": true,
-  "selected": 1,
-  "aot_save_cache_assets_retry_passed": true
-}

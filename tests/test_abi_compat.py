@@ -13,7 +13,9 @@ class Compatibility(unittest.TestCase):
         self.assertFalse(compare(self.old,n)['compatible'])
     def test_import_addition_requires_minor_raise(self):
         n=copy.deepcopy(self.old);n['signatures']['aster_future']='(i)i'
-        self.assertFalse(compare(self.old,n)['compatible']);n['abi']='3.8.0'
+        self.assertFalse(compare(self.old,n)['compatible'])
+        major, minor, _patch = (int(part) for part in self.old['abi'].split('.'))
+        n['abi'] = f'{major}.{minor + 1}.0'
         self.assertTrue(compare(self.old,n)['compatible'])
     def test_signature_enum_integer_and_package_mutations_block(self):
         for group,key in [('signatures',next(iter(self.old['signatures']))),('values','constant:ASTER_EINVAL'),('values','width:uint32_t'),('package','header_sizes')]:

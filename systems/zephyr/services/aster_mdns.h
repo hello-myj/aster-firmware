@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: MIT
- * Internal mDNS publisher contract (N5.2, design: docs/network-mdns-design.zh-CN.md).
+ * Internal mDNS publisher. Not an APP ABI.
  * Runs on the existing HTTP/MQTT/WS worker tick: no thread, no timer. Published
- * only while an owner (Wi-Fi settings UI or diagnostic CLI) requests it. Not
- * an APP ABI; errno values stay private.
+ * only while an owner (Wi-Fi settings UI or diagnostic CLI) requests it.
+ * errno values stay private.
  */
 #ifndef ASTER_MDNS_SERVICE_H
 #define ASTER_MDNS_SERVICE_H
