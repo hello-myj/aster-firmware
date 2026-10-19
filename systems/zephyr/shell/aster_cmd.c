@@ -66,7 +66,7 @@ static const char *aster_err_str(int err)
 	case ASTER_EBADF:     return "bad handle";
 	case ASTER_ENOSPC:    return "out of space";
 	case ASTER_ESTATE:    return "lifecycle state conflict (double pause/resume? init refused?)";
-	case ASTER_EABI:      return "ABI incompatible";
+	case ASTER_EABI:      return "ABI incompatible: 需用新 SDK 重编";
 	case ASTER_ECORRUPT:  return "corrupt package";
 	case ASTER_EAGAIN:    return "try again";
 	case ASTER_ENODEV:    return "no such device";

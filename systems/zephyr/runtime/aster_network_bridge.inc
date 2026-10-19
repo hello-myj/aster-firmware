@@ -183,9 +183,60 @@ static int32_t n_network_close(wasm_exec_env_t env, uint32_t h)
     uint64_t owner; int32_t rc = network_gate(env, &owner);
     return rc ? rc : network_error(aster_net_close(owner, h));
 }
+#define NET_PUB_SLOTS 16
+struct net_pub { uint64_t owner; uint32_t handle, proto, internal; int used; };
+static struct net_pub net_pubs[NET_PUB_SLOTS];
+static uint32_t net_pub_gen = 1;
+void aster_net_pub_drop(uint64_t owner)
+{
+    for (int i = 0; i < NET_PUB_SLOTS; ++i)
+        if (net_pubs[i].used && net_pubs[i].owner == owner) net_pubs[i].used = 0;
+}
+static int net_pub_count(uint64_t owner)
+{
+    int n = 0;
+    for (int i = 0; i < NET_PUB_SLOTS; ++i)
+        if (net_pubs[i].used && net_pubs[i].owner == owner) ++n;
+    return n;
+}
+static int32_t net_pub_add(uint64_t owner, uint32_t proto, int32_t internal)
+{
+    if (internal <= 0) return internal;
+    if (net_pub_count(owner) >= 4) return ASTER_ENOSPC;
+    for (int i = 0; i < NET_PUB_SLOTS; ++i) if (!net_pubs[i].used) {
+        uint32_t h = (net_pub_gen << 8) | (uint32_t)(i + 1);
+        if (++net_pub_gen > 0x00fffffeu) net_pub_gen = 1;
+        net_pubs[i].owner = owner; net_pubs[i].handle = h; net_pubs[i].proto = proto;
+        net_pubs[i].internal = (uint32_t)internal; net_pubs[i].used = 1;
+        return (int32_t)h;
+    }
+    return ASTER_ENOSPC;
+}
+static int net_pub_get(uint64_t owner, uint32_t handle, uint32_t *proto, uint32_t *internal)
+{
+    for (int i = 0; i < NET_PUB_SLOTS; ++i) if (net_pubs[i].used && net_pubs[i].handle == handle) {
+        if (net_pubs[i].owner != owner) return 0;
+        *proto = net_pubs[i].proto; *internal = net_pubs[i].internal; return 1;
+    }
+    return 0;
+}
+static void net_pub_del(uint32_t handle)
+{
+    for (int i = 0; i < NET_PUB_SLOTS; ++i)
+        if (net_pubs[i].used && net_pubs[i].handle == handle) net_pubs[i].used = 0;
+}
+uint32_t aster_net_public_handle(uint64_t owner, uint32_t kind, uint32_t internal)
+{
+    for (int i = 0; i < NET_PUB_SLOTS; ++i)
+        if (net_pubs[i].used && net_pubs[i].owner == owner && net_pubs[i].proto == kind &&
+            net_pubs[i].internal == internal) return net_pubs[i].handle;
+    return 0;
+}
 void aster_native_release_network(aster_app_ctx_t *ctx)
 {
     if (!ctx || !ctx->network_owner) return;
+    (void)net_pub_add; (void)net_pub_get; (void)net_pub_del;
+    aster_net_pub_drop(ctx->network_owner);
     /* Wait only for the bounded service critical section, never DNS/socket
      * progress. Accept owner-close before retiring the session. Numeric IDs
      * remain unique while old DNS callbacks finish worker-owned cleanup. */
@@ -213,5 +264,8 @@ NET_STUB(n_network_status, (wasm_exec_env_t env, uint32_t h, uint32_t o, uint32_
 NET_STUB(n_network_cancel, (wasm_exec_env_t env, uint32_t h))
 NET_STUB(n_network_close, (wasm_exec_env_t env, uint32_t h))
 void aster_native_release_network(aster_app_ctx_t *ctx) { (void)ctx; }
+void aster_net_pub_drop(uint64_t owner) { (void)owner; }
+uint32_t aster_net_public_handle(uint64_t o, uint32_t k, uint32_t i)
+{ (void)o; (void)k; (void)i; return 0; }
 #undef NET_STUB
 #endif

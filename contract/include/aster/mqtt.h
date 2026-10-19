@@ -48,21 +48,21 @@ typedef struct {
  * one verified TLS slot. No caller CA/skip-verify; synchronized clock required.
  * Every call is nonblocking and may return EAGAIN; retry on a later timer.
  */
-ASTER_I("aster_mqtt_connect") int32_t aster_mqtt_connect(
+int32_t aster_mqtt_connect(
     const aster_mqtt_options_t *options, uint32_t size);
-ASTER_I("aster_mqtt_status") int32_t aster_mqtt_status(
+int32_t aster_mqtt_status(
     uint32_t handle, aster_mqtt_status_t *status, uint32_t size);
 /* Publish/sub/unsub return a positive operation sequence, not delivery proof.
  * At most 2 queued operations, 4 filters, 2 received messages per client.
  * Topic names reject wildcards; filters permit full-level + and terminal #.
  * publish data=NULL only with length=0; retain 0/1; UTF-8 topic <=128 bytes.
  */
-ASTER_I("aster_mqtt_publish") int32_t aster_mqtt_publish(uint32_t handle,
+int32_t aster_mqtt_publish(uint32_t handle,
     const char *topic, uint32_t topic_length, const void *data, uint32_t length,
     uint32_t qos, uint32_t retain);
-ASTER_I("aster_mqtt_subscribe") int32_t aster_mqtt_subscribe(uint32_t handle,
+int32_t aster_mqtt_subscribe(uint32_t handle,
     const char *filter, uint32_t length, uint32_t qos);
-ASTER_I("aster_mqtt_unsubscribe") int32_t aster_mqtt_unsubscribe(
+int32_t aster_mqtt_unsubscribe(
     uint32_t handle, const char *filter, uint32_t length);
 /* operation: OK writes stable completion error (inspect it); EAGAIN pending;
  * ENOENT unknown/evicted (last 4 completions). QoS0 means queued to transport;
@@ -70,9 +70,9 @@ ASTER_I("aster_mqtt_unsubscribe") int32_t aster_mqtt_unsubscribe(
  * recv: OK copies one whole message including empty payload; EAGAIN empty.
  * Invalid output never consumes data. Unaligned output allowed; tail untouched.
  */
-ASTER_I("aster_mqtt_operation") int32_t aster_mqtt_operation(
+int32_t aster_mqtt_operation(
     uint32_t handle, uint32_t sequence, int32_t *error);
-ASTER_I("aster_mqtt_recv") int32_t aster_mqtt_recv(
+int32_t aster_mqtt_recv(
     uint32_t handle, aster_mqtt_message_t *message, uint32_t size);
 /* Reconnect backoff 1..30s restores confirmed subscriptions only. Pending ops
  * fail on loss; no offline/retry publish queue. Duplicates carry DUP; consumers
@@ -81,6 +81,6 @@ ASTER_I("aster_mqtt_recv") int32_t aster_mqtt_recv(
  * bounded DISCONNECT (unavailable links may still trigger Will). Terminal
  * handles retain quota until close/APP exit. Stop/trap/init failure closes all.
  */
-ASTER_I("aster_mqtt_cancel") int32_t aster_mqtt_cancel(uint32_t handle);
-ASTER_I("aster_mqtt_close") int32_t aster_mqtt_close(uint32_t handle);
+int32_t aster_mqtt_cancel(uint32_t handle);
+int32_t aster_mqtt_close(uint32_t handle);
 #endif

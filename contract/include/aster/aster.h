@@ -30,6 +30,7 @@
 #include "time.h"
 #include "wifi.h"
 #include "network.h"
+#include "net.h"
 #include "http.h"
 #include "mqtt.h"
 #include "ws.h"

@@ -645,8 +645,14 @@ static int http_end(uint64_t owner, uint32_t h, bool close)
     if (r) {
         if (close)
             r->closing = true;
-        else
+        else {
             r->cancel = true;
+            if (!finished(r->pub.state)) {
+                r->pub.state = ASTER_HTTP_CANCELLED;
+                r->pub.error = -ECANCELED;
+                r->stop_pending = true;
+            }
+        }
     }
     k_mutex_unlock(&http_lock);
     k_sem_give(&http_wake);

@@ -41,7 +41,7 @@ typedef struct {
  * interface is enabled; ESP carrier can remain set while unassociated.
  * Returns OK with zero flags when no interface exists. size >=sizeof(info).
  */
-ASTER_I("aster_network_get_info") int32_t aster_network_get_info(
+int32_t aster_network_get_info(
     aster_network_info_t *info, uint32_t size);
 
 typedef struct {
@@ -65,7 +65,7 @@ typedef struct {
  * UDP open requires host=NULL, host_len=port=timeout_ms=0. No listener API.
  * Cancelled/failed/EOF handles retain their quota until close or APP exit.
  */
-ASTER_I("aster_network_open") int32_t aster_network_open(
+int32_t aster_network_open(
     uint32_t kind, const char *host, uint32_t host_len,
     uint32_t port, uint32_t timeout_ms);
 /* length <=2048, UDP <=1200. TCP: host=NULL, host_len=port=0; returns
@@ -75,7 +75,7 @@ ASTER_I("aster_network_open") int32_t aster_network_open(
  * 5s without progress; UDP after 5s total including DNS/queue residence.
  * UDP TX/RX queue depth=2; oversized/full incoming packets drop and count.
  */
-ASTER_I("aster_network_send") int32_t aster_network_send(
+int32_t aster_network_send(
     uint32_t handle, const void *data, uint32_t length,
     const char *host, uint32_t host_len, uint32_t port);
 /* capacity <=2048; zero allowed only for UDP (data may be NULL). packet is
@@ -86,16 +86,16 @@ ASTER_I("aster_network_send") int32_t aster_network_send(
  * input precedes EOF/cancel/error. TCP writes after observed EOF fail EPIPE;
  * native Zephyr cannot continue writing after a peer half-close.
  */
-ASTER_I("aster_network_recv") int32_t aster_network_recv(
+int32_t aster_network_recv(
     uint32_t handle, void *data, uint32_t capacity,
     aster_network_packet_t *packet, uint32_t size);
 /* size >=sizeof(status); larger buffers accepted, tail left untouched. */
-ASTER_I("aster_network_status") int32_t aster_network_status(
+int32_t aster_network_status(
     uint32_t handle, aster_network_status_t *status, uint32_t size);
 /* Cancel retains buffered input/status, discards unsent data. Close makes
  * the handle invalid immediately; worker cleanup may briefly retain quota.
  * APP stop/trap/init failure automatically closes the entire session.
  */
-ASTER_I("aster_network_cancel") int32_t aster_network_cancel(uint32_t handle);
-ASTER_I("aster_network_close") int32_t aster_network_close(uint32_t handle);
+int32_t aster_network_cancel(uint32_t handle);
+int32_t aster_network_close(uint32_t handle);
 #endif

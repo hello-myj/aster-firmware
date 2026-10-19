@@ -48,24 +48,24 @@ typedef struct {
  * Two slots shared with TCP/UDP/CLI, one TLS slot. Terminal handles retain
  * quota until close/APP exit. Requests do not automatically reconnect/retry.
  */
-ASTER_I("aster_http_request") int32_t aster_http_request(
+int32_t aster_http_request(
     uint32_t method, const char *url, uint32_t url_length,
     const char *headers, uint32_t headers_length, const void *body,
     uint32_t body_length, uint32_t timeout_ms, uint32_t body_limit);
 /* Nonblocking calls may return EAGAIN; retry on a later event/timer.
  * Output size >=sizeof(status), tail untouched, unaligned output allowed. */
-ASTER_I("aster_http_status") int32_t aster_http_status(
+int32_t aster_http_status(
     uint32_t handle, aster_http_status_t *status, uint32_t size);
 /* capacity 1..2048. Buffered bytes precede error/cancel; 0 means successful
  * EOF only. Partial reads allowed. No data is consumed on invalid output. */
-ASTER_I("aster_http_read") int32_t aster_http_read(
+int32_t aster_http_read(
     uint32_t handle, void *data, uint32_t capacity);
 /* Case-insensitive ASCII token name; index selects duplicate field. Values
  * are ASCII, no NUL added. Returns byte count, ENOENT, EAGAIN or EMSGSIZE.
  * required is mandatory (4 bytes), receives field length on success/EMSGSIZE;
  * it must not overlap output. capacity 0..2048; NULL only when capacity=0.
  * Headers are available after FLAG_HEADERS; trailers update as received. */
-ASTER_I("aster_http_header") int32_t aster_http_header(
+int32_t aster_http_header(
     uint32_t handle, const char *name, uint32_t name_length, uint32_t index,
     char *output, uint32_t capacity, uint32_t *required);
 /* Cancel keeps buffered data/status; close immediately invalidates the
@@ -76,6 +76,6 @@ ASTER_I("aster_http_header") int32_t aster_http_header(
  * Root set is device/admin-owned (default ISRG Root X1), no skip-verify API.
  * No HTTP2, decompression, cookie jar, persistent connections or listeners.
  */
-ASTER_I("aster_http_cancel") int32_t aster_http_cancel(uint32_t handle);
-ASTER_I("aster_http_close") int32_t aster_http_close(uint32_t handle);
+int32_t aster_http_cancel(uint32_t handle);
+int32_t aster_http_close(uint32_t handle);
 #endif

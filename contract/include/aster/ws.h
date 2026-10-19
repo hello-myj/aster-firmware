@@ -50,17 +50,17 @@ typedef struct {
  * and wss:// uses the single shared verified-TLS slot and the device/admin
  * trust store (no caller CA, no skip-verify, synchronized clock required).
  */
-ASTER_I("aster_ws_connect") int32_t aster_ws_connect(
+int32_t aster_ws_connect(
     const char *url, uint32_t url_length, uint32_t timeout_ms);
 /* status/recv: output size must be >= sizeof(struct), tail untouched,
  * unaligned output allowed. EAGAIN on lock contention only. */
-ASTER_I("aster_ws_status") int32_t aster_ws_status(
+int32_t aster_ws_status(
     uint32_t handle, aster_ws_status_t *status, uint32_t size);
 /* send: opcode TEXT/BINARY; text must be valid UTF-8. length 0..4096; data
  * NULL only with length 0. Accepted into one bounded outgoing slot: OK is
  * queue admission, never peer acknowledgement; EAGAIN while a previous
  * message is still flushing (safe to retry; never blind-resend on error). */
-ASTER_I("aster_ws_send") int32_t aster_ws_send(
+int32_t aster_ws_send(
     uint32_t handle, uint32_t opcode, const void *data, uint32_t length);
 /* recv: delivers one whole message with boundary and opcode. Server
  * fragmentation (total <=4096) and interleaved control frames are handled
@@ -69,7 +69,7 @@ ASTER_I("aster_ws_send") int32_t aster_ws_send(
  * means none waiting, EPIPE means closed with the buffer drained. Failed or
  * cancelled handles return their stable terminal error instead, then keep
  * quota until close or APP exit. Invalid output never consumes a message. */
-ASTER_I("aster_ws_recv") int32_t aster_ws_recv(
+int32_t aster_ws_recv(
     uint32_t handle, aster_ws_message_t *message, uint32_t size);
 /* cancel keeps the handle and a terminal state (CANCELLED) until close;
  * close immediately invalidates the handle, attempting a bounded close
@@ -80,6 +80,6 @@ ASTER_I("aster_ws_recv") int32_t aster_ws_recv(
  * APP stop, init failure and traps close the session and release resources;
  * handles belong to one APP session and are never accepted across sessions.
  */
-ASTER_I("aster_ws_cancel") int32_t aster_ws_cancel(uint32_t handle);
-ASTER_I("aster_ws_close") int32_t aster_ws_close(uint32_t handle);
+int32_t aster_ws_cancel(uint32_t handle);
+int32_t aster_ws_close(uint32_t handle);
 #endif

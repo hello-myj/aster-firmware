@@ -205,7 +205,7 @@ int aster_pkg_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 		}
 	}
 	if ((dev >> 16) != appmajor || (((dev >> 8) & 0xFFu) < appminor)) {
-		LOG_ERR("abi mismatch: device %u.%u app min %u.%u",
+		LOG_ERR("abi mismatch: 需用新 SDK 重编 (device %u.%u app min %u.%u)",
 			dev >> 16, (dev >> 8) & 0xFFu, appmajor, appminor);
 		return ASTER_EABI;
 	}

@@ -291,7 +291,7 @@ int aster_ws_svc_recv(uint64_t owner,uint32_t handle,void *data,size_t capacity,
 static int ws_end(uint64_t owner,uint32_t handle,bool close)
 {
     if(k_mutex_lock(&ws_lock,K_NO_WAIT))return -EAGAIN;
-    struct ws_client *c=ws_find(owner,handle);if(c){if(close)c->closing=true;else c->cancel=true;}
+    struct ws_client *c=ws_find(owner,handle);if(c){if(close)c->closing=true;else{c->cancel=true;if(c->pub.state<ASTER_WS_CLOSED)ws_fault(c,-ECANCELED);}}
     k_mutex_unlock(&ws_lock);aster_http_svc_worker_signal();return c?0:-EBADF;
 }
 int aster_ws_svc_close(uint64_t owner,uint32_t h){return ws_end(owner,h,true);}

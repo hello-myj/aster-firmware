@@ -520,7 +520,13 @@ static int mqtt_end(uint64_t owner, uint32_t handle, bool close)
 {
     if (k_mutex_lock(&mqtt_lock, K_NO_WAIT)) return -EAGAIN;
     struct mqtt_client *c = mqtt_find(owner, handle);
-    if (c) { if (close) c->closing = true; else c->cancel = true; }
+    if (c) {
+        if (close) c->closing = true;
+        else {
+            c->cancel = true;
+            if (c->pub.state < ASTER_MQTT_FAILED) mqtt_fault(c, -ECANCELED, true);
+        }
+    }
     k_mutex_unlock(&mqtt_lock); return c ? 0 : -EBADF;
 }
 int aster_mqtt_svc_close(uint64_t o, uint32_t h) { return mqtt_end(o, h, true); }

@@ -778,19 +778,22 @@ static void ui_service(aster_app_ctx_t *ctx)
 /* N5.5: deliver at most one pending network state change before the frame
  * event. Only handles owned by this APP session are eligible (the ring is
  * keyed by owner), so a neighbour APP or the CLI can never be observed. */
+uint32_t aster_net_public_handle(uint64_t owner, uint32_t kind, uint32_t internal);
 static void pump_net_events(aster_app_ctx_t *ctx)
 {
 #if IS_ENABLED(CONFIG_ASTER_NET)
     if (!ctx->network_owner) return;
     uint32_t handle = 0, kind = 0, state = 0;
     if (!aster_net_event_take(ctx->network_owner, &handle, &kind, &state)) return;
+    uint32_t pub = aster_net_public_handle(ctx->network_owner, kind, handle);
+    if (!pub) return;
     aster_event_t ev = { 0 };
     ev.size = sizeof(ev);
     ev.version = 1;
     ev.type = ASTER_EVENT_SYS;
     ev.timestamp_ms = (uint64_t)k_uptime_get();
     ev.u.sys.code = ASTER_SYS_NET_STATE;
-    ev.u.sys.value = handle;
+    ev.u.sys.value = pub;
     ev.u.data[2] = kind;
     ev.u.data[3] = state;
     deliver_event(ctx, &ev);
@@ -1177,6 +1180,12 @@ static int app_start_common(const char *id, bool wait_ready)
 	}
 	if (rec->state == ASTER_APP_STATE_RUNNING || rec->state == ASTER_APP_STATE_PAUSED) {
 		ret = ASTER_EBUSY;
+		goto out;
+	}
+	if (rec->abi_major != ASTER_ABI_MAJOR) {
+		LOG_ERR("abi mismatch: 需用新 SDK 重编 (device %u app %u)",
+			(unsigned)ASTER_ABI_MAJOR, rec->abi_major);
+		ret = ASTER_EABI;
 		goto out;
 	}
 

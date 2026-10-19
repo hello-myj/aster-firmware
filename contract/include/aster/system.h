@@ -4,8 +4,11 @@
 
 #include "types.h"
 
-#define ASTER_ABI_MAJOR 3
-#define ASTER_ABI_MINOR 13 /* 3.13 (additive): coalesced network state
+#define ASTER_ABI_MAJOR 4
+#define ASTER_ABI_MINOR 0 /* 4.0 (breaking): six aster_net_* imports replace
+                          * the per-protocol network/HTTP/MQTT/WebSocket
+                          * imports. Every 3.x package is rejected.
+                          * 3.13 (additive): coalesced network state
                           * events (ASTER_SYS_NET_STATE) plus per-stage
                           * DNS/connect/TLS/TTFB diagnostics in the shell.
                           * 3.12 (additive): bounded WebSocket/WSS client.

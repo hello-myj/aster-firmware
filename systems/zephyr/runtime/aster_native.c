@@ -158,6 +158,7 @@ static int app_str(wasm_exec_env_t env, uint32_t off, uint32_t len, char *out, s
 #include "aster_http_bridge.inc"
 #include "aster_mqtt_bridge.inc"
 #include "aster_ws_bridge.inc"
+#include "aster_net_bridge.inc"
 
 /* ---- handle decode ---- */
 
@@ -2828,34 +2829,12 @@ static NativeSymbol syms[] = {
 	{ "aster_wifi_get_saved_ssid", (void *)n_wifi_get_saved_ssid, "(ii)i", NULL },
 	{ "aster_wifi_reconnect", (void *)n_wifi_reconnect, "()i", NULL },
 	{ "aster_wifi_scan_results", (void *)n_wifi_scan_results, "(ii)i", NULL },
-	{ "aster_network_get_info", (void *)n_network_get_info, "(ii)i", NULL },
-	{ "aster_network_open", (void *)n_network_open, "(iiiii)i", NULL },
-	{ "aster_network_send", (void *)n_network_send, "(iiiiii)i", NULL },
-	{ "aster_network_recv", (void *)n_network_recv, "(iiiii)i", NULL },
-	{ "aster_network_status", (void *)n_network_status, "(iii)i", NULL },
-	{ "aster_network_cancel", (void *)n_network_cancel, "(i)i", NULL },
-	{ "aster_network_close", (void *)n_network_close, "(i)i", NULL },
-	{ "aster_http_request", (void *)n_http_request, "(iiiiiiiii)i", NULL },
-	{ "aster_http_status", (void *)n_http_status, "(iii)i", NULL },
-	{ "aster_http_read", (void *)n_http_read, "(iii)i", NULL },
-	{ "aster_http_header", (void *)n_http_header, "(iiiiiii)i", NULL },
-	{ "aster_http_cancel", (void *)n_http_cancel, "(i)i", NULL },
-	{ "aster_http_close", (void *)n_http_close, "(i)i", NULL },
-	{ "aster_mqtt_connect", (void *)n_mqtt_connect, "(ii)i", NULL },
-	{ "aster_mqtt_status", (void *)n_mqtt_status, "(iii)i", NULL },
-	{ "aster_mqtt_publish", (void *)n_mqtt_publish, "(iiiiiii)i", NULL },
-	{ "aster_mqtt_subscribe", (void *)n_mqtt_subscribe, "(iiii)i", NULL },
-	{ "aster_mqtt_unsubscribe", (void *)n_mqtt_unsubscribe, "(iii)i", NULL },
-	{ "aster_mqtt_operation", (void *)n_mqtt_operation, "(iii)i", NULL },
-	{ "aster_mqtt_recv", (void *)n_mqtt_recv, "(iii)i", NULL },
-	{ "aster_mqtt_cancel", (void *)n_mqtt_cancel, "(i)i", NULL },
-	{ "aster_mqtt_close", (void *)n_mqtt_close, "(i)i", NULL },
-	{ "aster_ws_connect", (void *)n_ws_connect, "(iii)i", NULL },
-	{ "aster_ws_status", (void *)n_ws_status, "(iii)i", NULL },
-	{ "aster_ws_send", (void *)n_ws_send, "(iiii)i", NULL },
-	{ "aster_ws_recv", (void *)n_ws_recv, "(iii)i", NULL },
-	{ "aster_ws_cancel", (void *)n_ws_cancel, "(i)i", NULL },
-	{ "aster_ws_close", (void *)n_ws_close, "(i)i", NULL },
+	{ "aster_net_info", (void *)n_net_info, "(ii)i", NULL },
+	{ "aster_net_open", (void *)n_net_open, "(ii)i", NULL },
+	{ "aster_net_io", (void *)n_net_io, "(iiii)i", NULL },
+	{ "aster_net_status", (void *)n_net_status, "(iii)i", NULL },
+	{ "aster_net_cancel", (void *)n_net_cancel, "(i)i", NULL },
+	{ "aster_net_close", (void *)n_net_close, "(i)i", NULL },
 	{ "aster_wifi_scan_start", (void *)n_wifi_scan_start, "()i", NULL },
 	{ "aster_wifi_status", (void *)n_wifi_status, "(ii)i", NULL },
 };

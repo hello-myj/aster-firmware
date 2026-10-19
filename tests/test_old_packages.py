@@ -28,8 +28,7 @@ int main(int argc,char **argv) {
   FILE *f=fopen(argv[i],"rb");assert(f);assert(!fseek(f,0,SEEK_END));long n=ftell(f);rewind(f);
   unsigned char *p=malloc(n);assert(p);assert(fread(p,1,n,f)==(size_t)n);assert(!fclose(f));
   aster_manifest_t m;const uint8_t *wasm,*aot;size_t wl,al;uint32_t at;
-  assert(aster_pkg_parse(p,n,&m,&wasm,&wl,&aot,&al,&at)==ASTER_OK);
-  assert(wl>8 && al>4 && at==1);assert(!memcmp(wasm,"\0asm",4));assert(!memcmp(aot,"\0aot",4));
+  assert(aster_pkg_parse(p,n,&m,&wasm,&wl,&aot,&al,&at)==ASTER_EABI);
   p[4]=99;assert(aster_pkg_parse(p,n,&m,0,0,0,0,0)==ASTER_ECORRUPT);free(p);
  }
  return 0;

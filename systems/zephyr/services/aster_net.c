@@ -543,7 +543,10 @@ static int end(uint64_t owner, uint32_t handle, bool close)
 {
     if (k_mutex_lock(&net_lock, K_NO_WAIT)) return -EAGAIN;
     struct slot *s = lookup(owner, handle);
-    if (s) { if (close) s->closing = true; else s->cancel = true; }
+    if (s) {
+        if (close) s->closing = true;
+        else { s->cancel = true; if (!terminal(s)) fail(s, -ECANCELED); }
+    }
     k_mutex_unlock(&net_lock); k_sem_give(&net_wake);
     return s ? 0 : -EBADF;
 }
