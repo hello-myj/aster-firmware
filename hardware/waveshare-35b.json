@@ -3,7 +3,7 @@
     "schema": 1,
     "id": "waveshare-35b",
     "product": "aster",
-    "abi": "3.12.0",
+    "abi": "3.13.0",
     "system": "zephyr",
     "cpu": "xtensa",
     "aot_target": "xtensa",

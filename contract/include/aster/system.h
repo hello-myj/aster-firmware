@@ -5,7 +5,10 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 3
-#define ASTER_ABI_MINOR 12 /* 3.12 (additive): bounded WebSocket/WSS client.
+#define ASTER_ABI_MINOR 13 /* 3.13 (additive): coalesced network state
+                          * events (ASTER_SYS_NET_STATE) plus per-stage
+                          * DNS/connect/TLS/TTFB diagnostics in the shell.
+                          * 3.12 (additive): bounded WebSocket/WSS client.
                           * 3.11 (additive): bounded MQTT/MQTTS client.
                           * 3.10 (additive): bounded MP3 stream input.
                           * 3.9 (additive): bounded HTTP/HTTPS client.

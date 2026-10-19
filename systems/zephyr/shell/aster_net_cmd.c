@@ -4,13 +4,17 @@
 #include "aster_net_cmd.h"
 #if defined(CONFIG_ASTER_HTTP)
 #include "aster_http_cmd.h"
+#include "aster_http.h"
 #endif
 #if defined(CONFIG_ASTER_MQTT)
 #include "aster_mqtt_cmd.h"
+#include "aster_mqtt.h"
 #endif
 #include "aster_net.h"
+#include "aster_net_event.h"
 #if defined(CONFIG_ASTER_WEBSOCKET)
 #include "aster_ws_cmd.h"
+#include "aster_ws.h"
 #endif
 #if defined(CONFIG_ASTER_MDNS)
 #include "aster_mdns_cmd.h"
@@ -19,6 +23,11 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zephyr/kernel.h>
+#include <zephyr/sys/sys_heap.h>
+#if defined(CONFIG_COMMON_LIBC_MALLOC) && defined(CONFIG_SYS_HEAP_RUNTIME_STATS)
+#include <sys_malloc.h>
+#endif
 #include <zephyr/net/net_if.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/sys/crc.h>
@@ -86,9 +95,51 @@ static int cmd_stats(const struct shell *sh, size_t argc, char **argv)
     struct aster_net_stats s;
     int rc = aster_net_get_stats(&s);
     if (rc) return reply(sh, rc);
-    shell_print(sh, "NET active=%u closing=%u psram=%u stack=%u opened=%u closed=%u failed=%u cancelled=%u dropped=%u",
+    shell_print(sh, "NET active=%u closing=%u psram=%u stack=%u opened=%u closed=%u failed=%u cancelled=%u dropped=%u apps=%u",
                 s.active, s.closing, s.psram_bytes, s.stack_bytes, s.opened,
-                s.closed, s.failed, s.cancelled, s.dropped);
+                s.closed, s.failed, s.cancelled, s.dropped, aster_net_app_sessions());
+#if defined(CONFIG_ASTER_HTTP)
+    struct aster_http_stats http;
+    if (!aster_http_svc_get_stats(&http))
+        shell_print(sh, "NET http active=%u closing=%u tls=%u",
+                    http.active, http.closing, http.tls_active);
+#endif
+#if defined(CONFIG_ASTER_MQTT)
+    struct aster_mqtt_stats mqtt;
+    if (!aster_mqtt_svc_stats(&mqtt))
+        shell_print(sh, "NET mqtt active=%u closing=%u tls=%u reconnects=%u",
+                    mqtt.active, mqtt.closing, mqtt.tls_active,
+                    aster_mqtt_svc_reconnects());
+#endif
+#if defined(CONFIG_ASTER_WEBSOCKET)
+    struct aster_ws_stats ws;
+    if (!aster_ws_svc_stats(&ws))
+        shell_print(sh, "NET ws active=%u closing=%u tls=%u",
+                    ws.active, ws.closing, ws.tls_active);
+#endif
+    extern struct k_heap _system_heap;
+    struct sys_memory_stats heap = { 0 };
+    if (sys_heap_runtime_stats_get(&_system_heap.heap, &heap) == 0)
+        shell_print(sh, "NET mem dram_peak=%u", (unsigned)heap.max_allocated_bytes);
+#if defined(CONFIG_COMMON_LIBC_MALLOC) && defined(CONFIG_SYS_HEAP_RUNTIME_STATS)
+    struct sys_memory_stats libc = { 0 };
+    if (malloc_runtime_stats_get(&libc) == 0)
+        shell_print(sh, "NET mem libc_peak=%u", (unsigned)libc.max_allocated_bytes);
+#endif
+    return 0;
+}
+/* N5.5: per-stage timing from real local connections only; no probing. */
+static int cmd_diag(const struct shell *sh, size_t argc, char **argv)
+{
+    (void)argc; (void)argv;
+    struct aster_net_diag d;
+    int rc = aster_net_diag_get(&d);
+    if (rc) return reply(sh, rc);
+    shell_print(sh, "NETDIAG samples=%u", d.samples);
+    shell_print(sh, "NETDIAG dns      last=%u avg=%u max=%u ms", d.dns_last_us, d.dns_avg_us, d.dns_max_us);
+    shell_print(sh, "NETDIAG connect  last=%u avg=%u max=%u ms", d.connect_last_us, d.connect_avg_us, d.connect_max_us);
+    shell_print(sh, "NETDIAG tls      last=%u avg=%u max=%u ms", d.tls_last_us, d.tls_avg_us, d.tls_max_us);
+    shell_print(sh, "NETDIAG ttfb     last=%u avg=%u max=%u ms", d.ttfb_last_us, d.ttfb_avg_us, d.ttfb_max_us);
     return 0;
 }
 static int cmd_connect(const struct shell *sh, size_t argc, char **argv)
@@ -205,6 +256,7 @@ static const struct shell_static_entry net_entries[] = {
 #endif
     SHELL_CMD(status, NULL, "link/address and limits; not Internet reachability", cmd_status),
     SHELL_CMD(stats, NULL, "shared service counters", cmd_stats),
+    SHELL_CMD(diag, NULL, "per-stage DNS/connect/TLS/TTFB timings (local samples)", cmd_diag),
     SHELL_CMD(tcp, &tcp_cmds, "async TCP", NULL),
     SHELL_CMD(udp, &udp_cmds, "async UDP", NULL),
     SHELL_CMD_ARG(result, NULL, "HANDLE", cmd_result, 2, 0),

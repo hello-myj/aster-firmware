@@ -2,6 +2,7 @@
  * MQTT worker shares HTTP scheduling, verified TLS and the global TCP quota.
  */
 #include "aster_mqtt.h"
+#include "aster_net_event.h"
 #include "aster_http.h"
 #include "aster_mem.h"
 #include "aster_net.h"
@@ -29,7 +30,8 @@ struct mqtt_client {
     uint16_t packet_id;
     bool closing, cancel, disconnected, disconnect_sent, ping, tx_is_ping;
     bool connect_sent, output_operation;
-    int64_t deadline, retry_at, last_tx, ping_at, operation_at, close_at;
+    int64_t deadline, retry_at, last_tx, ping_at, operation_at, close_at, tls_started_ms;
+    uint32_t tls_ms;
     struct aster_mqtt_connect options;
     char host[254], client[65], username[129], will_topic[129];
     uint8_t password[128], will[256];
@@ -40,6 +42,7 @@ struct mqtt_client {
     struct aster_http_tls_report tls_report;
 #endif
     struct aster_mqtt_snapshot pub;
+    uint32_t published_state;
     struct mqtt_filter filters[ASTER_MQTT_TOPICS];
     struct mqtt_operation operations[ASTER_MQTT_DEPTH];
     unsigned operation_count, receive_count, completion_cursor;
@@ -49,7 +52,7 @@ struct mqtt_client {
     size_t input_length, output_length, output_offset;
 };
 static struct mqtt_client *mqtt_clients[ASTER_NET_SLOTS];
-static uint32_t mqtt_generation;
+static uint32_t mqtt_generation, mqtt_reconnects;
 K_MUTEX_DEFINE(mqtt_lock);
 static struct mqtt_client *mqtt_find(uint64_t owner, uint32_t handle)
 {
@@ -221,7 +224,7 @@ static void mqtt_process(struct mqtt_client *c)
             c->host, c->options.port, c->options.timeout_ms);
         if (rc == -EAGAIN || rc == -EBUSY) return;
         if (rc < 0) { mqtt_fault(c, rc, true); return; }
-        c->transport = rc; ++c->pub.reconnects;
+        c->transport = rc; ++c->pub.reconnects; ++mqtt_reconnects;
         c->deadline = now + c->options.timeout_ms;
         c->pub.state = ASTER_MQTT_CONNECTING;
     }
@@ -237,6 +240,7 @@ static void mqtt_process(struct mqtt_client *c)
         }
         if (t.state != ASTER_NET_READY) return;
         c->pub.state = c->options.tls ? ASTER_MQTT_HANDSHAKE : ASTER_MQTT_CONNACK;
+        if (c->options.tls && !c->tls_started_ms) c->tls_started_ms = now;
     }
 #if defined(CONFIG_ASTER_HTTP_TLS)
     if (c->pub.state == ASTER_MQTT_HANDSHAKE) {
@@ -247,6 +251,7 @@ static void mqtt_process(struct mqtt_client *c)
         c->pub.tls_verify = c->tls_report.verify;
         if (rc == -EAGAIN) return;
         if (rc) { mqtt_fault(c, rc, rc == -EACCES || rc == -EINVAL || rc == -ENODATA); return; }
+        c->tls_ms = aster_net_diag_span_ms(c->tls_started_ms, k_uptime_get());
         c->pub.state = ASTER_MQTT_CONNACK;
     }
 #endif
@@ -339,8 +344,20 @@ bool aster_mqtt_svc_tick(void)
         if (!c) continue;
         active = true;
         if (c->closing) {
-            if (mqtt_dispose(c)) { mqtt_clients[i] = NULL; aster_psram_free(c); }
-        } else mqtt_process(c);
+            if (mqtt_dispose(c)) {
+                uint32_t tls_ms = c->tls_ms;
+                mqtt_clients[i] = NULL;
+                aster_psram_free(c);
+                aster_net_diag_sample(0, 0, tls_ms);
+            }
+            continue; /* c may be freed: never touch it below */
+        }
+        mqtt_process(c);
+        /* N5.5: coalesced state change for this client's owning APP. */
+        if (c->pub.state != c->published_state) {
+            c->published_state = c->pub.state;
+            aster_net_event_post(c->owner, c->handle, ASTER_NET_EVENT_MQTT, c->pub.state);
+        }
     }
     k_mutex_unlock(&mqtt_lock);
     return active;
@@ -531,3 +548,4 @@ int aster_mqtt_svc_stats(struct aster_mqtt_stats *out)
     }
     k_mutex_unlock(&mqtt_lock); return 0;
 }
+uint32_t aster_mqtt_svc_reconnects(void) { return mqtt_reconnects; }

@@ -4,6 +4,7 @@
 #define ASTER_NET_HOST_TEST
 #define ASTER_HTTP_HOST_TEST
 #include "../systems/zephyr/services/aster_net.c"
+#include "../systems/zephyr/services/aster_net_event.c"
 #include "../systems/zephyr/services/aster_http.c"
 #include <assert.h>
 #include <signal.h>

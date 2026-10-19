@@ -23,6 +23,12 @@
 /* SYS notifications */
 #define ASTER_SYS_MEM_PRESSURE 1u
 #define ASTER_SYS_ORIENT       2u
+/* ABI 3.13: one of this APP's network handles changed state. The event carries
+ * only identifiers: u.sys.value = handle, u.data[2] = kind (1 TCP, 2 UDP,
+ * 3 HTTP, 4 MQTT, 5 WS), u.data[3] = protocol state number. Read details with
+ * the existing status calls; events are coalesced (one pending change per
+ * handle, newest wins) and at most one is delivered per frame. */
+#define ASTER_SYS_NET_STATE    3u
 
 typedef struct {
 	uint32_t size;    /* sizeof(aster_event_t) */

@@ -30,6 +30,7 @@ void aster_http_tls_heap(size_t *current,size_t *peak){*current=*peak=0;}
 #endif
 #include "../systems/zephyr/services/aster_http.c"
 #include "../systems/zephyr/services/aster_mqtt.c"
+#include "../systems/zephyr/services/aster_net_event.c"
 #include <signal.h>
 #include <netinet/tcp.h>
 #include <stdio.h>

@@ -4,6 +4,7 @@
 #define ASTER_WS_HOST_TEST
 #define CONFIG_ASTER_WEBSOCKET 1
 #include "../systems/zephyr/services/aster_net.c"
+#include "../systems/zephyr/services/aster_net_event.c"
 #ifdef ASTER_WS_TLS_TEST
 #define CONFIG_ASTER_HTTP_TLS 1
 #include "../systems/zephyr/services/aster_http_tls.h"

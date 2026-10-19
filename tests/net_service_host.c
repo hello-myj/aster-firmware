@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #define ASTER_NET_HOST_TEST
 #include "../systems/zephyr/services/aster_net.c"
+#include "../systems/zephyr/services/aster_net_event.c"
 #include <stdio.h>
 static void tick(void) { ++host_now; service_tick(); }
 static int udp(void)

@@ -11,6 +11,7 @@
 #if defined(CONFIG_ASTER_MDNS)
 #include "aster_mdns.h"
 #endif
+#include "aster_net_event.h"
 #if defined(CONFIG_ASTER_HTTP_TLS)
 #include "aster_http_tls.h"
 #endif
@@ -33,6 +34,7 @@ struct http_request {
     struct aster_http_tls_report tls_report;
 #endif
     struct aster_http_snapshot pub;
+    uint32_t published_state;
     struct aster_http_headers published_headers;
     uint8_t body[ASTER_HTTP_BODY_BUFFER];
     struct aster_http_options opts;
@@ -41,7 +43,8 @@ struct http_request {
     uint8_t upload[ASTER_HTTP_UPLOAD_MAX], input[HTTP_IO], decoded[HTTP_IO];
     size_t tx_length, tx_offset, upload_offset, input_length, input_offset;
     uint32_t redirects;
-    int64_t deadline;
+    int64_t deadline, born_ms, tls_started_ms;
+    uint32_t tls_ms, ttfb_ms;
     struct aster_http_codec codec;
 };
 static struct http_request *requests[ASTER_NET_SLOTS];
@@ -227,6 +230,8 @@ static void process(struct http_request *r, bool cancelled)
         }
         if (s.state != ASTER_NET_READY && s.state != ASTER_NET_EOF)
             return;
+        if (r->url.tls && !r->tls_started_ms)
+            r->tls_started_ms = k_uptime_get();
         state(r, r->url.tls ? ASTER_HTTP_HANDSHAKE : ASTER_HTTP_SENDING, 0);
     }
 #if defined(CONFIG_ASTER_HTTP_TLS)
@@ -256,6 +261,7 @@ static void process(struct http_request *r, bool cancelled)
             state(r, ASTER_HTTP_FAILED, rc);
             return;
         }
+        r->tls_ms = aster_net_diag_span_ms(r->tls_started_ms, k_uptime_get());
         state(r, ASTER_HTTP_SENDING, 0);
     }
 #endif
@@ -337,6 +343,8 @@ static void process(struct http_request *r, bool cancelled)
                                    r->decoded, cap, &wrote);
     r->input_offset += used;
     if (!previous && r->codec.headers_ready) {
+        if (!r->ttfb_ms)
+            r->ttfb_ms = aster_net_diag_span_ms(r->born_ms, k_uptime_get());
         int redirected = redirect_prepare(r);
         if (redirected > 0)
             return;
@@ -379,13 +387,25 @@ static bool http_tick(void)
 #endif
             if (aster_net_close(r->transport_owner, r->transport) == -EAGAIN)
                 continue;
+            uint32_t tls_ms = r->tls_ms, ttfb_ms = r->ttfb_ms;
             k_mutex_lock(&http_lock, K_FOREVER);
             requests[i] = NULL;
             k_mutex_unlock(&http_lock);
             aster_psram_free(r);
+            aster_net_diag_sample(0, 0, tls_ms);
+            aster_net_diag_sample_ttfb(ttfb_ms);
             continue;
         }
         process(r, cancelled);
+        /* N5.5: publish one event per state change (coalesced downstream). */
+        k_mutex_lock(&http_lock, K_FOREVER);
+        uint32_t st = r->pub.state;
+        bool changed = st != r->published_state;
+        if (changed) r->published_state = st;
+        uint64_t owner = r->owner;
+        uint32_t handle = r->pub.handle;
+        k_mutex_unlock(&http_lock);
+        if (changed) aster_net_event_post(owner, handle, ASTER_NET_EVENT_HTTP, st);
     }
     return active;
 }
@@ -543,7 +563,8 @@ int aster_http_svc_start(uint64_t owner, const struct aster_http_options *o)
     if (o->body_length)
         memcpy(r->upload, o->body, o->body_length);
     r->transport_owner = UINT64_C(0x8000000000000000) | ++http_generation;
-    r->deadline = k_uptime_get() + o->timeout_ms;
+    r->born_ms = k_uptime_get();
+    r->deadline = r->born_ms + o->timeout_ms;
     rc = request_head(r);
     if (rc) {
         aster_psram_free(r);

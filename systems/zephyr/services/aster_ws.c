@@ -5,6 +5,7 @@
 #include "aster_http.h"
 #include "aster_mem.h"
 #include "aster_net.h"
+#include "aster_net_event.h"
 #if defined(CONFIG_ASTER_HTTP_TLS)
 #include "aster_http_tls.h"
 #endif
@@ -19,9 +20,11 @@ struct ws_client {
     uint32_t handle, transport;
     bool closing, cancel, stopped, peer_close, close_sent, sending_message;
     bool upgraded, ping_wait;
-    int64_t deadline, close_at, last_rx, ping_at, output_at, fragment_at;
+    int64_t deadline, close_at, last_rx, ping_at, output_at, fragment_at, born_ms, tls_started_ms;
+    uint32_t tls_ms, ttfb_ms;
     struct aster_http_url url;
     struct aster_ws_snapshot pub;
+    uint32_t published_state;
     char expected_accept[29];
     char *ca; size_t ca_length;
 #if defined(CONFIG_ASTER_HTTP_TLS)
@@ -144,6 +147,7 @@ static void ws_process(struct ws_client *c)
         if(rc==-EAGAIN)return;
         if(rc||t.state==ASTER_NET_FAILED||t.state==ASTER_NET_EOF){ws_fault(c,rc?rc:t.error?t.error:-ECONNRESET);return;}
         if(t.state!=ASTER_NET_READY)return;
+        if(c->url.tls&&!c->tls_started_ms)c->tls_started_ms=now;
         c->pub.state=c->url.tls?ASTER_WS_TLS:ASTER_WS_UPGRADE;
     }
 #if defined(CONFIG_ASTER_HTTP_TLS)
@@ -152,7 +156,9 @@ static void ws_process(struct ws_client *c)
         if(!rc)rc=aster_http_tls_handshake(c->tls,&c->tls_report);
         c->pub.tls_verify=c->tls_report.verify;
         if(rc==-EAGAIN)return;
-        if(rc){ws_fault(c,rc);return;}c->pub.state=ASTER_WS_UPGRADE;
+        if(rc){ws_fault(c,rc);return;}
+        c->tls_ms=aster_net_diag_span_ms(c->tls_started_ms,now);
+        c->pub.state=ASTER_WS_UPGRADE;
     }
 #endif
     if(c->pub.state==ASTER_WS_UPGRADE&&!c->upgraded){
@@ -178,7 +184,10 @@ static void ws_process(struct ws_client *c)
             c->input_length++;
             if(c->input_length>=4&&!memcmp(c->input+c->input_length-4,"\r\n\r\n",4)){
                 rc=aster_ws_response((char *)c->input,c->input_length,c->expected_accept);
-                if(rc){ws_fault(c,rc);return;}c->input_length=0;c->pub.state=ASTER_WS_READY;c->last_rx=now;break;
+                if(rc){ws_fault(c,rc);return;}
+                c->input_length=0;c->pub.state=ASTER_WS_READY;c->last_rx=now;
+                if(!c->ttfb_ms)c->ttfb_ms=aster_net_diag_span_ms(c->born_ms,now);
+                break;
             }
         }
         return;
@@ -214,8 +223,19 @@ static bool ws_dispose(struct ws_client *c)
 bool aster_ws_svc_tick(void)
 {
     k_mutex_lock(&ws_lock,K_FOREVER);bool active=ws_client!=NULL;
-    if(ws_client){if(ws_client->closing){if(ws_dispose(ws_client)){aster_psram_free(ws_client);ws_client=NULL;}}else ws_process(ws_client);}
-    k_mutex_unlock(&ws_lock);return active;
+    if(ws_client){if(ws_client->closing){if(ws_dispose(ws_client)){
+        uint32_t tls_ms=ws_client->tls_ms,ttfb_ms=ws_client->ttfb_ms;
+        aster_psram_free(ws_client);ws_client=NULL;
+        aster_net_diag_sample(0,0,tls_ms);aster_net_diag_sample_ttfb(ttfb_ms);
+    }}else ws_process(ws_client);}
+    uint64_t owner=0;uint32_t handle=0,state=0;bool changed=false;
+    if(ws_client&&!ws_client->closing&&ws_client->pub.state!=ws_client->published_state){
+        ws_client->published_state=ws_client->pub.state;owner=ws_client->owner;
+        handle=ws_client->handle;state=ws_client->pub.state;changed=true;
+    }
+    k_mutex_unlock(&ws_lock);
+    if(changed)aster_net_event_post(owner,handle,ASTER_NET_EVENT_WS,state);
+    return active;
 }
 int aster_ws_svc_open(uint64_t owner,const char *url,uint32_t timeout)
 {
@@ -233,7 +253,7 @@ int aster_ws_svc_open(uint64_t owner,const char *url,uint32_t timeout)
     if(parsed.tls){rc=aster_http_svc_tls_acquire(&c->ca,&c->ca_length);if(rc){aster_psram_free(c);goto done;}}
     rc=aster_net_open(c->transport_owner,ASTER_NET_TCP,c->url.host,c->url.port,timeout);
     if(rc<0){c->closing=c->cancel=true;ws_client=c;goto done;}
-    c->handle=c->transport=rc;c->pub.state=ASTER_WS_CONNECTING;c->deadline=k_uptime_get()+timeout;ws_client=c;
+    c->handle=c->transport=rc;c->pub.state=ASTER_WS_CONNECTING;c->born_ms=k_uptime_get();c->deadline=c->born_ms+timeout;ws_client=c;
 done:
     k_mutex_unlock(&ws_lock);aster_http_svc_worker_signal();return rc;
 }

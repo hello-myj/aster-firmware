@@ -10,6 +10,7 @@
 #include "aster_storage.h"
 #include "aster_sysinfo.h"
 #include "aster_logring.h"
+#include "aster_net_event.h"
 #include "aster_platform.h"
 #if IS_ENABLED(CONFIG_ASTER_LVGL)
 #include "ui_font.h"
@@ -774,6 +775,28 @@ static void ui_service(aster_app_ctx_t *ctx)
 #endif
 }
 
+/* N5.5: deliver at most one pending network state change before the frame
+ * event. Only handles owned by this APP session are eligible (the ring is
+ * keyed by owner), so a neighbour APP or the CLI can never be observed. */
+static void pump_net_events(aster_app_ctx_t *ctx)
+{
+#if IS_ENABLED(CONFIG_ASTER_NET)
+    if (!ctx->network_owner) return;
+    uint32_t handle = 0, kind = 0, state = 0;
+    if (!aster_net_event_take(ctx->network_owner, &handle, &kind, &state)) return;
+    aster_event_t ev = { 0 };
+    ev.size = sizeof(ev);
+    ev.version = 1;
+    ev.type = ASTER_EVENT_SYS;
+    ev.timestamp_ms = (uint64_t)k_uptime_get();
+    ev.u.sys.code = ASTER_SYS_NET_STATE;
+    ev.u.sys.value = handle;
+    ev.u.data[2] = kind;
+    ev.u.data[3] = state;
+    deliver_event(ctx, &ev);
+#endif
+}
+
 static void app_event_loop(aster_app_ctx_t *ctx)
 {
 	/* ctx->start_ms is set by the caller, before aster_app_init -- see the
@@ -835,6 +858,9 @@ static void app_event_loop(aster_app_ctx_t *ctx)
 				}
 			}
 		}
+
+		/* 2b) N5.5 network state change (coalesced, one per frame) */
+		if (!ctx->quit) pump_net_events(ctx);
 
 		/* 3) frame */
 		if (!ctx->quit) {

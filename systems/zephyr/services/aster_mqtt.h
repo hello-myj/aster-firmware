@@ -49,6 +49,8 @@ int aster_mqtt_svc_cancel(uint64_t owner, uint32_t handle);
 int aster_mqtt_svc_close(uint64_t owner, uint32_t handle);
 int aster_mqtt_svc_close_owner(uint64_t owner);
 int aster_mqtt_svc_stats(struct aster_mqtt_stats *out);
+/* Cumulative reconnects since boot, including clients that have since closed. */
+uint32_t aster_mqtt_svc_reconnects(void);
 /* Only shared bounded network worker calls tick; no shell/APP network waits. */
 bool aster_mqtt_svc_tick(void);
 #endif

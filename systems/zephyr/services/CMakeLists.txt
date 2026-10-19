@@ -14,7 +14,7 @@ target_sources(app PRIVATE
 )
 
 if(CONFIG_ASTER_NET)
-  target_sources(app PRIVATE aster_net.c)
+  target_sources(app PRIVATE aster_net.c aster_net_event.c)
 endif()
 
 if(CONFIG_ASTER_NET_LOOPBACK_TEST)

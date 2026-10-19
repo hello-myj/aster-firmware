@@ -5,6 +5,7 @@
  */
 #if IS_ENABLED(CONFIG_ASTER_NET)
 #include "aster_net.h"
+#include "aster_net_event.h"
 #if defined(CONFIG_ASTER_MQTT)
 #include "aster_mqtt.h"
 #endif
@@ -198,6 +199,8 @@ void aster_native_release_network(aster_app_ctx_t *ctx)
     while (aster_http_svc_close_owner(ctx->network_owner) == -EAGAIN) k_sleep(K_MSEC(1));
 #endif
     while (aster_net_close_owner(ctx->network_owner) == -EAGAIN) k_sleep(K_MSEC(1));
+    /* N5.5: pending state events must not outlive the session. */
+    aster_net_event_drop_owner(ctx->network_owner);
     ctx->network_owner = 0;
 }
 #else

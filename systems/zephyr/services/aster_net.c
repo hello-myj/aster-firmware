@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "aster_net.h"
 #include "aster_mem.h"
+#include "aster_net_event.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <string.h>
@@ -46,6 +47,11 @@ struct slot {
     uint16_t tx_len, rx_len;
     uint64_t tx_bytes, rx_bytes;
     uint32_t dropped;
+    /* N5.5 diagnostics: N5.5 keeps microsecond timestamps per stage and the
+     * last published state used for transition detection. */
+    int64_t dns_started_us, connect_started_us;
+    uint32_t dns_us, connect_us;
+    enum aster_net_state published_state;
     union buffers *buf;
 };
 static struct slot slots[ASTER_NET_SLOTS];
@@ -141,6 +147,7 @@ static int address(struct slot *s, int64_t now)
     s->phase = ASTER_NET_DNS;
     s->dns_started = true;
     s->dns_done = false;
+    s->dns_started_us = k_uptime_get();
     s->state = ASTER_NET_RESOLVING;
     int32_t timeout = (int32_t)(s->deadline - now);
     k_mutex_unlock(&net_lock);
@@ -185,11 +192,17 @@ static void tcp_io(struct slot *s, int64_t now)
         if (!rc || s->closing || s->cancel) return;
         struct sockaddr_in a = peer(s);
         s->phase = ASTER_NET_CONNECT;
+        s->connect_started_us = k_uptime_get();
+        if (s->dns_started_us) {
+            int64_t d = s->connect_started_us - s->dns_started_us;
+            s->dns_us = d > 0 && d < 60000 ? (uint32_t)d : 0;
+        }
         rc = zsock_connect(s->fd, (struct sockaddr *)&a, sizeof(a));
         if (rc < 0 && errno != EINPROGRESS && errno != EALREADY) {
             fail(s, socket_error()); return;
         }
         s->state = rc == 0 ? ASTER_NET_READY : ASTER_NET_CONNECTING;
+        if (rc == 0 && s->connect_started_us) s->connect_us = 1; /* immediate */
     }
     if (s->state == ASTER_NET_CONNECTING) {
         if (now >= s->deadline) { fail(s, -ETIMEDOUT); return; }
@@ -203,6 +216,10 @@ static void tcp_io(struct slot *s, int64_t now)
             fail(s, socket_error()); return;
         }
         if (error) { fail(s, -error); return; }
+        if (s->connect_started_us) {
+            int64_t d = k_uptime_get() - s->connect_started_us;
+            s->connect_us = d > 0 && d < 60000 ? (uint32_t)d : 0;
+        }
         s->state = ASTER_NET_READY;
     }
     local_port(s);
@@ -319,6 +336,9 @@ static bool service_tick(void)
             }
         }
         if (s->closing) {
+            /* N5.5: fold the finished connection's stage timings into the
+             * global diag counters before the slot is wiped. */
+            aster_net_diag_sample(s->dns_us, s->connect_us, 0);
             counters.psram_bytes -= buffer_size(s->kind);
             aster_psram_free(s->buf);
             memset(s, 0, sizeof(*s));
@@ -326,7 +346,20 @@ static bool service_tick(void)
         }
     }
     bool active = false;
-    for (int i = 0; i < ASTER_NET_SLOTS; ++i) active |= slots[i].handle != 0;
+    for (int i = 0; i < ASTER_NET_SLOTS; ++i) {
+        struct slot *s = &slots[i];
+        if (!s->handle) continue;
+        active = true;
+        /* N5.5: publish one transition per state change. Detection lives here,
+         * in one place, so no fail()/tcp_io()/udp_io() path can miss it. */
+        if (s->state != s->published_state) {
+            s->published_state = s->state;
+            aster_net_event_post(s->owner, s->handle,
+                                 s->kind == ASTER_NET_TCP ? ASTER_NET_EVENT_TCP
+                                                          : ASTER_NET_EVENT_UDP,
+                                 s->state);
+        }
+    }
     k_mutex_unlock(&net_lock);
     return active;
 }
@@ -553,4 +586,20 @@ int aster_net_interface_info(struct aster_net_interface_info *out)
     if (addr) { out->ipv4 = addr->s_addr; out->flags |= 8u; }
     k_mutex_unlock(&iface->lock);
     return 0;
+}
+uint32_t aster_net_app_sessions(void)
+{
+    uint32_t owners = 0;
+    uint64_t seen[ASTER_NET_SLOTS] = { 0 };
+    if (k_mutex_lock(&net_lock, K_NO_WAIT)) return 0; /* diagnostic best effort */
+    for (int i = 0; i < ASTER_NET_SLOTS; ++i) {
+        struct slot *s = &slots[i];
+        if (!s->handle || s->owner == ASTER_NET_CLI_OWNER) continue;
+        bool dup = false;
+        for (uint32_t k = 0; k < owners; ++k)
+            if (seen[k] == s->owner) dup = true;
+        if (!dup && owners < ASTER_NET_SLOTS) seen[owners++] = s->owner;
+    }
+    k_mutex_unlock(&net_lock);
+    return owners;
 }

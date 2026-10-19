@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT: actual service + actual native bridge. */
 #define ASTER_NET_HOST_TEST
 #include "../systems/zephyr/services/aster_net.c"
+#include "../systems/zephyr/services/aster_net_event.c"
 #define ASTER_HTTP_HOST_TEST
 #include "../systems/zephyr/services/aster_http.c"
 #include <aster/aster.h>
