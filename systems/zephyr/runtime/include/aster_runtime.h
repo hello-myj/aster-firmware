@@ -71,6 +71,9 @@ typedef struct aster_app_ctx {
 	volatile uint32_t state; /* aster_app_state_t */
 	volatile bool     quit;
 	volatile bool     paused;
+	volatile bool     lifecycle_paused; /* pause hook state, including a system overlay */
+	volatile bool     touch_suppressed; /* wait for all-up after a lifecycle/UI handoff */
+	uint8_t           touch_slots_down; /* app slots with a delivered DOWN and no delivered UP */
 	volatile bool     crashed;      /* event loop ended via a wasm trap */
 	volatile bool     exit_clean;   /* set by aster_app_exit (not a crash) */
 	volatile uint32_t exit_code;

@@ -372,8 +372,10 @@
 	 * cannot explain.
 	 */
 	ft6336: ft6336@38 {
-		compatible = "focaltech,ft5336";
+		compatible = "focaltech,ft6336-mt";
 		reg = <0x38>;
+		screen-width = <240>;
+		screen-height = <320>;
 		status = "okay";
 	};
 

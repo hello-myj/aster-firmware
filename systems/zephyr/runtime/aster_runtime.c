@@ -12,6 +12,7 @@
 #include "aster_logring.h"
 #include "aster_net_event.h"
 #include "aster_platform.h"
+#include "touch_ui.h"
 #if IS_ENABLED(CONFIG_ASTER_LVGL)
 #include "ui_font.h"
 #include "font_sd.h"
@@ -589,6 +590,53 @@ static void drain_keys(aster_app_ctx_t *ctx)
 	}
 }
 
+/* The quick panel owns the glass while open. Reuse the existing APP
+ * pause/resume hooks so older ABI 4.0 packages can clear captured controls
+ * without inventing a new touch action or changing the event layout. A
+ * manually paused APP remains paused when the overlay closes. */
+static int sync_lifecycle_pause(aster_app_ctx_t *ctx)
+{
+	bool overlay = false;
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+	overlay = aster_qpanel_is_open() || aster_qpanel_exit_is_open();
+#endif
+	bool wanted = ctx->paused || overlay;
+	if (wanted == ctx->lifecycle_paused) return 0;
+	if (wanted) {
+		aster_native_frame_abort(ctx);
+		int err = call_fn(ctx, ctx->f_pause, 0, NULL);
+		if (err) return err;
+		ctx->lifecycle_paused = true;
+		ctx->touch_slots_down = 0;
+	} else {
+		int err = call_fn(ctx, ctx->f_resume, 0, NULL);
+		if (err) return err;
+		ctx->lifecycle_paused = false;
+	}
+	return 0;
+}
+
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+static struct aster_touch_ui_state runtime_touch_ui;
+static uint32_t runtime_touch_ui_x, runtime_touch_ui_y;
+#endif
+
+static void deliver_touch_event(aster_app_ctx_t *ctx, const aster_event_t *ev)
+{
+	deliver_event(ctx, ev);
+#if IS_ENABLED(CONFIG_ASTER_AXS15231B_RAW_DIAG)
+	if (ev->u.touch.action == ASTER_TOUCH_DOWN || ev->u.touch.action == ASTER_TOUCH_UP) {
+		LOG_INF("touch delivered app=%s slot=%u action=%u x=%u y=%u quit=%u",
+			ctx->id, ev->u.touch.slot, ev->u.touch.action,
+			ev->u.touch.x, ev->u.touch.y, (unsigned)ctx->quit);
+	}
+#endif
+	if (ctx->quit || ev->u.touch.slot >= ASTER_TOUCH_MAX) return;
+	uint8_t bit = (uint8_t)(1u << ev->u.touch.slot);
+	if (ev->u.touch.action == ASTER_TOUCH_DOWN) ctx->touch_slots_down |= bit;
+	else if (ev->u.touch.action == ASTER_TOUCH_UP) ctx->touch_slots_down &= (uint8_t)~bit;
+}
+
 /* The UI service for the app context: the gesture recognizer, the
  * quick-settings sheet, and the two things LVGL needs to stay alive while a
  * guest owns the screen (the indev samples and the timer pump).
@@ -613,76 +661,80 @@ static void drain_keys(aster_app_ctx_t *ctx)
 static void ui_service(aster_app_ctx_t *ctx)
 {
 #if IS_ENABLED(CONFIG_ASTER_LVGL)
-	aster_touch_evt_t tev[ASTER_TOUCH_MAX];
-	int n = aster_plat_input_poll(tev, ASTER_TOUCH_MAX);
+	/* The previous LVGL pump may have closed the overlay. Pair that pause
+	 * before the next queued DOWN reaches wasm, whose resume hook may clear
+	 * captured controls. */
+	if (sync_lifecycle_pause(ctx) != 0 || ctx->quit) return;
+	aster_touch_evt_t tev[ASTER_PLAT_TOUCH_EVENT_QUEUE];
+	int n = aster_plat_input_poll(tev, ARRAY_SIZE(tev));
+	uint32_t masks[ASTER_PLAT_TOUCH_EVENT_QUEUE];
+	for (int i = 0; i < n; ++i) masks[i] = tev[i].contact_mask;
+	aster_touch_ui_begin_batch(&runtime_touch_ui, masks, (uint8_t)n);
 
 	for (int i = 0; i < n && !ctx->quit; i++) {
 		bool pressed = tev[i].action != ASTER_TOUCH_UP;
+		struct aster_touch_ui_decision ui = aster_touch_ui_accept(
+			&runtime_touch_ui, (uint8_t)i, tev[i].action, tev[i].slot,
+			tev[i].contact_mask);
+		if (ui.reset_gesture) {
+			aster_gesture_reset();
 #if IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX)
-		if (!aster_qpanel_is_open() &&
-		    aster_launcher_app_touch(tev[i].x, tev[i].y, pressed)) {
-			lv_indev_wait_release(aster_ui_lvgl_indev());
-			ctx->exit_clean = true;
-			ctx->quit = true;
-			LOG_INF("runtime: right-edge return -> %s", ctx->id);
-			continue;
-		}
+			aster_launcher_app_touch_cancel();
 #endif
-		/* Asked per sample, not once per batch: a pull-down earlier in
-		 * this same batch can have just opened or closed the sheet, and
-		 * that changes what the next sample is allowed to mean. */
-		/* The runtime is deliberately not devicetree-aware, so it asks
-		 * the display substrate for the same logical height the touch
-		 * coordinates are in -- the launcher passes the compile-time
-		 * equivalent (ASTER_UI_H); both are the one number. */
-		aster_gest_t g = aster_gesture_feed(tev[i].x, tev[i].y, pressed,
-						aster_qpanel_allow(false),
-						(int32_t)aster_ui_lvgl_height());
-
-		/* Unconditional, gestures included: LVGL's indev only ever sees
-		 * press/release pixels, and a sample it never receives leaves it
-		 * believing the finger is still down -- the next tap on one of
-		 * the sheet's controls would then read as a drag. */
-		aster_ui_lvgl_pointer(tev[i].x, tev[i].y, pressed);
-
-		if (g != ASTER_GEST_NONE) {
-			/* Whatever the gesture turns into, it must not also land
-			 * as a CLICKED on the widget the finger crossed. */
+		}
+		if (ui.release_pointer) {
 			lv_indev_wait_release(aster_ui_lvgl_indev());
-			/* Everything reaching this point is a guest: the native
-			 * launcher is not an app ctx, it pumps on the branch
-			 * above. So the sheet is always over an app here --
-			 * which is the case that has to save the glass. */
-			if (aster_qpanel_on_gesture(g, ASTER_QPANEL_OVER_APP)) {
-				LOG_INF("runtime: pull-down (%d,%d) -> panel %s",
-					(int)tev[i].x, (int)tev[i].y,
-					aster_qpanel_is_open() ? "open" : "closed");
+			aster_ui_lvgl_pointer(runtime_touch_ui_x, runtime_touch_ui_y, false);
+		}
+		if (ui.route) {
+			runtime_touch_ui_x = tev[i].x;
+			runtime_touch_ui_y = tev[i].y;
+#if IS_ENABLED(CONFIG_ASTER_LAUNCHER_FLUX)
+			if (!aster_qpanel_is_open() && !aster_qpanel_exit_is_open() &&
+			    aster_launcher_app_touch(tev[i].x, tev[i].y, pressed)) {
+				lv_indev_wait_release(aster_ui_lvgl_indev());
+				ctx->exit_clean = true;
+				ctx->quit = true;
+				LOG_INF("runtime: right-edge return -> %s", ctx->id);
 				continue;
 			}
-			if (g == ASTER_GEST_PANEL_UP) {
-                /* The existing pull-up gesture asks; only the confirmation
-                 * callback below may actually end the APP. */
-                bool opened=aster_qpanel_request_exit(ctx->rec->name);
-                aster_gesture_reset();
-                LOG_INF("runtime: pull-up -> return confirmation %s (%s)",
-                        ctx->id,opened?"open":"unavailable");
-                continue;
-            }
+#endif
+			/* Asked per sample because an earlier event in this batch may
+			 * have opened or closed the quick-settings sheet. */
+			aster_gest_t g = aster_gesture_feed(tev[i].x, tev[i].y, pressed,
+							aster_qpanel_allow(false),
+							(int32_t)aster_ui_lvgl_height());
+			aster_ui_lvgl_pointer(tev[i].x, tev[i].y, pressed);
+			if (g != ASTER_GEST_NONE) {
+				lv_indev_wait_release(aster_ui_lvgl_indev());
+				if (aster_qpanel_on_gesture(g, ASTER_QPANEL_OVER_APP)) {
+					LOG_INF("runtime: pull-down (%d,%d) -> panel %s",
+						(int)tev[i].x, (int)tev[i].y,
+						aster_qpanel_is_open() ? "open" : "closed");
+					ctx->touch_suppressed = true;
+					continue;
+				}
+				if (g == ASTER_GEST_PANEL_UP) {
+					bool opened = aster_qpanel_request_exit(ctx->rec->name);
+					aster_gesture_reset();
+					LOG_INF("runtime: pull-up -> return confirmation %s (%s)",
+						ctx->id, opened ? "open" : "unavailable");
+					ctx->touch_suppressed = true;
+					continue;
+				}
+			}
 		}
 
-		/* Nothing is delivered to the guest while the sheet is up: it
-		 * owns the input, and a tap that lands on one of its rows must
-		 * not also press whatever the app has underneath.
-		 *
-		 * Note what this does NOT do: repair the guest's press state.
-		 * The recogniser only claims a stroke from the sample that
-		 * crosses its threshold, so for a pull-down the guest has
-		 * already been handed the DOWN and now never gets its UP. That
-		 * is left alone on purpose -- the guest's symptom is its own
-		 * highlight staying lit until the next touch, which heals
-		 * itself, whereas a synthetic UP would be a real activation at
-		 * a point the user never tapped. */
-		if (ctx->paused || aster_qpanel_is_open()) {
+		/* The overlay takes input ownership. Its pause hook clears any
+		 * captured app controls; physical events remain suppressed until all
+		 * contacts lift, so a held finger cannot leak into the resumed app. */
+		bool overlay = aster_qpanel_is_open() || aster_qpanel_exit_is_open();
+		if (ctx->paused || overlay) {
+			ctx->touch_suppressed = true;
+			if (sync_lifecycle_pause(ctx) != 0 || ctx->quit) return;
+		}
+		if (ctx->touch_suppressed) {
+			if (tev[i].contact_mask == 0) ctx->touch_suppressed = false;
 			continue;
 		}
 		aster_event_t ev = { 0 };
@@ -693,25 +745,16 @@ static void ui_service(aster_app_ctx_t *ctx)
 		ev.u.touch.x = tev[i].x;
 		ev.u.touch.y = tev[i].y;
 		ev.u.touch.action = tev[i].action;
-		/* The guest's surface is in APP space, not the panel's (see
-		 * aster_plat_display_app_space): on a board that scales, the
-		 * picture it drew is magnified to fill the glass, so a panel
-		 * coordinate is not an app coordinate. Everything above this
-		 * line -- gestures, the sheet's indev, the qpanel -- deliberately
-		 * stays in panel space, because all of it is firmware UI drawn
-		 * over the whole glass. A false return means there is no app
-		 * pixel under the finger; see aster_plat_display_app_touch(). */
-		if (!aster_plat_display_app_touch(&ev.u.touch.x, &ev.u.touch.y)) {
-			continue;
-		}
-		deliver_event(ctx, &ev);
+		ev.u.touch.slot = tev[i].slot;
+		(void)aster_plat_display_app_touch(&ev.u.touch.x, &ev.u.touch.y);
+		deliver_touch_event(ctx, &ev);
 	}
 
 	/* Keys go straight into wasm, so they keep the old gate: an app that
 	 * asked to be paused should not have its entry functions called behind
 	 * its back. The exit key is the one casualty, and it was already
 	 * unreachable on a paused app before this refactor. */
-	if (!ctx->paused) {
+	if (!ctx->paused && !aster_qpanel_is_open() && !aster_qpanel_exit_is_open()) {
 		drain_keys(ctx);
 	}
 
@@ -733,6 +776,7 @@ static void ui_service(aster_app_ctx_t *ctx)
 	/* The launcher normally polls the sheet. While a guest owns this
 	 * worker, service radio completion and status from this same UI thread. */
 	aster_qpanel_tick();
+	if (sync_lifecycle_pause(ctx) != 0 || ctx->quit) return;
 
 	/* Keeps the LVGL timer alive while an app owns the worker: it services
 	 * the screenshot poll (the shell blocks on it) and drains async flush
@@ -752,8 +796,8 @@ static void ui_service(aster_app_ctx_t *ctx)
 	if (ctx->paused) {
 		return;
 	}
-	aster_touch_evt_t tev[ASTER_TOUCH_MAX];
-	int n = aster_plat_input_poll(tev, ASTER_TOUCH_MAX);
+	aster_touch_evt_t tev[ASTER_PLAT_TOUCH_EVENT_QUEUE];
+	int n = aster_plat_input_poll(tev, ARRAY_SIZE(tev));
 
 	for (int i = 0; i < n && !ctx->quit; i++) {
 		aster_event_t ev = { 0 };
@@ -764,12 +808,15 @@ static void ui_service(aster_app_ctx_t *ctx)
 		ev.u.touch.x = tev[i].x;
 		ev.u.touch.y = tev[i].y;
 		ev.u.touch.action = tev[i].action;
+		ev.u.touch.slot = tev[i].slot;
 		/* Same app-space mapping as the LVGL branch above; here there is
 		 * no firmware UI to keep apart from it. */
-		if (!aster_plat_display_app_touch(&ev.u.touch.x, &ev.u.touch.y)) {
+		(void)aster_plat_display_app_touch(&ev.u.touch.x, &ev.u.touch.y);
+		if (ctx->touch_suppressed) {
+			if (tev[i].contact_mask == 0) ctx->touch_suppressed = false;
 			continue;
 		}
-		deliver_event(ctx, &ev);
+		deliver_touch_event(ctx, &ev);
 	}
 	drain_keys(ctx);
 #endif
@@ -802,6 +849,10 @@ static void pump_net_events(aster_app_ctx_t *ctx)
 
 static void app_event_loop(aster_app_ctx_t *ctx)
 {
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+	aster_touch_ui_reset(&runtime_touch_ui);
+	runtime_touch_ui_x = runtime_touch_ui_y = 0;
+#endif
 	/* ctx->start_ms is set by the caller, before aster_app_init -- see the
 	 * comment there. It is NOT set here: by the time this loop runs the app
 	 * has already been given control and may already have taken a baseline. */
@@ -813,15 +864,15 @@ static void app_event_loop(aster_app_ctx_t *ctx)
 		/* lifecycle callbacks (pause/resume) run here, not on shell thread */
 		switch (ctx->pending_ctrl) {
 		case ASTER_CTRL_PAUSE:
-			aster_native_frame_abort(ctx);
-			call_fn(ctx, ctx->f_pause, 0, NULL);
-			ctx->pending_ctrl = ASTER_CTRL_NONE;
 			ctx->paused = true;
+			if (ctx->touch_slots_down) ctx->touch_suppressed = true;
+			ctx->pending_ctrl = ASTER_CTRL_NONE;
+			if (sync_lifecycle_pause(ctx) != 0) continue;
 			continue;
 		case ASTER_CTRL_RESUME:
 			ctx->paused = false;
-			call_fn(ctx, ctx->f_resume, 0, NULL);
 			ctx->pending_ctrl = ASTER_CTRL_NONE;
+			if (sync_lifecycle_pause(ctx) != 0) continue;
 			break;
 		default:
 			break;

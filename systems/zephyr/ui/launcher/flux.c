@@ -23,6 +23,7 @@
 #include "wifi_settings.h"
 #include "qpanel.h"
 #include "gesture.h"
+#include "touch_ui.h"
 #include "aster_platform.h"
 #include "aster_app_mgr.h"
 #include "aster_runtime.h"
@@ -163,6 +164,8 @@ static struct {
  uint64_t started;
  struct flux_velocity track;
 } drag;
+static struct aster_touch_ui_state launcher_touch_ui;
+static uint32_t launcher_touch_x, launcher_touch_y;
 static void show_page(int next);
 static void redraw(void);
 static void settle(int target);
@@ -890,6 +893,10 @@ static void palette(aster_qpanel_palette_t *p)
 { *p=(aster_qpanel_palette_t){.bg=0x181b18,.fg=FG,.dim=DIM,.surface=0x252d22,.accent=ACCENT}; }
 static const aster_qpanel_theme_ops_t theme={.palette=palette};
 static struct {bool down,edge;int32_t x,y;} app_drag;
+void aster_launcher_app_touch_cancel(void)
+{
+ memset(&app_drag,0,sizeof(app_drag));
+}
 bool aster_launcher_app_touch(int32_t x,int32_t y,bool pressed)
 {
  if(pressed && !app_drag.down) {
@@ -906,6 +913,7 @@ int aster_launcher_init(void)
 {
  if(initialized) return 0;
  initialized=true;
+ aster_touch_ui_reset(&launcher_touch_ui);
  for(size_t face=0;face<ARRAY_SIZE(flux_icon_sizes);face++) for(size_t i=0;i<ARRAY_SIZE(chrome[face]);i++) {
   unsigned px=flux_icon_sizes[face];
   chrome[face][i]=(lv_image_dsc_t){.header={.magic=LV_IMAGE_HEADER_MAGIC,.cf=LV_COLOR_FORMAT_A8,.w=px,.h=px,.stride=px},.data_size=px*px,.data=flux_icon_data[face][i]};
@@ -921,7 +929,7 @@ int aster_launcher_init(void)
 void aster_launcher_show(void)
 {
  if(visible || !aster_ui_lvgl_screen()) return;
- aster_launcher_init();aster_qpanel_force_close();aster_gesture_reset();
+ aster_launcher_init();aster_touch_ui_reset(&launcher_touch_ui);aster_qpanel_force_close();aster_gesture_reset();
  if(aster_plat_display_orientation_get()!=ASTER_ORIENT_PORTRAIT) (void)aster_plat_display_orientation_set(ASTER_ORIENT_PORTRAIT);
  aster_ui_lvgl_resync_window();
  view_w=(int)aster_ui_lvgl_width();view_h=(int)aster_ui_lvgl_height();
@@ -962,6 +970,9 @@ void aster_launcher_show(void)
 void aster_launcher_hide(void)
 {
  if(!visible) return;
+ lv_indev_wait_release(aster_ui_lvgl_indev());
+ aster_ui_lvgl_pointer(launcher_touch_x,launcher_touch_y,false);
+ aster_touch_ui_reset(&launcher_touch_ui);
  aster_qpanel_force_close();save_now();aster_gesture_reset();
  aster_plat_audio_ui_release();
  lv_obj_clean(aster_ui_lvgl_screen());
@@ -1006,8 +1017,26 @@ void aster_launcher_pump_idle(void)
  }
  if(!visible) return;
  if(dirty && !modal) {aster_launcher_hide();sound_return=false;aster_launcher_show();}
- aster_touch_evt_t events[ASTER_TOUCH_MAX];int n=aster_plat_input_poll(events,ASTER_TOUCH_MAX);
- for(int i=0;i<n;i++) touch(&events[i]);
+ aster_touch_evt_t events[ASTER_PLAT_TOUCH_EVENT_QUEUE];
+ int n=aster_plat_input_poll(events,ARRAY_SIZE(events));
+ uint32_t masks[ASTER_PLAT_TOUCH_EVENT_QUEUE];
+ for(int i=0;i<n;i++) masks[i]=events[i].contact_mask;
+ aster_touch_ui_begin_batch(&launcher_touch_ui,masks,(uint8_t)n);
+ for(int i=0;i<n;i++) {
+  struct aster_touch_ui_decision ui=aster_touch_ui_accept(&launcher_touch_ui,(uint8_t)i,
+   events[i].action,events[i].slot,events[i].contact_mask);
+  if(ui.reset_gesture) {
+   aster_gesture_reset();memset(&drag,0,sizeof(drag));pull=0;
+  }
+  if(ui.release_pointer) {
+   lv_indev_wait_release(aster_ui_lvgl_indev());
+   aster_ui_lvgl_pointer(launcher_touch_x,launcher_touch_y,false);
+  }
+  if(ui.route) {
+   launcher_touch_x=events[i].x;launcher_touch_y=events[i].y;
+   touch(&events[i]);
+  }
+ }
  aster_key_evt_t keys[ASTER_PLAT_MAX_KEYS];while(aster_plat_input_keys_poll(keys,ASTER_PLAT_MAX_KEYS)>0) {}
  uint64_t now=k_uptime_get();
  if(drag.down && !drag.moved && !drag.handle && !drag.blocked && now-drag.started>=650 && drag.hit==selected[group] && current() && !current()->builtin) {

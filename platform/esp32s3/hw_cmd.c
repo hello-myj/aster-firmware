@@ -319,6 +319,54 @@ static int cmd_touch(const struct shell *sh, size_t argc, char **argv)
 	if (argc >= 2) {
 		const char *op = argv[1];
 		uint32_t x = 0, y = 0;
+#if defined(CONFIG_ASTER_AXS15231B_RAW_DIAG)
+		if (strcmp(op,"replay") == 0) {
+			if (argc != 2) return -EINVAL;
+			int err=aster_plat_axs_touch_diag_replay_start();
+			shell_print(sh,"injected touch driver replay result=%d",err);
+			return err;
+		}
+#endif
+
+		if (strcmp(op, "state") == 0) {
+			uint32_t pts[ASTER_PLAT_MAX_TOUCH * 4] = {0};
+			aster_plat_input_state(pts, ASTER_PLAT_MAX_TOUCH);
+			uint32_t count = 0;
+			for (; count < ASTER_PLAT_MAX_TOUCH && pts[count*4+2] != ASTER_INPUT_TERM; count++) {
+				shell_print(sh, "touch slot=%u x=%u y=%u action=%u",
+					pts[count*4+3], pts[count*4], pts[count*4+1], pts[count*4+2]);
+			}
+			shell_print(sh, "touch active=%u", count);
+			aster_touch_debug_t health;
+			aster_plat_input_touch_debug(&health);
+			shell_print(sh,"touch recovery=%u errors=%u pending=%u hardware=%#x synthetic=%#x",
+				health.recovery,health.errors,health.pending,
+				health.hardware_mask,health.synthetic_mask);
+			return 0;
+		}
+		if (strcmp(op, "slot") == 0) {
+			if (argc != 6) {
+				shell_error(sh, "usage: hw touch slot <0|1> <down|move|up> <x> <y>");
+				return -EINVAL;
+			}
+			uint32_t values[3];
+			const unsigned positions[3] = {2,4,5};
+			for (unsigned i=0; i<3; i++) {
+				char *end;
+				unsigned long value=strtoul(argv[positions[i]],&end,0);
+				if (!argv[positions[i]][0] || *end || argv[positions[i]][0]=='-' || value>UINT16_MAX)
+					return -EINVAL;
+				values[i]=(uint32_t)value;
+			}
+			uint32_t action = !strcmp(argv[3],"down") ? ASTER_TOUCH_DOWN :
+				!strcmp(argv[3],"move") ? ASTER_TOUCH_MOVE :
+				!strcmp(argv[3],"up") ? ASTER_TOUCH_UP : 0;
+			if (values[0]>=ASTER_PLAT_MAX_TOUCH || !action) return -EINVAL;
+			aster_plat_input_touch_inject_slot(values[0],values[1],values[2],action);
+			shell_print(sh,"injected touch slot=%u %s x=%u y=%u",
+				values[0],argv[3],values[1],values[2]);
+			return 0;
+		}
 
 		/* The inverse map, asked rather than inferred. On a board that
 		 * scales, every value an app receives has been through it, so
@@ -344,9 +392,13 @@ static int cmd_touch(const struct shell *sh, size_t argc, char **argv)
 		if (strcmp(op, "up") == 0) {
 			/* release where the finger is, not at the origin:
 			 * UP carries a position and apps use it */
-			uint32_t pts[ASTER_PLAT_MAX_TOUCH * 4 + 4];
+			uint32_t pts[ASTER_PLAT_MAX_TOUCH * 4 + 4] = {0};
 
 			aster_plat_input_state(pts, ASTER_PLAT_MAX_TOUCH);
+			if (pts[2] == ASTER_INPUT_TERM) {
+				shell_print(sh, "injected touch up: already released");
+				return 0;
+			}
 			aster_plat_input_touch_inject(pts[0], pts[1], ASTER_TOUCH_UP);
 			shell_print(sh, "injected touch up x=%u y=%u", pts[0], pts[1]);
 			return 0;
@@ -403,8 +455,8 @@ static int cmd_touch(const struct shell *sh, size_t argc, char **argv)
 			k_msleep(40);
 			for (uint32_t i = 1; i <= steps; i++) {
 				aster_plat_input_touch_inject(
-					x + (x2 - x) * i / steps,
-					y + (y2 - y) * i / steps,
+					(uint32_t)((int64_t)x + ((int64_t)x2 - x) * i / steps),
+					(uint32_t)((int64_t)y + ((int64_t)y2 - y) * i / steps),
 					ASTER_TOUCH_MOVE);
 				k_msleep(step_ms);
 			}
@@ -415,6 +467,10 @@ static int cmd_touch(const struct shell *sh, size_t argc, char **argv)
 			return 0;
 		}
 		if (strcmp(op, "help") == 0) {
+			shell_print(sh, "hw touch state | slot <0|1> <down|move|up> <x> <y>");
+#if defined(CONFIG_ASTER_AXS15231B_RAW_DIAG)
+			shell_print(sh,"hw touch replay: bounded lost-UP driver fault fixture");
+#endif
 			shell_print(sh, "hw touch [n] | tap <x> <y> | down <x> <y> |"
 					" move <x> <y> | up | drag <x1> <y1> <x2> <y2>"
 					" [steps] [step_ms]");
@@ -1300,7 +1356,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(hw_cmds,
 	SHELL_CMD(blpulse, NULL, "blink test", cmd_bl_pulse),
 	SHELL_CMD(display, &sub_disp, "display ops", NULL),
 	SHELL_CMD_ARG(touch, NULL, "poll/inject touch [n | tap <x> <y> | down|move <x> <y>"
-		      " | up | drag <x1> <y1> <x2> <y2> [steps] [step_ms]]",
+		      " | up | slot <0|1> <down|move|up> <x> <y> | state"
+		      " | drag <x1> <y1> <x2> <y2> [steps] [step_ms]]",
 		      cmd_touch, 1, 7),
 	SHELL_CMD_ARG(key, NULL, "poll/inject keys [inject <code> down|up]", cmd_key, 1, 3),
 	SHELL_CMD(imu, NULL, "read IMU", cmd_imu),

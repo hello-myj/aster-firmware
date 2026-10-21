@@ -67,14 +67,31 @@ config ST7789V_CS_ASSERT_AFTER_RESET
 config ASTER_ESP32S3_TOUCH
 	bool "Capacitive touch panel (FT5336 over I2C)"
 	select INPUT
-	select INPUT_FT5336
+	select I2C
 	select ASTER_HAS_TOUCH
+	help
+	  Use the Aster FT6336 two-point polling driver. It owns the panel node
+	  with a private compatible and does not instantiate Zephyr's single-point
+	  FT5336 driver.
 
 config ASTER_AXS15231B_TOUCH
 	bool "AXS15231B capacitive touch (I2C)"
 	select INPUT
 	select I2C
 	select ASTER_HAS_TOUCH
+	depends on !ASTER_ESP32S3_TOUCH
+
+config ASTER_AXS15231B_RAW_DIAG
+	bool "Log raw AXS15231B two-contact reports"
+	depends on ASTER_AXS15231B_TOUCH
+	default n
+	help
+	  Emit the two candidate ID nibbles and the full 14-byte controller frame
+	  once per second while two contacts are reported. Also log bounded
+	  count/event/ID transitions, rejected reports and APP DOWN/UP delivery
+	  for end-to-end diagnosis. The CLI "hw touch replay" enables a bounded
+	  30-report lost-UP fixture at the driver report boundary; it does not
+	  generate physical contacts. Keep disabled for normal use.
 
 config ASTER_AUDIO_ADC_ES8311
 	bool "Use ES8311 internal ADC instead of ES7210"

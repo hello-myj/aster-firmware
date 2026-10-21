@@ -1,61 +1,76 @@
-"""Real input callback/poll path must preserve edge gestures across a busy frame."""
-from pathlib import Path
+"""Real touch-state queue keeps the origin and release of a delayed swipe."""
+import subprocess
+import tempfile
 import unittest
-from test_waveshare import run_c
-ROOT=Path(__file__).resolve().parents[1]
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PLAT = ROOT / "platform" / "esp32s3"
+
+
 class InputCoalescing(unittest.TestCase):
     def test_press_origin_and_release_survive_delayed_poll(self):
-        source=(ROOT/'platform/esp32s3/input.c').read_text()
-        state=source[source.index('static struct {'):source.index('INPUT_CALLBACK_DEFINE')]
-        poll=source[source.index('int aster_plat_input_poll('):source.index('void aster_plat_input_state(')]
-        inject=source[source.index('void aster_plat_input_touch_inject('):]
-        # The injection function is the final definition in this translation unit.
-        run_c(r'''
-#include "aster_platform.h"
+        code = r'''
+#include "touch_state.h"
 #include <assert.h>
 #include <string.h>
-#define K_MUTEX_DEFINE(n) int n
-#define K_FOREVER 0
-#define ARG_UNUSED(x) (void)(x)
-#define INPUT_EV_ABS 1
-#define INPUT_EV_KEY 2
-#define INPUT_ABS_X 0
-#define INPUT_ABS_Y 1
-#define INPUT_BTN_TOUCH 330
-struct input_event {unsigned type,code;int value;};
-static void k_mutex_lock(int *p,int timeout){(void)timeout;assert(!*p);*p=1;}
-static void k_mutex_unlock(int *p){assert(*p);*p=0;}
-static bool available=true;
-bool aster_plat_input_touch_available(void){return available;}
-void aster_plat_display_touch_map(uint32_t *x,uint32_t *y){(void)x;(void)y;}
-void aster_plat_display_touch_unmap(uint32_t *x,uint32_t *y){(void)x;(void)y;}
-''' + state + poll + inject + r'''
-static void event(unsigned type,unsigned code,int value){struct input_event e={type,code,value};input_cb(&e,NULL);}
-static void point(unsigned x,unsigned y){event(INPUT_EV_ABS,INPUT_ABS_X,x);event(INPUT_EV_ABS,INPUT_ABS_Y,y);}
-int main(void){
- aster_touch_evt_t e[2];
- /* Device reports press then moves before the APP reaches its next frame. */
- point(100,4);event(INPUT_EV_KEY,INPUT_BTN_TOUCH,1);point(100,180);
- assert(aster_plat_input_poll(e,2)==2);
- assert(e[0].action==ASTER_TOUCH_DOWN&&e[0].y==4);
- assert(e[1].action==ASTER_TOUCH_MOVE&&e[1].y==180);
- event(INPUT_EV_KEY,INPUT_BTN_TOUCH,0);assert(aster_plat_input_poll(e,2)==1&&e[0].action==ASTER_TOUCH_UP);
- /* A whole fast swipe arrives between frames; final movement precedes UP. */
- point(100,475);event(INPUT_EV_KEY,INPUT_BTN_TOUCH,1);point(100,260);event(INPUT_EV_KEY,INPUT_BTN_TOUCH,0);
- assert(aster_plat_input_poll(e,2)==2);
- assert(e[0].action==ASTER_TOUCH_DOWN&&e[0].y==475);
- assert(e[1].action==ASTER_TOUCH_MOVE&&e[1].y==260);
- assert(aster_plat_input_poll(e,2)==1&&e[0].action==ASTER_TOUCH_UP&&e[0].y==260);
- /* A one-event consumer must not lose pending movement or release. */
- aster_plat_input_touch_inject(90,3,ASTER_TOUCH_DOWN);
- aster_plat_input_touch_inject(90,190,ASTER_TOUCH_MOVE);
- aster_plat_input_touch_inject(90,190,ASTER_TOUCH_UP);
- assert(aster_plat_input_poll(e,1)==1&&e[0].action==ASTER_TOUCH_DOWN&&e[0].y==3);
- assert(aster_plat_input_poll(e,1)==1&&e[0].action==ASTER_TOUCH_MOVE&&e[0].y==190);
- assert(aster_plat_input_poll(e,1)==1&&e[0].action==ASTER_TOUCH_UP);
- assert(!aster_plat_input_poll(e,2));
- available=false;aster_plat_input_touch_inject(1,1,ASTER_TOUCH_DOWN);
- assert(!aster_plat_input_poll(e,2));available=true;assert(!aster_plat_input_poll(e,2));
- return 0;
+
+static void report(struct aster_touch_state *s, unsigned id, unsigned x,
+                   unsigned y, unsigned active) {
+    struct aster_touch_frame f = {0};
+    if (active) {
+        f.count = 1;
+        f.points[0] = (struct aster_touch_sample){.x=x, .y=y, .id=id,
+                                               .state=ASTER_TOUCH_SAMPLE_ACTIVE};
+    }
+    assert(aster_touch_state_report_frame(s, &f) == 0);
 }
-''')
+
+int main(void) {
+    struct aster_touch_state s;
+    struct aster_touch_event out[2];
+    aster_touch_state_init(&s);
+
+    /* Device reports press then moves before the APP reaches its next frame. */
+    report(&s, 3, 100, 4, 1);
+    report(&s, 3, 100, 180, 1);
+    assert(aster_touch_state_poll(&s, out, 2) == 2);
+    assert(out[0].action == 1 && out[0].slot == 0 && out[0].y == 4);
+    assert(out[1].action == 2 && out[1].slot == 0 && out[1].y == 180);
+    report(&s, 3, 0, 0, 0);
+    assert(aster_touch_state_poll(&s, out, 2) == 1);
+    assert(out[0].action == 3 && out[0].slot == 0 && out[0].y == 180);
+
+    /* A whole fast swipe arrives between frames; final movement precedes UP. */
+    report(&s, 5, 100, 475, 1);
+    report(&s, 5, 100, 260, 1);
+    report(&s, 5, 0, 0, 0);
+    assert(aster_touch_state_poll(&s, out, 2) == 2);
+    assert(out[0].action == 1 && out[0].y == 475);
+    assert(out[1].action == 2 && out[1].y == 260);
+    assert(aster_touch_state_poll(&s, out, 1) == 1);
+    assert(out[0].action == 3 && out[0].y == 260);
+
+    /* A one-event consumer must not lose the pending movement or release. */
+    report(&s, 7, 90, 3, 1);
+    report(&s, 7, 90, 190, 1);
+    report(&s, 7, 0, 0, 0);
+    assert(aster_touch_state_poll(&s, out, 1) == 1 && out[0].action == 1 && out[0].y == 3);
+    assert(aster_touch_state_poll(&s, out, 1) == 1 && out[0].action == 2 && out[0].y == 190);
+    assert(aster_touch_state_poll(&s, out, 1) == 1 && out[0].action == 3 && out[0].y == 190);
+    assert(aster_touch_state_poll(&s, out, 1) == 0);
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "input-coalescing"
+            result = subprocess.run(
+                ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                 "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+                 "-I", str(PLAT), "-x", "c", "-", "-x", "none",
+                 str(PLAT / "touch_state.c"), "-o", str(exe)],
+                input=code, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            run = subprocess.run([str(exe)], text=True, capture_output=True, timeout=10)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)

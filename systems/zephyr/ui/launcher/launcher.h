@@ -46,5 +46,6 @@ void aster_launcher_on_registry_change(void);
 /* FLUX app return gesture: rightmost 22 pixels, left drag >65 pixels.
  * Called by the runtime in app logical coordinates, UI thread only. */
 bool aster_launcher_app_touch(int32_t x, int32_t y, bool pressed);
+void aster_launcher_app_touch_cancel(void);
 
 #endif /* ASTER_LAUNCHER_H */

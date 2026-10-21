@@ -18,7 +18,9 @@ typedef struct {
 ASTER_I("aster_input_get_info") int32_t aster_input_get_info(aster_input_info_t *info, uint32_t info_size);
 
 /* Poll last touch state without waiting for events (convenience for games).
- * Returns number of points written (0..max), or negative error. */
+ * Returns number of points written (0..max), or negative error. Each point is
+ * exactly three u32 values (x, y, action), 12 bytes. Stable slot identity is
+ * available on ASTER_EVENT_TOUCH, not in this legacy snapshot record. */
 ASTER_I("aster_input_touch") int32_t aster_input_touch(uint32_t points_offset, uint32_t max_points);
 
 typedef struct {

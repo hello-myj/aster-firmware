@@ -1,13 +1,9 @@
 #include <zephyr/sys/util.h>
 /* SPDX-License-Identifier: MIT
- * Input: Zephyr input events -> ASTER touch + key models.
- * Touch (ft5336): driver reports input_touchscreen_report_pos(x,y) then
- * INPUT_BTN_TOUCH 1/0 (EV_KEY). We keep the latest coords and emit
- * down/move/up edge events.
- * Keys (gpio-keys etc., any EV_KEY that is not BTN_TOUCH): edges are queued
- * and held codes tracked; drained via aster_plat_input_keys_poll().
+ * Atomic touch frames and Zephyr key events -> ASTER input model.
  */
 #include "aster_platform.h"
+#include "touch_state.h"
 
 #include <zephyr/input/input.h>
 #include <zephyr/kernel.h>
@@ -16,16 +12,8 @@
 
 LOG_MODULE_REGISTER(aster_input, LOG_LEVEL_INF);
 
-static struct {
-	uint16_t x;
-	uint16_t y;
-	uint16_t down_x, down_y; /* immutable until pending DOWN is consumed */
-	bool     down;
-	bool     pending_down;
-	bool     pending_up;
-	bool     pending_move;
-	bool     has_pos; /* a position was reported since last press */
-} pt;
+static struct aster_touch_state touch;
+static bool touch_ready;
 
 /* --- key state ----------------------------------------------------------- */
 #define KEY_EDGE_QUEUE 16
@@ -42,7 +30,7 @@ static struct {
 	bool available; /* saw at least one non-touch EV_KEY */
 } ks;
 
-static K_MUTEX_DEFINE(pt_lock);
+static K_MUTEX_DEFINE(input_lock);
 
 static void key_push_locked(uint16_t code, bool pressed)
 {
@@ -81,39 +69,14 @@ static void input_cb(struct input_event *evt, void *user_data)
 {
 	ARG_UNUSED(user_data);
 
-	k_mutex_lock(&pt_lock, K_FOREVER);
+	k_mutex_lock(&input_lock, K_FOREVER);
 	switch (evt->type) {
 	case INPUT_EV_ABS:
-		if (evt->code == INPUT_ABS_X) {
-			pt.x = (uint16_t)evt->value;
-			pt.has_pos = true;
-			if (pt.down) {
-				pt.pending_move = true;
-			}
-		} else if (evt->code == INPUT_ABS_Y) {
-			pt.y = (uint16_t)evt->value;
-			pt.has_pos = true;
-			if (pt.down) {
-				pt.pending_move = true;
-			}
-		}
+		/* Touch drivers publish complete frames through the atomic
+		 * aster_plat_input_touch_report_frame() interface below. */
 		break;
 	case INPUT_EV_KEY:
-		if (evt->code == INPUT_BTN_TOUCH) {
-			if (evt->value) { /* pressed */
-				if (!pt.down) {
-					pt.down = true;
-					if (!pt.pending_down) { pt.down_x = pt.x; pt.down_y = pt.y; }
-					pt.pending_down = true;
-				}
-				pt.pending_move = true;
-			} else { /* released */
-				if (pt.down) {
-					pt.down = false;
-					pt.pending_up = true;
-				}
-			}
-		} else if (evt->code < 0xFFFF) {
+		if (evt->code != INPUT_BTN_TOUCH && evt->code < 0xFFFF) {
 			key_push_locked((uint16_t)evt->code, evt->value != 0);
 			ks.available = true;
 		}
@@ -121,7 +84,7 @@ static void input_cb(struct input_event *evt, void *user_data)
 	default:
 		break;
 	}
-	k_mutex_unlock(&pt_lock);
+	k_mutex_unlock(&input_lock);
 }
 
 INPUT_CALLBACK_DEFINE(NULL, input_cb, NULL);
@@ -136,7 +99,13 @@ bool aster_plat_input_touch_available(void)
 	/* Follows the menuconfig/capability choice (which also selects the
 	 * driver). A DT-only test would keep advertising touch when the build
 	 * explicitly turned the hardware off. */
-	return IS_ENABLED(CONFIG_ASTER_HAS_TOUCH) && aster_plat_display_count() > 0;
+	return IS_ENABLED(CONFIG_ASTER_HAS_TOUCH) && touch_ready &&
+	       aster_plat_display_count() > 0;
+}
+
+uint32_t aster_plat_input_touch_max_points(void)
+{
+	return aster_plat_input_touch_available() ? ASTER_PLAT_MAX_TOUCH : 0u;
 }
 
 bool aster_plat_input_keys_available(void)
@@ -152,45 +121,22 @@ bool aster_plat_input_keys_available(void)
 
 int aster_plat_input_poll(aster_touch_evt_t *evt, int max)
 {
-    if (!aster_plat_input_touch_available()) {
-        k_mutex_lock(&pt_lock, K_FOREVER);
-        pt.pending_down = pt.pending_move = pt.pending_up = false;
-        pt.down = false;
-        k_mutex_unlock(&pt_lock);
-        return 0;
-    }
-	int n = 0;
-	k_mutex_lock(&pt_lock, K_FOREVER);
-	if (pt.pending_down && n < max) {
-		evt[n].x = pt.down_x;
-		evt[n].y = pt.down_y;
-		evt[n].action = ASTER_TOUCH_DOWN;
-		pt.pending_down = false;
-		n++;
-	}
-	/* Preserve the last MOVE before UP, even if a whole swipe arrived
-	 * while the APP was drawing. The next poll drains UP when max is 1/2. */
-	if (pt.pending_move && !pt.pending_down && n < max) {
-		evt[n].x = pt.x;
-		evt[n].y = pt.y;
-		evt[n].action = ASTER_TOUCH_MOVE;
-		pt.pending_move = false;
-		n++;
-	}
-	if (pt.pending_up && n < max) {
-		evt[n].x = pt.x;
-		evt[n].y = pt.y;
-		evt[n].action = ASTER_TOUCH_UP;
-		pt.pending_up = false;
-		pt.pending_move = false;
-		n++;
-	}
-	k_mutex_unlock(&pt_lock);
+	if (!evt || max <= 0 || !aster_plat_input_touch_available()) return 0;
+	struct aster_touch_event raw[ASTER_TOUCH_EVENT_QUEUE];
+	if (max > ASTER_TOUCH_EVENT_QUEUE) max = ASTER_TOUCH_EVENT_QUEUE;
+	k_mutex_lock(&input_lock, K_FOREVER);
+	int n = aster_touch_state_poll(&touch, raw, max);
+	k_mutex_unlock(&input_lock);
 	/* Touch arrives exactly as the digitizer reported it: the DT touch node
 	 * is deliberately neutral, so Zephyr's input_touch.c applied nothing on
 	 * the way through. Turning that into LOGICAL space is the platform's
 	 * job, and it lives in display.c next to the window it depends on. */
 	for (int i = 0; i < n; i++) {
+		evt[i].x = raw[i].x;
+		evt[i].y = raw[i].y;
+		evt[i].action = raw[i].action;
+		evt[i].slot = raw[i].slot;
+		evt[i].contact_mask = raw[i].contact_mask;
 		aster_plat_display_touch_map(&evt[i].x, &evt[i].y);
 	}
 	return n;
@@ -198,29 +144,18 @@ int aster_plat_input_poll(aster_touch_evt_t *evt, int max)
 
 void aster_plat_input_state(uint32_t *points, uint32_t max)
 {
-	k_mutex_lock(&pt_lock, K_FOREVER);
-	if (max > 0 && pt.down && aster_plat_input_touch_available()) {
-		points[0] = pt.x;
-		points[1] = pt.y;
-		points[2] = ASTER_TOUCH_DOWN;
-		points[3] = 0;
-		points[4] = 0;
-		points[5] = 0;
-		points[6] = 0;
-		points[7] = ASTER_INPUT_TERM; /* terminator action */
-	} else if (max > 0) {
-		points[0] = pt.x;
-		points[1] = pt.y;
+	if (!points || max == 0) return;
+	k_mutex_lock(&input_lock, K_FOREVER);
+	if (aster_plat_input_touch_available()) {
+		aster_touch_state_snapshot(&touch, points, max);
+	} else {
 		points[2] = ASTER_INPUT_TERM;
-		points[3] = 0;
 	}
-	k_mutex_unlock(&pt_lock);
-	/* same raw->logical mapping as aster_plat_input_poll() */
-	if (max > 0) {
-		uint32_t x = points[0], y = points[1];
-		aster_plat_display_touch_map(&x, &y);
-		points[0] = x;
-		points[1] = y;
+	k_mutex_unlock(&input_lock);
+	/* Snapshot entries are packed as 4-u32 x/y/action/slot records. */
+	for (uint32_t i = 0; i < max && i < ASTER_PLAT_MAX_TOUCH &&
+	     points[i * 4u + 2u] != ASTER_INPUT_TERM; i++) {
+		aster_plat_display_touch_map(&points[i * 4u], &points[i * 4u + 1u]);
 	}
 }
 
@@ -229,34 +164,34 @@ void aster_plat_input_state(uint32_t *points, uint32_t max)
 int aster_plat_input_keys_poll(aster_key_evt_t *evt, int max)
 {
 	int n = 0;
-	k_mutex_lock(&pt_lock, K_FOREVER);
+	k_mutex_lock(&input_lock, K_FOREVER);
 	while (ks.count > 0 && n < max) {
 		evt[n].code = ks.q[(ks.head - ks.count + KEY_EDGE_QUEUE) % KEY_EDGE_QUEUE].code;
 		evt[n].pressed = ks.q[(ks.head - ks.count + KEY_EDGE_QUEUE) % KEY_EDGE_QUEUE].pressed;
 		ks.count--;
 		n++;
 	}
-	k_mutex_unlock(&pt_lock);
+	k_mutex_unlock(&input_lock);
 	return n;
 }
 
 int aster_plat_input_keys_state(uint32_t *codes, int max)
 {
 	int n = 0;
-	k_mutex_lock(&pt_lock, K_FOREVER);
+	k_mutex_lock(&input_lock, K_FOREVER);
 	for (int i = 0; i < ks.held_n && n < max; i++) {
 		codes[n++] = ks.held[i];
 	}
-	k_mutex_unlock(&pt_lock);
+	k_mutex_unlock(&input_lock);
 	return n;
 }
 
 void aster_plat_input_keys_inject(uint32_t code, bool pressed)
 {
-	k_mutex_lock(&pt_lock, K_FOREVER);
+	k_mutex_lock(&input_lock, K_FOREVER);
 	key_push_locked((uint16_t)code, pressed);
 	ks.available = true;
-	k_mutex_unlock(&pt_lock);
+	k_mutex_unlock(&input_lock);
 }
 
 /* --- touch --------------------------------------------------------------- */
@@ -267,34 +202,55 @@ void aster_plat_input_touch_inject(uint32_t x, uint32_t y, uint32_t action)
 	 * raw digitizer report. Injecting in the raw space and letting the
 	 * normal poll path map it forward is deliberate: the point then travels
 	 * the same road a finger's does, so it cannot agree with the display by
-	 * accident.
-	 *
-	 * This used to be a hand-written inverse of the rotation, right here.
-	 * It is now the platform's, derived from the same table the forward
-	 * direction reads: a second copy of the algebra is a copy that can be
-	 * edited without the other one, and the two only have to disagree once
-	 * (for the `hw touch` verb, for the apitest injection cases) to look
-	 * like a broken panel. */
-	aster_plat_display_touch_unmap(&x, &y);
+	 * accident. The slot helper performs the single inverse map before it
+	 * enters the shared state machine. */
+	aster_plat_input_touch_inject_slot(0, x, y, action);
+}
 
-	k_mutex_lock(&pt_lock, K_FOREVER);
-	pt.x = (uint16_t)x;
-	pt.y = (uint16_t)y;
-	pt.has_pos = true;
-	if (action == ASTER_TOUCH_DOWN) {
-		if (!pt.down) {
-			pt.down = true;
-			if (!pt.pending_down) { pt.down_x = pt.x; pt.down_y = pt.y; }
-			pt.pending_down = true;
-		}
-		pt.pending_move = true;
-	} else if (action == ASTER_TOUCH_MOVE) {
-		if (pt.down) {
-			pt.pending_move = true;
-		}
-	} else if (pt.down) {
-		pt.down = false;
-		pt.pending_up = true;
+void aster_plat_input_touch_inject_slot(uint32_t slot, uint32_t x, uint32_t y,
+					uint32_t action)
+{
+	aster_plat_display_touch_unmap(&x, &y);
+	k_mutex_lock(&input_lock, K_FOREVER);
+	aster_touch_state_inject(&touch, slot, x, y, action);
+	k_mutex_unlock(&input_lock);
+}
+
+void aster_plat_input_touch_report_frame(const struct aster_touch_frame *frame)
+{
+	if (!frame) return;
+	k_mutex_lock(&input_lock, K_FOREVER);
+	(void)aster_touch_state_report_frame(&touch, frame);
+	k_mutex_unlock(&input_lock);
+}
+
+void aster_plat_input_touch_debug(aster_touch_debug_t *out)
+{
+	if (!out) return;
+	k_mutex_lock(&input_lock, K_FOREVER);
+	*out = (aster_touch_debug_t) {
+		.recovery=touch.ignore_until_clear, .errors=touch.io_errors,
+		.pending=touch.event_count,
+	};
+	for (uint32_t i=0; i<ASTER_TOUCH_SLOT_COUNT; i++) {
+		if (!touch.slots[i].down) continue;
+		if (touch.slots[i].id <= ASTER_TOUCH_HW_ID_MAX) out->hardware_mask |= 1u<<i;
+		else out->synthetic_mask |= 1u<<i;
 	}
-	k_mutex_unlock(&pt_lock);
+	k_mutex_unlock(&input_lock);
+}
+
+void aster_plat_input_touch_report_error(uint64_t now_ms)
+{
+	k_mutex_lock(&input_lock, K_FOREVER);
+	aster_touch_state_report_error(&touch, now_ms);
+	k_mutex_unlock(&input_lock);
+}
+
+void aster_plat_input_touch_set_ready(bool ready)
+{
+	k_mutex_lock(&input_lock, K_FOREVER);
+	touch_ready = ready;
+	if (!ready) aster_touch_state_clear(&touch);
+	k_mutex_unlock(&input_lock);
 }
