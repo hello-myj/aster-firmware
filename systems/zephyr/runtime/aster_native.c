@@ -1217,7 +1217,7 @@ static int32_t n_input_get_info(wasm_exec_env_t env, uint32_t info_off, uint32_t
 		.size = sizeof(in), .version = 1,
 		.kinds = (aster_plat_input_touch_available() ? ASTER_INPUT_TOUCH : 0) |
 			 (aster_plat_input_keys_available() ? ASTER_INPUT_KEYS : 0),
-		.max_points = ASTER_TOUCH_MAX,
+		.max_points = aster_plat_input_touch_max_points(),
 	};
 	size_t n = info_size < sizeof(in) ? info_size : sizeof(in);
 	memcpy(dst, &in, n);
@@ -1230,30 +1230,34 @@ static int32_t n_input_touch(wasm_exec_env_t env, uint32_t pts_off, uint32_t max
 	if (!ctx) {
 		return ASTER_EBADF;
 	}
-	if (max > ASTER_TOUCH_MAX) {
-		max = ASTER_TOUCH_MAX;
-	}
-	uint32_t *dst = (uint32_t *)buf(env, pts_off, max * 4 * 4);
+	if (max == 0) return 0;
+	uint32_t available = aster_plat_input_touch_max_points();
+	if (max > available) max = available;
+	if (max == 0) return 0;
+	uint8_t *dst = buf(env, pts_off, (size_t)max * sizeof(aster_touch_point_t));
 	if (!dst) {
 		return ASTER_EINVAL;
 	}
-	uint32_t tmp[ASTER_TOUCH_MAX * 4 + 4];
-	aster_plat_input_state(tmp, ASTER_TOUCH_MAX);
+	uint32_t tmp[ASTER_TOUCH_MAX * 4 + 4] = {0};
+	aster_plat_input_state(tmp, available);
 	/* Polled points arrive in panel space; the guest reads them against its
 	 * own surface, which is app space. Mapping the single live point is the
 	 * same call the event path makes, and "the finger is on the letterbox
 	 * bars" is reported the same way a lifted finger is -- as an empty
 	 * list, which is what an app polling for input can act on. */
-	if (tmp[2] != ASTER_INPUT_TERM &&
-	    !aster_plat_display_app_touch(&tmp[0], &tmp[1])) {
-		tmp[2] = ASTER_INPUT_TERM;
+	uint32_t written = 0;
+	for (uint32_t src = 0; src < available && written < max; ++src) {
+		if (tmp[src * 4 + 2] == ASTER_INPUT_TERM) break;
+		aster_touch_point_t point = {
+			.x = tmp[src * 4], .y = tmp[src * 4 + 1],
+			.action = tmp[src * 4 + 2],
+		};
+		if (!aster_plat_display_app_touch(&point.x, &point.y)) continue;
+		/* Guest offsets need not satisfy native struct alignment. */
+		memcpy(dst + (size_t)written * sizeof(point), &point, sizeof(point));
+		written++;
 	}
-	uint32_t n = 0;
-	while (n < max && tmp[n * 4 + 2] != 0xFFFFFFFF) {
-		memcpy(dst + n * 4, tmp + n * 4, 16);
-		n++;
-	}
-	return (int32_t)n;
+	return (int32_t)written;
 }
 
 static int32_t n_input_keys_state(wasm_exec_env_t env, uint32_t codes_off, uint32_t max)

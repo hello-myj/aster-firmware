@@ -5,10 +5,16 @@
 	if(CONFIG_ASTER_AXS15231B_TOUCH)
 		target_sources(app PRIVATE input_axs15231b.c)
 	endif()
+	if(CONFIG_ASTER_ESP32S3_TOUCH)
+		target_sources(app PRIVATE input_ft6336.c)
+	endif()
 
 	target_sources(app PRIVATE
 		display.c
 		input.c
+		touch_state.c
+		touch_ui.c
+		touch_protocol.c
 		sensors.c
 		hw_cmd.c
 	)

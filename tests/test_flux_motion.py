@@ -109,6 +109,7 @@ int main(void) {
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
+''' + '#include "' + str(ROOT / 'platform/esp32s3/touch_ui.h') + r'''"
 #define CLAMP(v,lo,hi) ((v)<(lo)?(lo):(v)>(hi)?(hi):(v))
 #define LOG_INF(...) ((void)0)
 ''' + HEADER + r'''
@@ -131,6 +132,7 @@ static void event(unsigned ms,unsigned y,unsigned type) {
  now=ms;aster_touch_evt_t e={155,y,type};touch(&e);
 }
 int main(void) {
+ (void)launcher_touch_ui;(void)launcher_touch_x;(void)launcher_touch_y;
  event(0,280,ASTER_TOUCH_DOWN);event(100,180,ASTER_TOUCH_MOVE);event(120,160,ASTER_TOUCH_UP);
  assert(animating && coasting && scroll_duration>1000 && target_phase>from_phase+2500);
  assert(selected[0]==1); /* caption follows current card rather than final target */

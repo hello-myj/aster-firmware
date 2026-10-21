@@ -14,7 +14,8 @@
 #include <aster/audio_stream.h>
 #include "aster_dirty.h"
 
-#define ASTER_PLAT_MAX_TOUCH 1
+#define ASTER_PLAT_MAX_TOUCH 2
+#define ASTER_PLAT_TOUCH_EVENT_QUEUE 16
 #define ASTER_PLAT_MAX_KEYS  8
 /* terminator written into points[2] when no contact */
 #define ASTER_INPUT_TERM     0xFFFFFFFFu
@@ -23,12 +24,16 @@ typedef struct {
 	uint32_t x;
 	uint32_t y;
 	uint32_t action; /* ASTER_TOUCH_x (down/move/up) — edge-tracked by platform */
+	uint32_t slot;   /* stable logical slot 0..ASTER_PLAT_MAX_TOUCH-1 */
+	uint32_t contact_mask; /* contact bits captured with this controller frame */
 } aster_touch_evt_t;
 
 typedef struct {
 	uint32_t code;    /* raw host key code (Zephyr INPUT_KEY_*) */
 	uint32_t pressed; /* 1 = down edge, 0 = up edge */
 } aster_key_evt_t;
+
+struct aster_touch_frame;
 
 int  aster_platform_init(void);
 
@@ -116,10 +121,9 @@ void     aster_plat_display_flip_release(void);
 bool aster_plat_display_app_space(uint32_t *w, uint32_t *h);
 bool aster_plat_display_app_scaled(void);
 /* The inverse map, for input: x,y are panel pixels and come back as app
- * pixels. False means the point is on the letterbox bars and the caller must
- * drop the sample -- there is no app pixel under it. Always true (and the
- * coords untouched) when app space is the panel's, so the guest delivery
- * path needs no orientation test of its own. */
+ * pixels. In scale-fit mode points in the letterbox margin clamp to the
+ * nearest app edge; the current implementation returns true for every
+ * non-null coordinate, including the 1:1 path. */
 bool aster_plat_display_app_touch(uint32_t *x, uint32_t *y);
 int  aster_plat_display_write_app_at(const uint8_t *buf, uint32_t x, uint32_t y,
 				   uint32_t w, uint32_t h, uint32_t pitch);
@@ -209,6 +213,21 @@ void aster_plat_input_state(uint32_t *points /*4 fields per point: x,y,action,sl
  * action is ASTER_TOUCH_DOWN / _MOVE / _UP; MOVE and UP on a released screen
  * are dropped, exactly as the driver's would be. */
 void aster_plat_input_touch_inject(uint32_t x, uint32_t y, uint32_t action);
+void aster_plat_input_touch_inject_slot(uint32_t slot, uint32_t x, uint32_t y,
+					uint32_t action);
+/* Internal, non-consuming CLI health snapshot; not part of the guest ABI. */
+typedef struct {
+	uint32_t recovery, errors, pending, hardware_mask, synthetic_mask;
+} aster_touch_debug_t;
+void aster_plat_input_touch_debug(aster_touch_debug_t *out);
+#if defined(CONFIG_ASTER_AXS15231B_RAW_DIAG)
+/* Test-only bounded wire-report replay in the AXS poller; no public ABI. */
+int aster_plat_axs_touch_diag_replay_start(void);
+#endif
+void aster_plat_input_touch_report_frame(const struct aster_touch_frame *frame);
+void aster_plat_input_touch_report_error(uint64_t now_ms);
+void aster_plat_input_touch_set_ready(bool ready);
+uint32_t aster_plat_input_touch_max_points(void);
 
 /* keyboard / buttons: drain edge events (UP counts included; codes < 0xFFFF
  * only), report capability, snapshot currently-held codes (returns count).
