@@ -46,6 +46,15 @@ def main():
             return result
         def state():
             return c.command('hw audio fxstate')
+        def phase_advances(initial):
+            # A looping phase wraps: equal snapshots need not mean a stall.
+            # Vary observation intervals to avoid sampling the same period.
+            first = phase(initial)
+            for delay in (.019, .073, .113, .197, .431):
+                time.sleep(delay)
+                if phase(state()) != first:
+                    return
+            raise AssertionError('No observed source phase advancement')
         if args.stage=='lifecycle':
             assert 'RUNNING' in c.command('aster app state '+APP)
             fx('fxparams 1 98304 32768 120')
@@ -54,11 +63,14 @@ def main():
             time.sleep(1);b=state();assert phase(a)==phase(b),(a,b)
             c.command('aster app resume '+APP);time.sleep(.5)
             a=state();assert 'playing=0x1 suspended=0' in a,a
-            time.sleep(.317);b=state();assert phase(a)!=phase(b),(a,b)
+            phase_advances(a)
             fx('fxstop 1 80');time.sleep(.2)
             a=state();assert 'loaded=0x1 playing=0x0' in a,a
             fx('fxstop 1 0');fx('fxloop 1');fx('fxparams 1 65536 32768 30')
-            c.overlays(320,480,True)
+            display=c.command('hw display info')
+            size=re.search(r'display0: (\d+)x(\d+)',display)
+            assert size,display
+            c.overlays(*map(int,size.groups()),True)
             assert 'playing=0x1 suspended=0' in state()
             print('PASS: native params, frozen pause phase, resume, independent stop, overlays; example remains running',flush=True)
         elif args.stage=='reclaim':
@@ -85,7 +97,7 @@ def main():
                 time.sleep(7)
                 a=state();assert f'output_hz={args.rate} ' in a,a
                 assert 'playing=0x1' in a,a
-                time.sleep(.317);b=state();assert phase(a)!=phase(b),(a,b)
+                phase_advances(a)
                 c.command('hw audio state')
                 print(f'PASS: {args.rate} Hz source ended, effect phase continues over silence at that output rate',flush=True)
             finally:

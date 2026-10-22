@@ -27,6 +27,7 @@
 #include "audio_rate.h"
 #include "audio_effect_engine.h"
 #include "audio_effect_wav.h"
+#include "audio_file_reader.h"
 #include <minimp3.h>
 
 LOG_MODULE_REGISTER(aster_audio, LOG_LEVEL_INF);
@@ -141,6 +142,7 @@ static struct {
 	int16_t frame[MINIMP3_MAX_SAMPLES_PER_FRAME];
 	int16_t fifo[MP3_FIFO_SAMP];
 	unsigned fifo_n;
+	unsigned fifo_head;
 	int hz;
 	int ch;
 	unsigned wrote;
@@ -600,6 +602,9 @@ static bool sess_busy(void)
 
 static void sess_clear_locked(void)
 {
+	/* Join the sole SD producer before closing its file or releasing state.
+	 * The reader never takes sess_mu, so joining here has no lock cycle. */
+	audio_file_reader_stop();
 	if (sess.from_stream) {
 		input_stream.error = sess.stop ? -ECANCELED : sess.err;
 		input_stream.state = input_stream.error ? ASTER_AUDIO_STREAM_FAILED : ASTER_AUDIO_STREAM_DONE;
@@ -747,6 +752,7 @@ static void mp3_reset(void)
 {
 	mp3dec_init(&mp3p.dec);
 	mp3p.fifo_n = 0;
+	mp3p.fifo_head = 0;
 	mp3p.hz = 0;
 	mp3p.ch = 0;
 	mp3p.wrote = 0;
@@ -765,11 +771,11 @@ static int fifo_write_block(bool *started)
 	if (err) {
 		return err;
 	}
-	memcpy(blk, mp3p.fifo, output_block);
+	unsigned first = MIN(n, MP3_FIFO_SAMP - mp3p.fifo_head);
+	memcpy(blk, mp3p.fifo + mp3p.fifo_head, first * sizeof(int16_t));
+	memcpy((int16_t *)blk + first, mp3p.fifo, (n - first) * sizeof(int16_t));
+	mp3p.fifo_head = (mp3p.fifo_head + n) % MP3_FIFO_SAMP;
 	mp3p.fifo_n -= n;
-	if (mp3p.fifo_n) {
-		memmove(mp3p.fifo, mp3p.fifo + n, mp3p.fifo_n * sizeof(int16_t));
-	}
 	err = i2s_submit(blk, started);
 	if (err == 0) {
 		mp3p.wrote++;
@@ -798,7 +804,8 @@ static int fifo_drain(bool *started)
 		return err;
 	}
 	while (mp3p.fifo_n < (output_block / sizeof(int16_t))) {
-		mp3p.fifo[mp3p.fifo_n++] = 0;
+		mp3p.fifo[(mp3p.fifo_head + mp3p.fifo_n) % MP3_FIFO_SAMP] = 0;
+		mp3p.fifo_n++;
 	}
 	err = fifo_write_block(started);
 	if (err) {
@@ -819,8 +826,10 @@ static int fifo_push_stereo(int16_t l, int16_t r, bool *started)
 			return -ENOMEM;
 		}
 	}
-	mp3p.fifo[mp3p.fifo_n++] = l;
-	mp3p.fifo[mp3p.fifo_n++] = r;
+	unsigned tail = (mp3p.fifo_head + mp3p.fifo_n) % MP3_FIFO_SAMP;
+	mp3p.fifo[tail] = l;
+	mp3p.fifo[(tail + 1) % MP3_FIFO_SAMP] = r;
+	mp3p.fifo_n += 2;
 	sess.pcm_done++;
 	return 0;
 }
@@ -936,6 +945,28 @@ static int stream_refill(bool *eof)
 		*eof = true;
 	}
 	sess.win_len += (size_t)n;
+	return 0;
+}
+
+/* Playback consumes only published bytes. SD latency is confined to the
+ * producer; a short queue yields silence/effects instead of blocking I2S.
+ * The synchronous stream_refill above is retained only for seek alignment. */
+static int file_refill(bool *eof, bool *waiting)
+{
+	/* Compact in batches, not once per compressed frame. */
+	if (sess.win_off && (sess.win_off >= 4096 ||
+			    STREAM_WIN - sess.win_len < MP3_NEED)) {
+		memmove(sess.buf, sess.buf + sess.win_off, sess.win_len - sess.win_off);
+		sess.win_len -= sess.win_off;
+		sess.win_off = 0;
+	}
+	int n = audio_file_reader_read(sess.buf + sess.win_len,
+				       STREAM_WIN - sess.win_len, eof);
+	if (n < 0) {
+		return n;
+	}
+	sess.win_len += (size_t)n;
+	*waiting = !*eof && sess.win_len - sess.win_off < MP3_NEED;
 	return 0;
 }
 
@@ -1178,7 +1209,7 @@ static int apply_seek_io(uint32_t msec)
 	sess.pcm_done = (uint32_t)((uint64_t)msec * (sess.pcm_rate ? sess.pcm_rate : CONFIG_ASTER_AUDIO_RATE) / 1000u);
 	if (sess.mp3) {
 		mp3_reset();
-		(void)mp3_align_sync();
+		return mp3_align_sync();
 	}
 	return 0;
 }
@@ -1235,7 +1266,13 @@ static void player_loop(void *a, void *b, void *c)
 		}
 
 		k_mutex_lock(&audio_lock, K_FOREVER);
-		int err = codecs_init();
+		int err = 0;
+		if (from_file && is_mp3) {
+			err = audio_file_reader_start(&sess_file, size);
+		}
+		if (!err) {
+			err = codecs_init();
+		}
 		if (err == 0) {
 			err = es8311_dac_on();
 		}
@@ -1273,9 +1310,18 @@ static void player_loop(void *a, void *b, void *c)
 					(void)feed_silence(&started);
 				}
 				k_mutex_unlock(&audio_lock);
+				audio_file_reader_stop();
 				k_mutex_lock(&sess_mu, K_FOREVER);
-				(void)apply_seek_io(ms);
+				err = apply_seek_io(ms);
+				if (!err && from_file && is_mp3) {
+					err = audio_file_reader_start(&sess_file,
+						sess.size - sess.off - sess.win_len);
+				}
 				k_mutex_unlock(&sess_mu);
+				if (err) {
+					LOG_WRN("player seek %d", err);
+					break;
+				}
 				/* Leave I2S running. DROP/reconfigure here
 				 * races the DMA callback into ERROR, after
 				 * which write returns -EIO until a hard reset. */
@@ -1292,20 +1338,27 @@ static void player_loop(void *a, void *b, void *c)
 					k_mutex_lock(&sess_mu, K_FOREVER);
 					bool pausing = sess.pause;
 					bool stopping = sess.stop;
+					bool seeking = sess.seek_pending;
 					k_mutex_unlock(&sess_mu);
-					if (!pausing || stopping) {
+					if (!pausing || stopping || seeking) {
 						break;
 					}
 					k_sem_take(&play_wake, K_FOREVER);
 				}
 				k_mutex_lock(&sess_mu, K_FOREVER);
 				bool stopping = sess.stop;
-				if (!stopping) {
+				bool still_paused = sess.pause;
+				if (!stopping && !still_paused) {
 					sess.state = ASTER_AUDIO_PLAYING;
 				}
 				k_mutex_unlock(&sess_mu);
 				if (stopping) {
 					break;
+				}
+				if (still_paused) {
+					/* A paused seek must go through the same producer join
+					 * and restart as a playing seek. Keep I2S stopped. */
+					continue;
 				}
 				k_mutex_lock(&audio_lock, K_FOREVER);
 				(void)es8311_dac_on();
@@ -1365,15 +1418,17 @@ static void player_loop(void *a, void *b, void *c)
 				bool eof = false;
 
 				mp3p.wrote = 0;
-				err = stream_refill(&eof);
+				err = file_refill(&eof, &waiting_input);
 				if (err) {
 					k_mutex_unlock(&audio_lock);
 					LOG_WRN("player refill %d", err);
 					break;
 				}
 				before = sess.win_off;
-				err = mp3_pump(sess.buf, sess.win_len, &sess.win_off,
-					       &started, eof);
+				if (!waiting_input) {
+					err = mp3_pump(sess.buf, sess.win_len, &sess.win_off,
+						       &started, eof);
+				}
 				off = sess.off + (sess.win_off - before);
 				if (err == 0 && started && mp3p.wrote == 0) {
 					err = feed_silence(&started);
@@ -2337,8 +2392,6 @@ int aster_plat_audio_get_clock(uint32_t *msec_done, uint32_t *msec_total)
 
 int aster_plat_audio_seek(uint32_t msec)
 {
-	int err = 0;
-
 	k_mutex_lock(&sess_mu, K_FOREVER);
     if (sess.from_stream) {
         k_mutex_unlock(&sess_mu);
@@ -2348,11 +2401,8 @@ int aster_plat_audio_seek(uint32_t msec)
 		k_mutex_unlock(&sess_mu);
 		return -EAGAIN;
 	}
-	if (sess.state == ASTER_AUDIO_PAUSED) {
-		err = apply_seek_io(msec);
-		k_mutex_unlock(&sess_mu);
-		return err;
-	}
+	/* The worker owns file IO even while paused. Never seek a file here
+	 * while its prefetch producer may still be reading it. */
 	sess.seek_msec = msec;
 	sess.seek_pending = true;
 	k_mutex_unlock(&sess_mu);

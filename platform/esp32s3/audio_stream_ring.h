@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <string.h>
 struct audio_stream_ring { uint8_t *data; size_t cap, head, used; };
-static size_t audio_ring_write(struct audio_stream_ring *r,const void *src,size_t n)
+static inline size_t audio_ring_write(struct audio_stream_ring *r,const void *src,size_t n)
 {
     if(n>r->cap-r->used)n=r->cap-r->used;
     if(!n)return 0;
@@ -14,7 +14,7 @@ static size_t audio_ring_write(struct audio_stream_ring *r,const void *src,size_
     memcpy(r->data+pos,src,first);memcpy(r->data,(const uint8_t *)src+first,n-first);
     r->used+=n;return n;
 }
-static size_t audio_ring_read(struct audio_stream_ring *r,void *dst,size_t n)
+static inline size_t audio_ring_read(struct audio_stream_ring *r,void *dst,size_t n)
 {
     if(n>r->used)n=r->used;
     if(!n)return 0;
