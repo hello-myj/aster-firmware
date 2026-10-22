@@ -37,7 +37,7 @@ def bundle_files():
            "runtime": {"name": "wamr", "version": "2.4.3"},
            "aot_backends": {"xtensa": "xtensa-esp32s3", "riscv32": "riscv",
                             "thumbv7": "thumb-v7", "thumbv8": "cortex-m", "x86_64": "x86-64"}}
-    feature_names = {"AUDIO_INPUT": "audio-in", "AUDIO_OUTPUT": "audio-out", "AUDIO_STREAM": "audio-stream"}
+    feature_names = {"AUDIO_INPUT": "audio-in", "AUDIO_OUTPUT": "audio-out", "AUDIO_STREAM": "audio-stream", "AUDIO_EFFECTS": "audio-effects"}
     api["feature_bits"] = {feature_names.get(name, name.lower()): int(bit)
                            for name, bit in re.findall(r"#define\s+ASTER_FEATURE_(\w+)\s+(\d+)u", version)}
     api["feature_bits"]["storage.app"] = api["feature_bits"]["filesystem"]

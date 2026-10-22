@@ -80,7 +80,9 @@ void aster_sysinfo_get(aster_system_info_t *info)
 	if (IS_ENABLED(CONFIG_ASTER_MQTT)) f |= 1ull << ASTER_FEATURE_MQTT;
 	if (IS_ENABLED(CONFIG_ASTER_WEBSOCKET)) f |= 1ull << ASTER_FEATURE_WEBSOCKET;
 	if (IS_ENABLED(CONFIG_ASTER_HTTP_TLS)) f |= 1ull << ASTER_FEATURE_TLS;
-	if (IS_ENABLED(CONFIG_ASTER_AUDIO)) f |= 1ull << ASTER_FEATURE_AUDIO_STREAM;
+	if (IS_ENABLED(CONFIG_ASTER_AUDIO)) {
+		f |= (1ull << ASTER_FEATURE_AUDIO_STREAM) | (1ull << ASTER_FEATURE_AUDIO_EFFECTS);
+	}
 	info->feature_flags = f;
 }
 
@@ -111,6 +113,7 @@ bool aster_sysinfo_feature_by_name(const char *name)
 		{ "websocket", ASTER_FEATURE_WEBSOCKET },
 		{ "tls", ASTER_FEATURE_TLS },
 		{ "audio-stream", ASTER_FEATURE_AUDIO_STREAM },
+		{ "audio-effects", ASTER_FEATURE_AUDIO_EFFECTS },
 		{ "bluetooth", ASTER_FEATURE_BLUETOOTH },
 		{ "accelerometer", ASTER_FEATURE_ACCELEROMETER },
 		{ "gyroscope", ASTER_FEATURE_GYROSCOPE },

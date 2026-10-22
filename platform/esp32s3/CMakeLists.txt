@@ -24,6 +24,7 @@
 	if(CONFIG_ASTER_AUDIO)
 		target_sources(app PRIVATE
 			audio.c
+			audio_effect_engine.c
 			audio_lyrics.c
 			minimp3_impl.c
 		)

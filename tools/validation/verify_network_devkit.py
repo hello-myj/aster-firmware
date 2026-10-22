@@ -42,7 +42,13 @@ def main():
         assert identity['source']['commit'] == kit['components']['firmware']['revision']
     compatibility = json.loads((sdk/'simulator/src/sdk-compat.json').read_text())
     assert compatibility['abi'] == kit['abi']
-    assert compatibility['sdkCommit'] == release['commit']
+    # SDK commits that only pin final payload hashes follow the public-contract
+    # commit. Recording that revision avoids a circular SDK<->simulator hash.
+    expected_sdk = kit['components']['simulator'].get('sdk_contract_revision', release['commit'])
+    assert compatibility['sdkCommit'] == expected_sdk
+    assert not compatibility.get('sdkWorkingTree', False)
+    assert compatibility['contractHashes'] == {name: checksum for name, checksum in lock['sha256'].items()
+                                               if name.startswith(('contract/', 'include/'))}
     assert release['development_kit']['components'] == kit['components']
     windows = sys.platform == 'win32'
     cli = sdk/('aster.exe' if windows else 'aster')

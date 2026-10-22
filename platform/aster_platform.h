@@ -12,6 +12,7 @@
 #include <aster/error.h>
 #include <aster/event.h>
 #include <aster/audio_stream.h>
+#include <aster/audio.h>
 #include "aster_dirty.h"
 
 #define ASTER_PLAT_MAX_TOUCH 2
@@ -289,6 +290,17 @@ void aster_plat_audio_ui_stop(void);
 void aster_plat_audio_ui_release(void);
 int  aster_plat_audio_effect_load(const char *path);
 int  aster_plat_audio_effect_play(uint32_t handle);
+int aster_plat_audio_effect_play_ex(uint32_t handle,const aster_audio_effect_play_desc_t *desc);
+int aster_plat_audio_effect_set_params(uint32_t handle,const aster_audio_effect_params_t *params);
+int aster_plat_audio_effect_stop(uint32_t handle,uint32_t fade_ms);
+void aster_plat_audio_effect_suspend(bool paused);
+/* CLI snapshot only, not a guest ABI. Phase counts rendered source frames,
+ * not samples confirmed played by the codec. */
+typedef struct {
+ uint32_t rate, loaded_mask, playing_mask, suspended, pcm_bytes, mixed_peak;
+ uint64_t phase_q16[4];
+} aster_audio_effect_debug_t;
+void aster_plat_audio_effect_debug(aster_audio_effect_debug_t *out);
 int  aster_plat_audio_effect_unload(uint32_t handle);
 void aster_plat_audio_effect_reset(void);
 /* Stream WAV/PCM/MP3 from the filesystem; no whole-file copy. */

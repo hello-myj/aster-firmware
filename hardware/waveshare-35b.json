@@ -3,7 +3,7 @@
     "schema": 1,
     "id": "waveshare-35b",
     "product": "aster",
-    "abi": "4.0.0",
+    "abi": "4.1.0",
     "system": "zephyr",
     "cpu": "xtensa",
     "aot_target": "xtensa",
@@ -23,6 +23,7 @@
       "http",
       "tls",
       "audio-stream",
+      "audio-effects",
       "mqtt",
       "websocket"
     ],
