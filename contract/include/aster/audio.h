@@ -30,7 +30,7 @@
 #define ASTER_AUDIO_PLAYING 1u
 #define ASTER_AUDIO_PAUSED  2u
 
-/* Raw PCM/record/effect format (asked for with aster_audio_get_info). MP3
+/* Raw PCM/record format (asked for with aster_audio_get_info). MP3
  * playback may use its source rate without changing this input contract. The reference
  * port answers 16000/2/16 -- little-endian signed 16-bit, interleaved stereo
  * -- but read it from here rather than assuming: another board's codec may
@@ -84,8 +84,9 @@ ASTER_I("aster_audio_record") int32_t aster_audio_record(uint8_t *pcm, uint32_t 
  * ASTER_EPERM, ASTER_EINVAL, ASTER_ENOENT, or ASTER_EIO. */
 ASTER_I("aster_audio_start_file") int32_t aster_audio_start_file(const char *path, uint32_t path_len);
 
-/* ABI 3.4: preload up to four short native-format stereo PCM WAV effects
- * (max 64 KiB each) from a sandboxed path before starting music. Returns a
+/* ABI 3.4: preload up to four short PCM16 WAV effects
+ * (max 64 KiB each) from a sandboxed path before starting music. ABI 4.1
+ * accepts mono/stereo, 8..48 kHz and RIFF ancillary chunks. Returns a
  * positive handle or ASTER_* error. play mixes one effect into the current
  * background stream without replacing it, or plays over silence when idle.
  * Different handles play together; replaying one handle restarts that cue.
@@ -94,6 +95,29 @@ ASTER_I("aster_audio_start_file") int32_t aster_audio_start_file(const char *pat
 ASTER_I("aster_audio_effect_load") int32_t aster_audio_effect_load(const char *path, uint32_t path_len);
 ASTER_I("aster_audio_effect_play") int32_t aster_audio_effect_play(uint32_t handle);
 ASTER_I("aster_audio_effect_unload") int32_t aster_audio_effect_unload(uint32_t handle);
+
+/* ABI 4.1. A frame is a complete source L/R group, not a byte or channel.
+ * LOOP plays the intro from frame zero, then loops [start,end). End=0 means
+ * the full source. Crossfade overlaps the tail/head and wraps to start+fade;
+ * its steady-state period is end-start-crossfade source frames. */
+#define ASTER_AUDIO_EFFECT_F_LOOP 1u
+typedef struct {
+	uint32_t size, version; /* 36, 1 */
+	uint32_t flags, loop_start_frame, loop_end_frame, crossfade_frames;
+	uint32_t pitch_q16, gain_q16, fade_in_ms;
+} aster_audio_effect_play_desc_t;
+typedef struct {
+	uint32_t size, version; /* 20, 1 */
+	uint32_t pitch_q16, gain_q16, ramp_ms;
+} aster_audio_effect_params_t;
+
+/* Pitch 32768..131072, gain 0..65536; fades/ramps 0..1000ms. Unknown bits,
+ * invalid structures/ranges fail. Nonloop descriptors require loop fields=0.
+ * play_ex restarts; set_params never resets phase. Gain zero keeps advancing.
+ * stop is idempotent for a valid loaded handle; unload detaches safely. */
+ASTER_I("aster_audio_effect_play_ex") int32_t aster_audio_effect_play_ex(uint32_t handle, const aster_audio_effect_play_desc_t *desc, uint32_t size);
+ASTER_I("aster_audio_effect_set_params") int32_t aster_audio_effect_set_params(uint32_t handle, const aster_audio_effect_params_t *params, uint32_t size);
+ASTER_I("aster_audio_effect_stop") int32_t aster_audio_effect_stop(uint32_t handle, uint32_t fade_out_ms);
 
 ASTER_I("aster_audio_pause") int32_t aster_audio_pause(void);   /* ESTATE if idle */
 ASTER_I("aster_audio_resume") int32_t aster_audio_resume(void); /* ESTATE if idle */

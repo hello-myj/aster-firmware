@@ -895,7 +895,58 @@ static int cmd_audio_loop(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Explicit effect commands: no APP-frame timer is used to repeat cues. */
+static bool fx_number(const char *text,uint32_t *value)
+{
+ char *end;errno=0;
+ unsigned long long n=strtoull(text,&end,0);
+ if(!*text || *text=='-' || *end || errno || n>UINT32_MAX) return false;
+ *value=(uint32_t)n;return true;
+}
+static int cmd_audio_fxload(const struct shell *sh,size_t argc,char **argv)
+{
+ ARG_UNUSED(argc);
+ int h=aster_plat_audio_effect_load(argv[1]);shell_print(sh,"fxload handle=%d",h);
+ return h<0?h:0;
+}
+static int cmd_audio_fx(const struct shell *sh,size_t argc,char **argv)
+{
+ uint32_t a[6]={0};
+ for(size_t i=1;i<argc;i++) if(i>6 || !fx_number(argv[i],&a[i-1])) return -EINVAL;
+ int rc;
+ if(!strcmp(argv[0],"fxfree")) rc=aster_plat_audio_effect_unload(a[0]);
+ else if(!strcmp(argv[0],"fxstop")) rc=aster_plat_audio_effect_stop(a[0],a[1]);
+ else if(!strcmp(argv[0],"fxparams")) {
+  aster_audio_effect_params_t p={sizeof(p),1,a[1],a[2],a[3]};
+  rc=aster_plat_audio_effect_set_params(a[0],&p);
+ } else {
+  aster_audio_effect_play_desc_t d={.size=sizeof(d),.version=1,
+   .flags=!strcmp(argv[0],"fxloop")?ASTER_AUDIO_EFFECT_F_LOOP:0,
+   .loop_start_frame=a[1],.loop_end_frame=a[2],.crossfade_frames=a[3],
+   .pitch_q16=65536,.gain_q16=65536};
+  rc=aster_plat_audio_effect_play_ex(a[0],&d);
+ }
+ shell_print(sh,"%s result=%d",argv[0],rc);return rc;
+}
+static int cmd_audio_fxstate(const struct shell *sh,size_t argc,char **argv)
+{
+ ARG_UNUSED(argc);ARG_UNUSED(argv);
+ aster_audio_effect_debug_t d;aster_plat_audio_effect_debug(&d);
+ shell_print(sh,"effects output_hz=%u loaded=0x%x playing=0x%x suspended=%u pcm_bytes=%u mixed_peak=%u",
+  d.rate,d.loaded_mask,d.playing_mask,d.suspended,d.pcm_bytes,d.mixed_peak);
+ for(unsigned i=0;i<4;i++) shell_print(sh,"slot=%u rendered_source_frame=%u fraction_q16=%u",i+1,
+  (uint32_t)(d.phase_q16[i]>>16),(uint32_t)(d.phase_q16[i]&65535));
+ shell_print(sh,"DMA live depth=unknown; hardware underruns=unknown");return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_audio,
+	SHELL_CMD_ARG(fxload, NULL, "preload PCM16 WAV <path>", cmd_audio_fxload, 2, 0),
+	SHELL_CMD_ARG(fxplay, NULL, "one-shot <handle>", cmd_audio_fx, 2, 0),
+	SHELL_CMD_ARG(fxloop, NULL, "loop <handle> [start end crossfade] (source frames)", cmd_audio_fx, 2, 3),
+	SHELL_CMD_ARG(fxparams, NULL, "<handle> <pitch_q16> <gain_q16> <ramp_ms>", cmd_audio_fx, 5, 0),
+	SHELL_CMD_ARG(fxstop, NULL, "<handle> [fade_ms]", cmd_audio_fx, 2, 1),
+	SHELL_CMD_ARG(fxfree, NULL, "unload <handle>", cmd_audio_fx, 2, 0),
+	SHELL_CMD(fxstate, NULL, "effect phase/cache snapshot (not DMA telemetry)", cmd_audio_fxstate),
 	SHELL_CMD(info, NULL, "codec / format info", cmd_audio_info),
 	SHELL_CMD_ARG(vol, NULL, "get/set volume [0-100]", cmd_audio_vol, 1, 1),
 	SHELL_CMD_ARG(beep, NULL, "sine [ms] [hz]", cmd_audio_beep, 1, 2),

@@ -1712,6 +1712,51 @@ static int32_t n_audio_effect_play(wasm_exec_env_t env, uint32_t handle)
 #endif
 }
 
+/* Copy versioned guest descriptors before entering the audio service. */
+static int32_t n_audio_effect_play_ex(wasm_exec_env_t env, uint32_t handle,
+                                     uint32_t off, uint32_t size)
+{
+ int32_t e=audio_out_gate();
+ if(e!=ASTER_OK) return e;
+ if(size!=sizeof(aster_audio_effect_play_desc_t)) return ASTER_EINVAL;
+ const void *src=buf(env,off,size);
+ if(!src) return ASTER_EINVAL;
+ aster_audio_effect_play_desc_t d;memcpy(&d,src,sizeof(d));
+ if(d.size!=size || d.version!=1) return ASTER_EINVAL;
+#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+ return map_audio_err(aster_plat_audio_effect_play_ex(handle,&d));
+#else
+ ARG_UNUSED(handle);return ASTER_ENODEV;
+#endif
+}
+static int32_t n_audio_effect_set_params(wasm_exec_env_t env, uint32_t handle,
+                                        uint32_t off, uint32_t size)
+{
+ int32_t e=audio_out_gate();
+ if(e!=ASTER_OK) return e;
+ if(size!=sizeof(aster_audio_effect_params_t)) return ASTER_EINVAL;
+ const void *src=buf(env,off,size);
+ if(!src) return ASTER_EINVAL;
+ aster_audio_effect_params_t p;memcpy(&p,src,sizeof(p));
+ if(p.size!=size || p.version!=1) return ASTER_EINVAL;
+#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+ return map_audio_err(aster_plat_audio_effect_set_params(handle,&p));
+#else
+ ARG_UNUSED(handle);return ASTER_ENODEV;
+#endif
+}
+static int32_t n_audio_effect_stop(wasm_exec_env_t env,uint32_t handle,uint32_t ms)
+{
+ ARG_UNUSED(env);
+ int32_t e=audio_out_gate();
+ if(e!=ASTER_OK) return e;
+#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+ return map_audio_err(aster_plat_audio_effect_stop(handle,ms));
+#else
+ ARG_UNUSED(handle);ARG_UNUSED(ms);return ASTER_ENODEV;
+#endif
+}
+
 static int32_t n_audio_effect_unload(wasm_exec_env_t env, uint32_t handle)
 {
 	ARG_UNUSED(env);
@@ -2770,6 +2815,9 @@ static NativeSymbol syms[] = {
 	{ "aster_audio_get_volume", (void *)n_audio_get_volume, "()i", NULL },
 	{ "aster_audio_effect_load", (void *)n_audio_effect_load, "(ii)i", NULL },
 	{ "aster_audio_effect_play", (void *)n_audio_effect_play, "(i)i", NULL },
+	{ "aster_audio_effect_play_ex", (void *)n_audio_effect_play_ex, "(iii)i", NULL },
+	{ "aster_audio_effect_set_params", (void *)n_audio_effect_set_params, "(iii)i", NULL },
+	{ "aster_audio_effect_stop", (void *)n_audio_effect_stop, "(ii)i", NULL },
 	{ "aster_audio_effect_unload", (void *)n_audio_effect_unload, "(i)i", NULL },
 	{ "aster_audio_pause", (void *)n_audio_pause, "()i", NULL },
 	{ "aster_audio_record", (void *)n_audio_record, "(ii)i", NULL },

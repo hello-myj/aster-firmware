@@ -5,7 +5,8 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 4
-#define ASTER_ABI_MINOR 0 /* 4.0 (breaking): six aster_net_* imports replace
+#define ASTER_ABI_MINOR 1 /* 4.1 (additive): continuous effect voices, pitch/gain ramps.
+                          * 4.0 (breaking): six aster_net_* imports replace
                           * the per-protocol network/HTTP/MQTT/WebSocket
                           * imports. Every 3.x package is rejected.
                           * 3.13 (additive): coalesced network state
@@ -76,6 +77,7 @@
 #define ASTER_FEATURE_MQTT         19u
 #define ASTER_FEATURE_AUDIO_STREAM 18u
 #define ASTER_FEATURE_WEBSOCKET    20u
+#define ASTER_FEATURE_AUDIO_EFFECTS 21u
 
 /* CPU arch ids */
 #define ASTER_ARCH_XTENSA 1u

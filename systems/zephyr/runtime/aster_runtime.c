@@ -613,6 +613,9 @@ static int sync_lifecycle_pause(aster_app_ctx_t *ctx)
 		if (err) return err;
 		ctx->lifecycle_paused = false;
 	}
+#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+	aster_plat_audio_effect_suspend(wanted);
+#endif
 	return 0;
 }
 

@@ -54,20 +54,33 @@ class Console:
         if 'touch recovery=' in result:
             assert 'touch recovery=0 ' in result, result
 
+    def command_event(self, line, event, timeout=3):
+        # Shell completion only acknowledges injection. The APP/UI worker
+        # may still be building the overlay (including cold SD fonts).
+        # Await its event without injecting a second gesture or discarding
+        # the delayed log on the next command's input-buffer reset.
+        result = self.command(line)
+        deadline = time.monotonic() + timeout
+        while event not in result and time.monotonic() < deadline:
+            raw = self.serial.read(8192).decode(errors='replace')
+            if raw:
+                self.log.write(raw)
+                self.log.flush()
+                result += re.sub(r'\x1b\[[0-9;?]*[A-Za-z]', '', raw)
+        assert event in result, result
+        return result
+
     def overlays(self, w, h, upward_close):
         x=w//2
-        result=self.command(f'hw touch drag {x} {h-4} {x} {h-100} 8 30')
-        assert 'return: confirmation opened' in result, result
+        self.command_event(f'hw touch drag {x} {h-4} {x} {h-100} 8 30',
+                           'return: confirmation opened')
         cw=min(w-32,288)
         cancel_x=(w-cw)//2+18+(cw-44)//4
         cancel_y=(h-194)//2+159
-        result=self.command(f'hw touch tap {cancel_x} {cancel_y}')
-        assert 'return: cancelled' in result, result
-        result=self.command(f'hw touch drag {x} 4 {x} 180 8 30')
-        assert 'qpanel: open (over app)' in result, result
+        self.command_event(f'hw touch tap {cancel_x} {cancel_y}', 'return: cancelled')
+        self.command_event(f'hw touch drag {x} 4 {x} 180 8 30', 'qpanel: open (over app)')
         stroke=(f'{x} {h-4} {x} {h-150}' if upward_close else f'{x} 4 {x} 180')
-        result=self.command(f'hw touch drag {stroke} 8 30')
-        assert 'qpanel: close' in result, result
+        self.command_event(f'hw touch drag {stroke} 8 30', 'qpanel: close')
         self.state([])
 
     def replay(self, app):

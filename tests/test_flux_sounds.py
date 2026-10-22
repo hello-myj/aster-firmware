@@ -125,17 +125,33 @@ static void k_mutex_unlock(int *a) {(void)a;}
 static int i2s_write(int dev,void *blk,int bytes) {(void)dev;(void)blk;assert(bytes==AUDIO_BLOCK);return 0;}
 static void k_mem_slab_free(int *slab,void *blk) {(void)slab;(void)blk;}
 static int i2s_kick(bool *started,bool force) {(void)force;*started=true;return 0;}
-static struct {uint8_t *pcm;size_t size,off;uint32_t fraction;bool playing;} effects[EFFECT_SLOTS];
+#include "esp32s3/audio_effect_engine.c"
+static audio_effect_voice_t effects[EFFECT_SLOTS];
+static bool effects_suspended;
+static uint32_t mixed_peak;
 static struct {const int16_t *pcm;size_t frames,off;uint32_t fraction;unsigned gain;} ui_voice;
 ''' + code + r'''
 int main(void) {
  static int16_t mono[]={2000,-2000,30000}, app[]={30000,30000,0,0,30000,30000,123,456};
  ui_voice.pcm=mono;ui_voice.frames=3;ui_voice.gain=500;
  bool started=false;assert(!i2s_submit(app,&started));
+ assert(mixed_peak==32767);
  assert(started && app[0]==31000 && app[1]==31000);
  assert(app[2]==-1000 && app[3]==-1000);
  assert(app[4]==32767 && app[5]==32767);
  assert(app[6]==123 && app[7]==456 && !ui_voice.pcm && ui_voice.off==3);
+ static const int16_t stereo[]={8000,-8000,4000,-4000};
+ effects[0]=(audio_effect_voice_t){.pcm=stereo,.frames=2,.rate=16000,.channels=2};
+ aster_audio_effect_play_desc_t d={.size=36,.version=1,.flags=1,.pitch_q16=65536,.gain_q16=32768};
+ assert(!audio_effect_begin(&effects[0],&d));
+ for(int i=0;i<8;i++)app[i]=0;
+ assert(!i2s_submit(app,&started));
+ assert(app[0]==4000 && app[1]==-4000 && app[2]==2000 && app[3]==-2000 && mixed_peak==4000);
+ effects_suspended=true;uint64_t phase=effects[0].phase;
+ for(int i=0;i<8;i++)app[i]=0;
+ assert(!i2s_submit(app,&started));assert(effects[0].phase==phase && mixed_peak==0);
+ assert(!audio_effect_stop(&effects[0],0));effects_suspended=false;
+ assert(!i2s_submit(app,&started));assert(mixed_peak==0);
  return 0;
 }
 ''')
