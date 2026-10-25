@@ -1698,6 +1698,18 @@ static int32_t n_audio_effect_load(wasm_exec_env_t env, uint32_t off, uint32_t l
 #endif
 }
 
+static int32_t n_audio_effect_load_memory(wasm_exec_env_t env,uint32_t off,uint32_t len)
+{
+ int32_t e=audio_out_gate();if(e!=ASTER_OK)return e;
+ if(!ctx_of(env)||len<12||len>69632)return ASTER_EINVAL;
+ const void *data=buf(env,off,len);if(!data)return ASTER_EINVAL;
+#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+ int h=aster_plat_audio_effect_load_memory(data,len);return h>0?h:map_audio_err(h);
+#else
+ return ASTER_ENODEV;
+#endif
+}
+
 static int32_t n_audio_effect_play(wasm_exec_env_t env, uint32_t handle)
 {
 	ARG_UNUSED(env);
@@ -2814,6 +2826,7 @@ static NativeSymbol syms[] = {
 	{ "aster_audio_get_state", (void *)n_audio_get_state, "(ii)i", NULL },
 	{ "aster_audio_get_volume", (void *)n_audio_get_volume, "()i", NULL },
 	{ "aster_audio_effect_load", (void *)n_audio_effect_load, "(ii)i", NULL },
+	{ "aster_audio_effect_load_memory", (void *)n_audio_effect_load_memory, "(ii)i", NULL },
 	{ "aster_audio_effect_play", (void *)n_audio_effect_play, "(i)i", NULL },
 	{ "aster_audio_effect_play_ex", (void *)n_audio_effect_play_ex, "(iii)i", NULL },
 	{ "aster_audio_effect_set_params", (void *)n_audio_effect_set_params, "(iii)i", NULL },

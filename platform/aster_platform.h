@@ -289,6 +289,7 @@ int aster_plat_audio_ui_play(const int16_t *pcm, size_t frames, unsigned gain, u
 void aster_plat_audio_ui_stop(void);
 void aster_plat_audio_ui_release(void);
 int  aster_plat_audio_effect_load(const char *path);
+int  aster_plat_audio_effect_load_memory(const void *data, uint32_t bytes);
 int  aster_plat_audio_effect_play(uint32_t handle);
 int aster_plat_audio_effect_play_ex(uint32_t handle,const aster_audio_effect_play_desc_t *desc);
 int aster_plat_audio_effect_set_params(uint32_t handle,const aster_audio_effect_params_t *params);

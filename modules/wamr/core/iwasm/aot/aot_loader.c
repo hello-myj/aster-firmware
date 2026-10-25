@@ -4522,6 +4522,9 @@ aot_load_from_aot_file(const uint8 *buf, uint32 size, const LoadArgs *args,
     if (!module)
         return NULL;
 
+    /* Establish ownership before parsing: failure paths call aot_unload()
+       and must also release copied initialization data and custom sections. */
+    module->is_binary_freeable = args->wasm_binary_freeable;
     os_thread_jit_write_protect_np(false); /* Make memory writable */
     if (!load(buf, size, module, args->wasm_binary_freeable, args->no_resolve,
               error_buf, error_buf_size)) {

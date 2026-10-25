@@ -93,6 +93,10 @@ ASTER_I("aster_audio_start_file") int32_t aster_audio_start_file(const char *pat
  * Unload releases its PSRAM copy.
  * load requires the fs permission. */
 ASTER_I("aster_audio_effect_load") int32_t aster_audio_effect_load(const char *path, uint32_t path_len);
+/* ABI 4.2, audio-effects-memory. Copies a bounded RIFF PCM16 WAV from
+ * Guest memory before returning. Container <=69632B, PCM <=65536B;
+ * mono/stereo 8..48kHz, same four shared effect handles. No fs permission. */
+ASTER_I("aster_audio_effect_load_memory") int32_t aster_audio_effect_load_memory(const void *wav, uint32_t wav_bytes);
 ASTER_I("aster_audio_effect_play") int32_t aster_audio_effect_play(uint32_t handle);
 ASTER_I("aster_audio_effect_unload") int32_t aster_audio_effect_unload(uint32_t handle);
 

@@ -359,33 +359,57 @@ aster_app_ctx_t *aster_runtime_owner(void *module_inst)
 
 /* ---------- image loading ---------- */
 
-static int load_image(const char *path, uint8_t **out, size_t *out_len)
+static int load_image(const char *path, uint8_t **out, size_t *out_len,
+                      uint32_t linear_initial)
 {
-	struct fs_dirent st;
-	int err = fs_stat(path, &st);
-	if (err) {
-		return err;
-	}
-	uint8_t *b = aster_psram_alloc((size_t)st.size);
-	if (!b) {
-		return -ENOMEM;
-	}
-	struct fs_file_t f;
-	fs_file_t_init(&f);
-	err = fs_open(&f, path, FS_O_READ);
-	if (err) {
-		aster_psram_free(b);
-		return err;
-	}
-	err = aster_fs_read_safe(&f, b, (size_t)st.size);
-	fs_close(&f);
-	if (err < 0 || (size_t)err != (size_t)st.size) {
-		aster_psram_free(b);
-		return err < 0 ? err : -EIO;
-	}
-	*out = b;
-	*out_len = (size_t)err;
-	return 0;
+    struct fs_dirent st;
+    int err = fs_stat(path, &st);
+    if (err) return err;
+    struct fs_file_t f;
+    fs_file_t_init(&f);
+    err = fs_open(&f, path, FS_O_READ);
+    if (err) return err;
+
+    uint8_t header[64];
+    size_t prefix = MIN((size_t)st.size, sizeof(header));
+    err = aster_fs_read_safe(&f, header, prefix);
+    if (err < 0 || (size_t)err != prefix) {
+        fs_close(&f);
+        return err < 0 ? err : -EIO;
+    }
+    size_t allocation = (size_t)st.size;
+    /* A large staging image followed by executable text can split the only
+     * large PSRAM hole. Reuse a future-linear-sized staging reservation so
+     * releasing it leaves room for the instance and display reserve.
+     * The canonical format-6 target section fits in this prefix. XIP must
+     * keep its backing image and is deliberately excluded. */
+    if (prefix == sizeof(header) && linear_initial >= 1024u * 1024u &&
+        (size_t)st.size > linear_initial / 4u &&
+        get_package_type(header, prefix) == Wasm_Module_AoT &&
+        !wasm_runtime_is_xip_file(header, prefix)) {
+        size_t staging = (size_t)linear_initial + ASTER_WAMR_RESERVE + 65536u;
+        if (staging <= CONFIG_ASTER_WAMR_HEAP_SIZE && staging > allocation)
+            allocation = staging;
+    }
+    uint8_t *b = aster_psram_alloc(allocation);
+    if (!b && allocation > (size_t)st.size) {
+        allocation = (size_t)st.size;
+        b = aster_psram_alloc(allocation);
+    }
+    if (!b) { fs_close(&f); return -ENOMEM; }
+    memcpy(b, header, prefix);
+    size_t tail = (size_t)st.size - prefix;
+    err = tail ? aster_fs_read_safe(&f, b + prefix, tail) : 0;
+    fs_close(&f);
+    if (err < 0 || (size_t)err != tail) {
+        aster_psram_free(b);
+        return err < 0 ? err : -EIO;
+    }
+    LOG_INF("AOT staging %u bytes for %u-byte image", (unsigned)allocation,
+            (unsigned)st.size);
+    *out = b;
+    *out_len = (size_t)st.size;
+    return 0;
 }
 
 static int ctx_load(aster_app_ctx_t *ctx, const aster_app_rec_t *rec)
@@ -401,7 +425,7 @@ static int ctx_load(aster_app_ctx_t *ctx, const aster_app_rec_t *rec)
 	}
 
 	snprintf(path, sizeof(path), "%s/app.aot", dir);
-	int err = load_image(path, &ctx->img, &ctx->img_size);
+	int err = load_image(path, &ctx->img, &ctx->img_size, rec->mem_initial);
 	if (err) {
 		LOG_ERR("load required AOT %s: %d", path, err);
 		return err;
@@ -414,13 +438,26 @@ static int ctx_load(aster_app_ctx_t *ctx, const aster_app_rec_t *rec)
 	}
 
 	char error_buf[160];
-	ctx->module = wasm_runtime_load(ctx->img, (uint32_t)ctx->img_size,
-					error_buf, sizeof(error_buf));
+	/* Copy retained strings/data into the module so the input AOT image can
+	 * be reclaimed before allocating the much larger guest linear memory.
+	 * XIP code still points into that image and must retain its backing. */
+	LoadArgs load_args = { 0 };
+	load_args.wasm_binary_freeable =
+		!wasm_runtime_is_xip_file(ctx->img, (uint32_t)ctx->img_size);
+	ctx->module = wasm_runtime_load_ex(ctx->img, (uint32_t)ctx->img_size,
+					   &load_args, error_buf, sizeof(error_buf));
 	if (!ctx->module) {
 		LOG_ERR("AOT load failed: %s", error_buf);
 		aster_psram_free(ctx->img);
 		ctx->img = NULL;
 		return -EINVAL;
+	}
+
+	if (load_args.wasm_binary_freeable &&
+	    wasm_runtime_is_underlying_binary_freeable(ctx->module)) {
+		LOG_INF("AOT input image reclaimed: %u bytes", (unsigned)ctx->img_size);
+		aster_psram_free(ctx->img);
+		ctx->img = NULL;
 	}
 
 	uint32_t stack_size = rec->mem_stack ? rec->mem_stack : 65536;

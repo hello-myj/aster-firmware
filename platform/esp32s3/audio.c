@@ -1963,6 +1963,32 @@ int aster_plat_audio_effect_load(const char *path)
  return err?err:slot+1;
 }
 
+/* Bounded synchronous copy: no Guest pointer survives this call. */
+struct effect_memory {const uint8_t *data;uint32_t bytes;};
+static int effect_memory_read(void *ctx,uint32_t off,void *dst,size_t size)
+{
+ const struct effect_memory *m=ctx;
+ if(off>m->bytes || size>m->bytes-off)return -EINVAL;
+ memcpy(dst,m->data+off,size);return 0;
+}
+int aster_plat_audio_effect_load_memory(const void *data,uint32_t bytes)
+{
+ if(!data || bytes<12 || bytes>69632)return -EINVAL;
+ struct effect_memory input={data,bytes};audio_effect_wav_t wav={0};
+ int err=audio_effect_wav_parse(effect_memory_read,&input,bytes,&wav);
+ if(err)return err;
+ int slot=-1;uint32_t serial=0;
+ k_mutex_lock(&effect_mu,K_FOREVER);
+ for(int i=0;i<EFFECT_SLOTS;i++)if(!effects[i].pcm&&!effects[i].loading){slot=i;effects[i].loading=true;serial=++effects[i].serial;break;}
+ k_mutex_unlock(&effect_mu);if(slot<0)return -ENOMEM;
+ int16_t *pcm=aster_psram_alloc(wav.bytes);
+ if(!pcm)err=-ENOMEM;else memcpy(pcm,input.data+wav.offset,wav.bytes);
+ k_mutex_lock(&effect_mu,K_FOREVER);
+ if(effects[slot].serial!=serial||!effects[slot].loading){if(!err)err=-ECANCELED;}
+ else{effects[slot].loading=false;if(!err){effects[slot].pcm=pcm;effects[slot].size=wav.bytes;effects[slot].frames=wav.bytes/(wav.channels*2);effects[slot].rate=wav.rate;effects[slot].channels=wav.channels;pcm=NULL;}}
+ k_mutex_unlock(&effect_mu);aster_psram_free(pcm);return err?err:slot+1;
+}
+
 /* Never wait for hardware or a closing session on the UI worker. A busy cue
  * is dropped, never queued for late playback. PCM lifetime must be static. */
 int aster_plat_audio_ui_play(const int16_t *pcm, size_t frames, unsigned gain,

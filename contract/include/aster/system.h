@@ -5,7 +5,8 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 4
-#define ASTER_ABI_MINOR 1 /* 4.1 (additive): continuous effect voices, pitch/gain ramps.
+#define ASTER_ABI_MINOR 2 /* 4.2 (additive): bounded memory WAV effects.
+                          * 4.1 (additive): continuous effect voices, pitch/gain ramps.
                           * 4.0 (breaking): six aster_net_* imports replace
                           * the per-protocol network/HTTP/MQTT/WebSocket
                           * imports. Every 3.x package is rejected.
@@ -78,6 +79,7 @@
 #define ASTER_FEATURE_AUDIO_STREAM 18u
 #define ASTER_FEATURE_WEBSOCKET    20u
 #define ASTER_FEATURE_AUDIO_EFFECTS 21u
+#define ASTER_FEATURE_AUDIO_EFFECTS_MEMORY 22u
 
 /* CPU arch ids */
 #define ASTER_ARCH_XTENSA 1u

@@ -81,7 +81,7 @@ void aster_sysinfo_get(aster_system_info_t *info)
 	if (IS_ENABLED(CONFIG_ASTER_WEBSOCKET)) f |= 1ull << ASTER_FEATURE_WEBSOCKET;
 	if (IS_ENABLED(CONFIG_ASTER_HTTP_TLS)) f |= 1ull << ASTER_FEATURE_TLS;
 	if (IS_ENABLED(CONFIG_ASTER_AUDIO)) {
-		f |= (1ull << ASTER_FEATURE_AUDIO_STREAM) | (1ull << ASTER_FEATURE_AUDIO_EFFECTS);
+		f |= (1ull << ASTER_FEATURE_AUDIO_STREAM) | (1ull << ASTER_FEATURE_AUDIO_EFFECTS) | (1ull << ASTER_FEATURE_AUDIO_EFFECTS_MEMORY);
 	}
 	info->feature_flags = f;
 }
@@ -114,6 +114,7 @@ bool aster_sysinfo_feature_by_name(const char *name)
 		{ "tls", ASTER_FEATURE_TLS },
 		{ "audio-stream", ASTER_FEATURE_AUDIO_STREAM },
 		{ "audio-effects", ASTER_FEATURE_AUDIO_EFFECTS },
+		{ "audio-effects-memory", ASTER_FEATURE_AUDIO_EFFECTS_MEMORY },
 		{ "bluetooth", ASTER_FEATURE_BLUETOOTH },
 		{ "accelerometer", ASTER_FEATURE_ACCELEROMETER },
 		{ "gyroscope", ASTER_FEATURE_GYROSCOPE },

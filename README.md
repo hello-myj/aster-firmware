@@ -1,6 +1,6 @@
 # Aster Firmware
 
-立创 ESP32-S3 实战派（`lckfb-s3`）和微雪 ESP32-S3-Touch-LCD-3.5B（`waveshare-35b`）的设备固件。当前 ABI 为 4.0.0。桌面固定竖屏；APP 可以声明横屏或竖屏。
+立创 ESP32-S3 实战派（`lckfb-s3`）和微雪 ESP32-S3-Touch-LCD-3.5B（`waveshare-35b`）的设备固件。当前 ABI 为 4.2.0。桌面固定竖屏；APP 可以声明横屏或竖屏。
 
 ## 构建和烧录
 
