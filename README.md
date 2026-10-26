@@ -70,6 +70,8 @@ systems/zephyr/           设备服务和桌面
 python tools/resources.py
 ```
 
+字库需与固件一同更新到 SD 卡；仅烧录固件不会替换卡上的旧字形。字体与光带的像素对齐、资源重建及验证说明见 [桌面显示清晰度](docs/ui-display-clarity.md)。
+
 ## 检查
 
 ```bash

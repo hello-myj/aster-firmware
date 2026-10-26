@@ -7,9 +7,11 @@
 
 真正上卡的是 `build_cpfont.py` 产出的 `ui_<px>.cpfont`（cpfont v4），`tools/resources.py`
 按 `faces.json` 拷进 `dist/sdcard/aster/fonts/`，设备上读 `/SD:/aster/fonts/ui_<px>.cpfont`。
-当前只烘焙一个尺寸（20px，见 `contract/include/aster/font_metrics.h`）。
+当前提供 12/14/16/18/20/24/28/32/40/48px 全覆盖字库，见 `faces.json` 与
+`contract/include/aster/font_metrics.h`。12–20px 使用原生像素网格微调，
+其余字号使用高倍采样；均保持灰度抗锯齿和同一组公开度量。
 
-ABI 2.1 起字体栈统一到 tiny_ttf：不再烘焙 MJXF 子集。`DejaVuSans.ttf` 不再是
+当前字体栈使用 SD cpfont v4：不再烘焙 MJXF 子集。`DejaVuSans.ttf` 不再是
 固件里的 rodata 字体源，但 `build_ui_ttf.py` 合成 ui.ttf 时仍取它的拉丁字形，
 许可义务保留如下。
 

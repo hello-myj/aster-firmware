@@ -77,8 +77,10 @@ SS_DEFAULT = 4
 # changes with native grid hinting or use it to hide misplaced thin stems.
 GAMMA_DEFAULT = 1.0
 DEPTH_DEFAULT = 4
-# Native hinting selected on-device for the 12px face; larger faces keep SS.
-NATIVE_HINT_MAX_DEFAULT = 12
+# Native grid fitting keeps common UI stems solid at their final ppem.
+# Large display faces retain supersampling for smooth curves. The separate
+# metrics pass below preserves every published advance and line metric.
+NATIVE_HINT_MAX_DEFAULT = 20
 
 
 def make_lut(gamma, depth=DEPTH_DEFAULT):
@@ -474,7 +476,7 @@ def main(argv=None):
                     help=f"supersample factor before box-downsampling "
                          f"(default {SS_DEFAULT}; 1 = render at 1x)")
     ap.add_argument("--native-hint-max", type=int, default=NATIVE_HINT_MAX_DEFAULT,
-                    help="native auto-hinted grayscale pixels through this ppem (default 12); 0 restores supersampling for all faces; advances unchanged")
+                    help=f"native auto-hinted grayscale pixels through this ppem (default {NATIVE_HINT_MAX_DEFAULT}); 0 restores supersampling for all faces; advances unchanged")
     ap.add_argument("--gamma", type=float, default=GAMMA_DEFAULT,
                     help=f"grey gamma applied before quantisation "
                          f"(default {GAMMA_DEFAULT}). Applied as "

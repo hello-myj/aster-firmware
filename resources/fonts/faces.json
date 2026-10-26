@@ -10,7 +10,7 @@
     "gamma": 1.0,
     "depth": 4,
     "lut": "round",
-    "native_hint_max": 12,
+    "native_hint_max": 20,
     "native_hint_freetype_version": "2.13.2"
   },
   "faces": [
@@ -36,7 +36,7 @@
       "coverage": "full",
       "intervals": 138,
       "codepoints": 28988,
-      "bytes": 3165879,
+      "bytes": 2880766,
       "max_bmp": 105,
       "max_scratch": 210
     },
@@ -49,9 +49,9 @@
       "coverage": "full",
       "intervals": 138,
       "codepoints": 28988,
-      "bytes": 3777946,
-      "max_bmp": 145,
-      "max_scratch": 289
+      "bytes": 3553772,
+      "max_bmp": 128,
+      "max_scratch": 256
     },
     {
       "px": 18,
@@ -62,7 +62,7 @@
       "coverage": "full",
       "intervals": 138,
       "codepoints": 28988,
-      "bytes": 4582956,
+      "bytes": 4534267,
       "max_bmp": 171,
       "max_scratch": 342
     },
@@ -75,7 +75,7 @@
       "coverage": "full",
       "intervals": 138,
       "codepoints": 28988,
-      "bytes": 5428108,
+      "bytes": 5401249,
       "max_bmp": 210,
       "max_scratch": 420
     },

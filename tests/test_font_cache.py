@@ -196,13 +196,15 @@ int main(void) {
         spec=importlib.util.spec_from_file_location('bake_hint',ROOT/'tools/build_cpfont.py')
         bake=importlib.util.module_from_spec(spec);spec.loader.exec_module(bake)
         text=set(map(ord,'音乐设置清晰中文笔画ABCxyz012345'))
-        base=bake.rasterize(ROOT/'resources/fonts/ui.ttf',12,text,bake.make_lut(1),4)
-        hinted=bake.rasterize(ROOT/'resources/fonts/ui.ttf',12,text,bake.make_lut(1),4,12)
-        self.assertEqual(base[1],hinted[1])
-        self.assertEqual(base[4:7],hinted[4:7])
-        self.assertEqual([g[2] for g in base[2]],[g[2] for g in hinted[2]])
-        self.assertNotEqual(base[3],hinted[3])
-        levels={v for packed in hinted[3] for byte in packed for v in (byte>>4,byte&15)}
-        self.assertGreater(len(levels),8) # Grayscale, not monochrome thresholding.
+        for px in (12,14,16,18,20):
+            with self.subTest(px=px):
+                base=bake.rasterize(ROOT/'resources/fonts/ui.ttf',px,text,bake.make_lut(1),4)
+                hinted=bake.rasterize(ROOT/'resources/fonts/ui.ttf',px,text,bake.make_lut(1),4,bake.NATIVE_HINT_MAX_DEFAULT)
+                self.assertEqual(base[1],hinted[1])
+                self.assertEqual(base[4:7],hinted[4:7])
+                self.assertEqual([g[2] for g in base[2]],[g[2] for g in hinted[2]])
+                self.assertNotEqual(base[3],hinted[3])
+                levels={v for packed in hinted[3] for byte in packed for v in (byte>>4,byte&15)}
+                self.assertGreater(len(levels),8) # Grayscale, not monochrome thresholding.
         unchanged=bake.rasterize(ROOT/'resources/fonts/ui.ttf',16,text,bake.make_lut(1),4,12)
         self.assertEqual(unchanged,bake.rasterize(ROOT/'resources/fonts/ui.ttf',16,text,bake.make_lut(1),4))

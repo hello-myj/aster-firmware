@@ -448,8 +448,11 @@ static void bind_ribbon(int slot,int idx)
  text(o,meta,43,12,240,INK,16,128);
  if(!e->builtin && ((same && ribbons[slot].data) || load_icon(slot,e->id))) {
   lv_obj_t *img=lv_image_create(o);lv_image_set_src(img,&ribbons[slot].icon);
-  lv_image_set_pivot(img,0,0);lv_image_set_scale(img,56*256/ribbons[slot].icon.header.w);
-  lv_obj_set_pos(img,ax(43),ay(43));
+  /* SDK icons are normally 48px. Keep that native size rather than
+   * enlarging to 56px before the whole ribbon is transformed again. */
+  lv_image_set_pivot(img,0,0);lv_image_set_scale(img,48*256/ribbons[slot].icon.header.w);
+  lv_image_set_antialias(img,true);
+  lv_obj_set_pos(img,ax(47),ay(47));
   if(ribbons[slot].icon.header.cf==LV_COLOR_FORMAT_A8) {
    lv_obj_set_style_image_recolor(img,lv_color_hex(INK),0);lv_obj_set_style_image_recolor_opa(img,LV_OPA_COVER,0);
   }
@@ -561,7 +564,10 @@ static void redraw(void)
   int shift=idx==selected[group]?pull:0;
   int zoom=MAX(174,256-a*41/1000);
   int f=fit256();
-  lv_image_set_rotation(o,wrap(-90+CLAMP(d*60/1000,-120,120),3600));
+  /* The selected ribbon settles on the native pixel grid: its already
+   * antialiased glyphs and icons must not get a second resampling pass.
+   * Neighbours still fan out, and drag/settle motion remains continuous. */
+  lv_image_set_rotation(o,wrap(CLAMP(d*60/1000,-120,120),3600));
   if(f==256) {
    lv_obj_set_pos(o,-20+a*9/1000+shift,126+d*FLUX_RIBBON_PITCH/1000-70);
    lv_image_set_pivot(o,180,70);
@@ -625,7 +631,7 @@ static void slider_card(int y,const char *name,const char *hint,uint32_t color,i
  lv_obj_set_user_data(s,out);
  lv_obj_add_event_cb(s,slider_changed,LV_EVENT_VALUE_CHANGED,(void *)(intptr_t)kind);
  lv_obj_add_event_cb(s,slider_changed,LV_EVENT_RELEASED,(void *)(intptr_t)kind);
- text(card,hint,15,82,250,0x6c8356,16,160);
+ text(card,hint,15,82,250,DIM,16,160);
 }
 static void build_home(void)
 {
