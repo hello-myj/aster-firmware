@@ -544,3 +544,19 @@ void aster_app_mgr_note_mem(const char *id, uint32_t linear_bytes)
 	}
 	k_mutex_unlock(&reg_lock);
 }
+
+bool aster_app_mgr_snapshot(int index,aster_app_rec_t *out)
+{
+    if(!out)return false;
+    k_mutex_lock(&reg_lock,K_FOREVER);
+    bool found=index>=0 && index<nrecs;
+    if(found)*out=recs[index];
+    k_mutex_unlock(&reg_lock);return found;
+}
+bool aster_app_mgr_find_snapshot(const char *id,aster_app_rec_t *out)
+{
+    if(!out || !id)return false;
+    k_mutex_lock(&reg_lock,K_FOREVER);aster_app_rec_t *r=find_mut(id);
+    if(r)*out=*r;
+    k_mutex_unlock(&reg_lock);return r!=NULL;
+}

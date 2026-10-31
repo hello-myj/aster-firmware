@@ -39,6 +39,9 @@ static int hexnib(char c)
 static int load_pubkey(uint8_t out[65])
 {
 	const char *hex = CONFIG_ASTER_VENDOR_PUBKEY;
+	if (strlen(hex) != 130) {
+		return -1;
+	}
 	for (int i = 0; i < 65; i++) {
 		int hi = hexnib(hex[2 * i]), lo = hexnib(hex[2 * i + 1]);
 		if (hi < 0 || lo < 0) {

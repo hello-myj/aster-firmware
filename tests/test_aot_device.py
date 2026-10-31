@@ -17,20 +17,26 @@ class DeviceAOT(unittest.TestCase):
 #include <errno.h>
 #define IS_ENABLED(x) (x)
 #define LOG_ERR(...) ((void)0)
+#define LOG_INF(...) ((void)0)
 static int CONFIG_ASTER_AOT=1;
 enum {Wasm_Module_Bytecode,Wasm_Module_AoT};
-typedef struct {const char *id;bool has_aot;} aster_app_rec_t;
+typedef struct {const char *id;bool has_aot;uint32_t mem_initial;} aster_app_rec_t;
+typedef struct {bool wasm_binary_freeable;} LoadArgs;
 typedef struct {uint8_t *img;size_t img_size;void *module;} aster_app_ctx_t;
 static uint8_t image[8];
 static int disk_error,module_error,loads,frees,kind=Wasm_Module_AoT,unlinks;
 static int aster_storage_app_code_dir(char *dir,size_t n,const char *id) {snprintf(dir,n,"/apps/%s",id);return 0;}
-static int load_image(const char *path,uint8_t **out,size_t *size) {
+static int load_image(const char *path,uint8_t **out,size_t *size,uint32_t initial) {
+ (void)initial;
  assert(strstr(path,"/app.aot"));loads++;
  if(disk_error) return disk_error;
  *out=image;*size=sizeof(image);return 0;
 }
 static int get_package_type(const uint8_t *img,uint32_t n) {assert(img==image && n==8);return kind;}
-static void *wasm_runtime_load(uint8_t *img,uint32_t n,char *error,size_t cap) {
+static bool wasm_runtime_is_xip_file(uint8_t *img,uint32_t n) {(void)img;(void)n;return false;}
+static bool wasm_runtime_is_underlying_binary_freeable(void *module) {(void)module;return false;}
+static void *wasm_runtime_load_ex(uint8_t *img,uint32_t n,LoadArgs *args,char *error,size_t cap) {
+ (void)args;
  assert(img==image && n==8);snprintf(error,cap,"broken relocation");return module_error?NULL:(void *)image;
 }
 static void aster_psram_free(void *p) {assert(p==image);frees++;}
@@ -39,7 +45,7 @@ static int fs_unlink(const char *path) {(void)path;unlinks++;return 0;}
  return 0;
 }
 int main(void) {
- aster_app_ctx_t ctx={0};aster_app_rec_t rec={"test.game",false};
+ aster_app_ctx_t ctx={0};aster_app_rec_t rec={"test.game",false,0};
  assert(ctx_load(&ctx,&rec)==-ENOTSUP && loads==0);
  rec.has_aot=true;CONFIG_ASTER_AOT=0;
  assert(ctx_load(&ctx,&rec)==-ENOTSUP && loads==0);CONFIG_ASTER_AOT=1;

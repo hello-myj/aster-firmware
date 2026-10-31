@@ -540,7 +540,7 @@ int compare_nodes(const void* a, const void* b) {
 
 /* MJX: picolibc qsort pulls in a heavyweight generic sort for what are
  * tiny per-scanline node lists; insertion sort beats it and saves rocode */
-static void pp_sort_int(int *a, int n) {
+static void pp_sort_int(int32_t *a, int n) {
   for (int i = 1; i < n; i++) {
     int v = a[i], j = i - 1;
     while (j >= 0 && a[j] > v) { a[j + 1] = a[j]; j--; }

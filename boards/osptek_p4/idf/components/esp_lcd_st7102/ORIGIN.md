@@ -1,0 +1,1 @@
+Driver copied from the supplied OSPTEK archive, examples/esp32p4-st7102-mipi-bringup/components/esp_lcd_st7102/. Original per-file Apache-2.0 notices retained. Adaptation: deprecated color_space member renamed to rgb_ele_order for IDF 6.

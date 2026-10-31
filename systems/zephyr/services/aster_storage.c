@@ -9,14 +9,18 @@
 #include <string.h>
 #include <zephyr/fs/fs.h>
 #include <zephyr/logging/log.h>
+#ifndef ASTER_SYSTEM_ESP_IDF
 #include <zephyr/storage/disk_access.h>
 #include <ff.h>
 #include <esp_memory_utils.h>
+#endif
 
 LOG_MODULE_REGISTER(aster_storage, LOG_LEVEL_INF);
 
 static bool mounted;
 
+
+#ifndef ASTER_SYSTEM_ESP_IDF
 /* ---- DMA-safe file I/O ---------------------------------------------------
  * Some SDMMC controllers only accept DMA-capable (internal RAM) buffers, but
  * ASTER keeps wasm images and linear memory in external RAM. When the
@@ -105,6 +109,7 @@ int aster_fs_write_safe(struct fs_file_t *f, const void *src, size_t len)
  * to point at it, otherwise f_mount() finds no registered filesystem object
  * and returns FR_NOT_ENABLED (mapped to -ENODEV). */
 static FATFS fat_fs;
+#endif /* !ASTER_SYSTEM_ESP_IDF: board mount and DMA bounce live in IDF port. */
 
 /* Zephyr's fs_mkdir logs at <err> level on EEXIST. ASTER creates the same hot
  * dirs (apps/, /data, ...) over and over, so probe with fs_stat first to keep
@@ -178,6 +183,13 @@ bool aster_storage_is_music_path(const char *app_path)
 
 int aster_storage_init(void)
 {
+#ifdef ASTER_SYSTEM_ESP_IDF
+    struct fs_dirent st;
+    int status=fs_stat(ASTER_MOUNT_POINT,&st);
+    if(status)return status;
+    if(st.type!=FS_DIR_ENTRY_DIR)return -ENOTDIR;
+    mounted=true;return ensure_dirs();
+#else
 	int err;
 
 	if (mounted) {
@@ -219,8 +231,10 @@ int aster_storage_init(void)
 		LOG_INF("SD mounted");
 	}
 	return 0;
+#endif /* ASTER_SYSTEM_ESP_IDF */
 }
 
+/* End of OS-specific mount; path/sandbox logic below is shared. */
 bool aster_storage_mounted(void)
 {
 	return mounted;

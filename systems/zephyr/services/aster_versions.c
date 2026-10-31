@@ -114,7 +114,24 @@ static int version_candidate(const char *base, unsigned slot, uint32_t *sequence
     /* Byte-for-byte payload verification precedes commit. Recovery also
      * refuses slots missing required program files or a valid AOT header. */
     const char *files[] = {"package.ast", "app.wasm", "app.aot"};
-    for (unsigned i = 0; i < 3; i++) {
+    unsigned required = 3;
+#ifdef ASTER_SYSTEM_ESP_IDF
+    /* The IDF interpreter also accepts portable WASM-only packages. The
+     * committed manifest explicitly records whether app.aot was extracted;
+     * its CRC was checked above, so a missing required AOT is still rejected. */
+    char manifest[ASTER_MANIFEST_MAX];
+    if (snprintf(path,sizeof(path),"%s/manifest.json",dir)>=(int)sizeof(path))return -ENAMETOOLONG;
+    err=fs_stat(path,&st);if(err)return err;
+    if(st.size>=sizeof(manifest))return -EBADMSG;
+    fs_file_t_init(&f);err=fs_open(&f,path,FS_O_READ);if(err)return err;
+    int n=aster_fs_read_safe(&f,manifest,st.size);
+    int closed=fs_close(&f);
+    if(n<0 || (size_t)n!=st.size || closed)return -EIO;
+    manifest[n]=0;uint32_t has_aot;
+    if(aster_json_u32(manifest,"aot",&has_aot) || has_aot>1)return -EBADMSG;
+    if(!has_aot)required=2;
+#endif
+    for (unsigned i = 0; i < required; i++) {
         if (snprintf(path, sizeof(path), "%s/%s", dir, files[i]) >= (int)sizeof(path)) {
             return -ENAMETOOLONG;
         }
@@ -122,6 +139,7 @@ static int version_candidate(const char *base, unsigned slot, uint32_t *sequence
         if (err) { return err; }
         if (st.type != FS_DIR_ENTRY_FILE || st.size < 8) { return -EBADMSG; }
     }
+    if(required==2) {*sequence=version_u32(record+8);return 0;}
     fs_file_t_init(&f);
     err = fs_open(&f, path, FS_O_READ);
     if (err) { return err; }

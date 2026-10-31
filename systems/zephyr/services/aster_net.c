@@ -10,7 +10,9 @@
 #else
 #include <zephyr/kernel.h>
 #include <zephyr/net/socket.h>
+#ifndef ASTER_SYSTEM_ESP_IDF
 #include <zephyr/net/net_if.h>
+#endif
 #include <zephyr/posix/fcntl.h>
 #include <zephyr/net/dns_resolve.h>
 #endif
@@ -577,6 +579,10 @@ int aster_net_get_stats(struct aster_net_stats *out)
  * best-effort snapshot: callers must not infer internet access from flags. */
 int aster_net_interface_info(struct aster_net_interface_info *out)
 {
+#ifdef ASTER_SYSTEM_ESP_IDF
+    extern int aster_idf_net_interface_info(struct aster_net_interface_info *);
+    return aster_idf_net_interface_info(out);
+#else
     if (!out) return -EINVAL;
     *out = (struct aster_net_interface_info){0};
     struct net_if *iface = net_if_get_default();
@@ -589,6 +595,7 @@ int aster_net_interface_info(struct aster_net_interface_info *out)
     if (addr) { out->ipv4 = addr->s_addr; out->flags |= 8u; }
     k_mutex_unlock(&iface->lock);
     return 0;
+#endif
 }
 uint32_t aster_net_app_sessions(void)
 {

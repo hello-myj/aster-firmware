@@ -409,7 +409,7 @@ static bool http_tick(void)
     }
     return active;
 }
-#ifndef ASTER_HTTP_HOST_TEST
+#if !defined(ASTER_HTTP_HOST_TEST) && !defined(ASTER_SYSTEM_ESP_IDF)
 /* A full-rate APP can keep priority-7 drawing runnable continuously. A lower
  * priority TLS worker can then starve inside scalar multiplication. Share that
  * priority, but force a 1 ms sleep after each 2 ms CPU slice so native TCP and
@@ -434,7 +434,7 @@ static void http_worker(void *a, void *b, void *c)
     (void)a;
     (void)b;
     (void)c;
-#ifndef ASTER_HTTP_HOST_TEST
+#if !defined(ASTER_HTTP_HOST_TEST) && !defined(ASTER_SYSTEM_ESP_IDF)
     k_thread_time_slice_set(&http_thread, k_ms_to_ticks_ceil32(2),
                             http_budget_expired, NULL);
 #endif
@@ -682,7 +682,7 @@ int aster_http_svc_get_stats(struct aster_http_stats *out)
         return -EAGAIN;
     memset(out, 0, sizeof(*out));
     out->stack_bytes = http_stack ? K_KERNEL_STACK_LEN(HTTP_STACK) : 0;
-#ifndef ASTER_HTTP_HOST_TEST
+#if !defined(ASTER_HTTP_HOST_TEST) && !defined(ASTER_SYSTEM_ESP_IDF)
     out->cpu_yields = atomic_get(&http_cpu_yields);
 #endif
 #if defined(CONFIG_ASTER_HTTP_TLS)

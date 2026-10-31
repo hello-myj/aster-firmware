@@ -1,0 +1,45 @@
+menu "Aster OSPTEK P4 baseboard V1.5 wiring"
+config ASTER_P4_BACKLIGHT_GPIO
+    int "BACKLIGHT_GPIO"
+    range 0 54
+    default 20
+config ASTER_P4_LCD_RESET_GPIO
+    int "LCD_RESET_GPIO"
+    range 0 54
+    default 5
+config ASTER_P4_TOUCH_SCL_GPIO
+    int "TOUCH_SCL_GPIO"
+    range 0 54
+    default 8
+config ASTER_P4_TOUCH_SDA_GPIO
+    int "TOUCH_SDA_GPIO"
+    range 0 54
+    default 7
+config ASTER_P4_TOUCH_RESET_GPIO
+    int "TOUCH_RESET_GPIO"
+    range 0 54
+    default 6
+config ASTER_P4_TOUCH_INT_GPIO
+    int "TOUCH_INT_GPIO"
+    range 0 54
+    default 21
+endmenu
+config ASTER_APP_WATCHDOG_MS
+    int "Maximum duration of a guest lifecycle/event callback (ms)"
+    range 100 30000
+    default 2000
+config ASTER_P4_AOT_INTERNAL_RESERVE_KB
+    int "Internal SRAM left available when allocating AOT code (KiB)"
+    range 16 256
+    default 64
+config ASTER_SIGNATURE_VERIFY
+    bool "Verify package signatures"
+    default n
+config ASTER_SIGNATURE_REQUIRE
+    bool "Reject unsigned packages"
+    depends on ASTER_SIGNATURE_VERIFY
+    default y
+config ASTER_VENDOR_PUBKEY
+    string "Trusted P-256 public key (130 hexadecimal characters)"
+    depends on ASTER_SIGNATURE_VERIFY
+    default ""

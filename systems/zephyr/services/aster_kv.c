@@ -40,7 +40,7 @@ int aster_kv_set(const char *id, const char *key, const void *val, size_t len)
 	}
 	err = aster_fs_write_safe(&f, val, len);
 	fs_close(&f);
-	return err < 0 ? err : 0;
+	return err < 0 ? err : (size_t)err == len ? 0 : -EIO;
 }
 
 int aster_kv_get(const char *id, const char *key, void *dst, size_t max, size_t *out_len)
@@ -50,7 +50,8 @@ int aster_kv_get(const char *id, const char *key, void *dst, size_t max, size_t 
 		return -ENOENT;
 	}
 	/* a missing key is normal (first read); fs_open would log it at <err> */
-	if (fs_stat(path, &(struct fs_dirent){0}) != 0) {
+	struct fs_dirent stat;
+	if (fs_stat(path, &stat) != 0) {
 		return -ENOENT;
 	}
 	struct fs_file_t f;
@@ -65,7 +66,7 @@ int aster_kv_get(const char *id, const char *key, void *dst, size_t max, size_t 
 		return err;
 	}
 	if (out_len) {
-		*out_len = (size_t)err;
+		*out_len = stat.size;
 	}
 	return 0;
 }

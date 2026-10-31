@@ -1,0 +1,90 @@
+{
+  "id": "osptek-p4-st7102",
+  "stage": "hardware-smoke-tested-full-validation-pending",
+  "system": "esp-idf",
+  "cpu": "riscv32",
+  "soc": "esp32p4",
+  "coprocessor": "esp32c5",
+  "panel": {
+    "driver": "ST7102",
+    "interface": "mipi-dsi",
+    "width": 480,
+    "height": 480,
+    "lanes": 2,
+    "lane_bit_rate_mbps": 620,
+    "dpi_clock_mhz": 30
+  },
+  "touch": {
+    "driver": "ST7123",
+    "status": "hardware-swipe-verified"
+  },
+  "wiring_source": "ESP32-P4-Module User Guide 20260910, page 6, baseboard V1.5 schematic",
+  "wiring_verified": false,
+  "aster_runtime": "Experimental ESP-IDF ABI 4.2: desktop, applications, storage, graphics, network, audio; see README limitations",
+  "c5_transport": {
+    "type": "sdio",
+    "slot": 1,
+    "width": 4,
+    "clk": 18,
+    "cmd": 19,
+    "d0": 14,
+    "d1": 15,
+    "d2": 16,
+    "d3": 17,
+    "reset": 54,
+    "boot": 6,
+    "boot_shared_with_touch_reset": true,
+    "source": "osptek/esp32-p4c5-core-board/images/c5-p4-connection.png"
+  },
+  "wiring_schematic_checked": true,
+  "gpio": {
+    "BACKLIGHT_GPIO": 20,
+    "LCD_RESET_GPIO": 5,
+    "TOUCH_SCL_GPIO": 8,
+    "TOUCH_SDA_GPIO": 7,
+    "TOUCH_RESET_GPIO": 6,
+    "TOUCH_INT_GPIO": 21
+  },
+  "flash_bytes": 16777216,
+  "psram_bytes": 33554432,
+  "sdmmc": {
+    "slot": 0,
+    "width": 4,
+    "clk": 43,
+    "cmd": 44,
+    "d0": 39,
+    "d1": 40,
+    "d2": 41,
+    "d3": 42,
+    "detect": 45
+  },
+  "audio": {
+    "codec": "ES8311",
+    "i2c_sda": 7,
+    "i2c_scl": 8,
+    "i2s_mclk": 13,
+    "i2s_bclk": 12,
+    "i2s_ws": 10,
+    "i2s_tx": 9,
+    "i2s_rx": 11,
+    "pa_enable": 53
+  },
+  "reference_archives": {
+    "display-tft-3.95inch-480x480-main.zip": "32b58c55ae15049ffcb90d6c311deb948e8c1376ce632dc6db1573507cb8904b",
+    "esp32-p4c5-module-dev-board-main.zip": "c8cad6b4c3054e2c75e5c303b9be10f7f01afd75696decd4a0fbb5656c1a5cfb"
+  },
+  "c5_firmware_reference": {
+    "version": "2.12.9",
+    "flash_offset": "0x0",
+    "auto_flash": false
+  },
+  "aot": {
+    "enabled": true,
+    "cpu": "riscv32",
+    "abi": "ilp32f",
+    "memory": "internal executable SRAM; pre-entry failure falls back to WASM",
+    "interruptible_shared_memory_profile": true,
+    "idf_memory_protection": false,
+    "hardware_execution_verified": true
+  }
+}

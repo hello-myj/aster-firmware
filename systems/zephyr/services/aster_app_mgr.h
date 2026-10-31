@@ -104,4 +104,8 @@ void aster_app_mgr_set_change_cb(void (*cb)(void));
 /* downgrade the AOT preference at runtime (corrupt app.aot -> wasm fallback) */
 void aster_app_mgr_clear_aot(const char *id);
 
+/* Stable copies for ports with independent console and UI tasks. */
+bool aster_app_mgr_snapshot(int index,aster_app_rec_t *out);
+bool aster_app_mgr_find_snapshot(const char *id,aster_app_rec_t *out);
+
 #endif

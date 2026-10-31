@@ -13,10 +13,14 @@
 #include <errno.h>
 #include <stdint.h>
 #include <string.h>
+#ifdef ASTER_SYSTEM_ESP_IDF
+#include "audio_port.h"
+#else
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/i2s.h>
+#endif
 #include <zephyr/fs/fs.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -53,14 +57,18 @@ LOG_MODULE_REGISTER(aster_audio, LOG_LEVEL_INF);
  * camera's power-down line from here -- silently, while looking correct at
  * both ends. See the zephyr,user block in the board overlay. */
 static const struct gpio_dt_spec pa_en =
+#ifdef ASTER_SYSTEM_ESP_IDF
+    {.port=&aster_idf_gpio_device,.pin=53};
+#else
 	GPIO_DT_SPEC_GET_OR(DT_PATH(zephyr_user), pa_en_gpios, {0});
+#endif
 
 /* The buses are bound by ROLE, not by node label (see the chosen block in the
  * board overlay). Without this the mismatch is invisible: DT_CHOSEN() on a
  * missing role yields an invalid node, DEVICE_DT_GET_OR_NULL() yields NULL,
  * and bring-up returns -ENODEV -- which on the bench looks exactly like a
  * codec that failed to probe. */
-#if IS_ENABLED(CONFIG_ASTER_AUDIO)
+#if IS_ENABLED(CONFIG_ASTER_AUDIO) && !defined(ASTER_SYSTEM_ESP_IDF)
 BUILD_ASSERT(DT_HAS_CHOSEN(aster_audio_i2c) && DT_HAS_CHOSEN(aster_audio_i2s),
 	     "the board conf claims an audio codec, but the board overlay has no "
 	     "`chosen { aster,audio-i2c = &<bus>; aster,audio-i2s = &<i2s>; }` -- "
@@ -411,8 +419,12 @@ static int codecs_init(void)
 	if (codecs_ready) {
 		return 0;
 	}
-	i2c_dev = DEVICE_DT_GET_OR_NULL(DT_CHOSEN(aster_audio_i2c));
-	i2s_dev = DEVICE_DT_GET_OR_NULL(DT_CHOSEN(aster_audio_i2s));
+#ifdef ASTER_SYSTEM_ESP_IDF
+    i2c_dev=aster_idf_audio_i2c();i2s_dev=aster_idf_audio_i2s();
+#else
+    i2c_dev = DEVICE_DT_GET_OR_NULL(DT_CHOSEN(aster_audio_i2c));
+    i2s_dev = DEVICE_DT_GET_OR_NULL(DT_CHOSEN(aster_audio_i2s));
+#endif
 	if (!i2c_dev || !device_is_ready(i2c_dev) || !i2s_dev || !device_is_ready(i2s_dev)) {
 		return -ENODEV;
 	}
@@ -1684,6 +1696,9 @@ static int record_blocks(uint8_t *pcm, size_t size)
 	while (off < size) {
 		void *blk = NULL;
 		size_t got = 0;
+#ifdef ASTER_SYSTEM_ESP_IDF
+        if(aster_idf_audio_record_cancelled()){err=-ECANCELED;break;}
+#endif
 		err = i2s_read(i2s_dev, &blk, &got);
 		if (err || !blk) {
 			/* Otherwise the only trace is the caller's trailing -EIO:

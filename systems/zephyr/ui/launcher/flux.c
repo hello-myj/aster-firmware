@@ -564,19 +564,20 @@ static void redraw(void)
   int shift=idx==selected[group]?pull:0;
   int zoom=MAX(174,256-a*41/1000);
   int f=fit256();
+  int centered_x=(view_w-320*f/256)/2;
   /* The selected ribbon settles on the native pixel grid: its already
    * antialiased glyphs and icons must not get a second resampling pass.
    * Neighbours still fan out, and drag/settle motion remains continuous. */
   lv_image_set_rotation(o,wrap(CLAMP(d*60/1000,-120,120),3600));
   if(f==256) {
-   lv_obj_set_pos(o,-20+a*9/1000+shift,126+d*FLUX_RIBBON_PITCH/1000-70);
+   lv_obj_set_pos(o,centered_x-20+a*9/1000+shift,126+d*FLUX_RIBBON_PITCH/1000-70);
    lv_image_set_pivot(o,180,70);
    lv_image_set_scale(o,zoom);
   } else {
    int design_x=-20+a*9/1000+shift;
    int design_y=126+d*FLUX_RIBBON_PITCH/1000-70;
    int sc=zoom*f/256; if(sc<1) sc=1;
-   lv_obj_set_pos(o,design_x*f/256-180+180*f/256,design_y*f/256-70+70*f/256);
+   lv_obj_set_pos(o,centered_x+design_x*f/256-180+180*f/256,design_y*f/256-70+70*f/256);
    lv_image_set_pivot(o,180,70);
    lv_image_set_scale(o,(uint32_t)sc);
   }
@@ -886,10 +887,10 @@ static void tick_clock(void)
 {
  uint64_t sec=k_uptime_get()/1000;if(sec==clock_sec) return;clock_sec=sec;
  aster_time_info_t t={0};char value[48];
- if(!aster_time_read(&t)) snprintf(value,sizeof(value),"%02u:%02u",t.hour,t.minute);
+ if(!aster_time_read(&t)) snprintf(value,sizeof(value),"%02u:%02u",(unsigned)t.hour,(unsigned)t.minute);
  else snprintf(value,sizeof(value),"--:--");
  set_text(bar_time,value);set_text(clock_value,value);
- snprintf(value,sizeof(value),"%04d-%02u-%02u%s",t.year,t.month,t.day,(t.flags&ASTER_TIME_FLAG_SYNCED)?"":" · 默认时间");set_text(clock_date,value);
+ snprintf(value,sizeof(value),"%04d-%02u-%02u%s",(int)t.year,(unsigned)t.month,(unsigned)t.day,(t.flags&ASTER_TIME_FLAG_SYNCED)?"":" · 默认时间");set_text(clock_date,value);
  if(wifi_state) {
   aster_wifi_status_t s={0};int err=aster_plat_wifi_status(&s);
   set_text(wifi_state,err || !s.ip[0]?"未连接":"已连接");

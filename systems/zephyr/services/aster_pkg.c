@@ -1,12 +1,17 @@
 /* SPDX-License-Identifier: MIT */
 #include "aster_pkg.h"
+#ifndef ASTER_PKG_PARSER_ONLY
 #include "aster_versions.h"
 #include "aster_app_mgr.h"
 #include "aster_sig.h"
 #include "aster_storage.h"
 #include "aster_sysinfo.h"
 #include "aster_mem.h"
+#endif
 #include "aster_bytes.h"
+#ifdef ASTER_PKG_PARSER_ONLY
+#include "aster_idf_pkg_port.h"
+#endif
 
 #include <errno.h>
 #include <stdio.h>
@@ -438,6 +443,7 @@ int aster_json_str_array(const char *json, const char *key, char arr[][24], int 
 }
 
 /* Load a whole file into memory */
+#ifndef ASTER_PKG_PARSER_ONLY
 static int load_file(const char *path, uint8_t **buf, size_t *len)
 {
 	struct fs_dirent st;
@@ -851,10 +857,12 @@ static int pkg_install_locked(const char *src_path)
 	 * manifest's "aot" flag both read it, so they cannot disagree. */
 	bool aot_ok = alen && atarget == CONFIG_ASTER_AOT_TARGET_ID;
 	if (!aot_ok) {
+#ifndef ASTER_SYSTEM_ESP_IDF
 		LOG_ERR("install: %s requires AOT target %u (package target=%u, bytes=%u)",
 			m.id, (unsigned)CONFIG_ASTER_AOT_TARGET_ID, atarget, (unsigned)alen);
 		aster_psram_free(img);
 		return alen ? ASTER_EABI : ASTER_ENOTSUP;
+#endif
 	}
 
 	/* Signature gate BEFORE anything is written to the app dir. Policy is
@@ -1015,8 +1023,8 @@ static int pkg_install_locked(const char *src_path)
 		"\"mem_initial\":%u,\"mem_max\":%u,\"mem_stack\":%u,\"mem_heap\":%u,"
 		"\"aot\":%u,\"installed\":1",
 		m.id, m.name, m.version, m.abi_min, m.abi_target,
-		m.mem_initial, m.mem_max, m.mem_stack ? m.mem_stack : 65536,
-		m.mem_heap ? m.mem_heap : 262144, aot_ok ? 1u : 0u);
+		(unsigned)m.mem_initial, (unsigned)m.mem_max, (unsigned)(m.mem_stack ? m.mem_stack : 65536),
+		(unsigned)(m.mem_heap ? m.mem_heap : 262144), aot_ok ? 1u : 0u);
 	int r = (w > 0 && w < (int)ASTER_MANIFEST_MAX) ? 0 : -1;
 
 	if (r >= 0 && m.description[0]) {
@@ -1139,3 +1147,5 @@ int aster_pkg_install_file(const char *src_path)
 	aster_app_mgr_files_unlock();
 	return err;
 }
+
+#endif /* !ASTER_PKG_PARSER_ONLY */

@@ -82,3 +82,7 @@ python -m unittest discover -s tests -v
 ```
 
 架构见 [docs/architecture.md](docs/architecture.md)。从工程到设备的步骤见 [快速入门](docs/quickstart.md)。许可见 [NOTICE.md](NOTICE.md)。
+
+## P4 实验性移植
+
+鱼鹰 ESP32-P4+C5 / ST7102 MIPI 480×480 的独立 ESP-IDF 移植见 [板级说明](boards/osptek_p4/README.md)。已接入桌面、应用管理、图形/存储、网络、音频及 RISC-V AOT；当前没有实机验证，仍有说明中列出的限制，不属于正式支持的设备。构建使用 `tools/bringup.py`。

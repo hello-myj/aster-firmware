@@ -17,10 +17,16 @@
 #ifndef ASTER_UI_GEOM_H_
 #define ASTER_UI_GEOM_H_
 
+#ifdef ASTER_SYSTEM_ESP_IDF
+#include "sdkconfig.h"
+#include <zephyr/sys/util.h>
+#define ASTER_DISPLAY_PANEL_W CONFIG_ASTER_DISPLAY_WIDTH
+#define ASTER_DISPLAY_PANEL_H CONFIG_ASTER_DISPLAY_HEIGHT
+#else
 #include <zephyr/devicetree.h>
-
 #define ASTER_DISPLAY_PANEL_W DT_PROP(DT_CHOSEN(zephyr_display), width)
 #define ASTER_DISPLAY_PANEL_H DT_PROP(DT_CHOSEN(zephyr_display), height)
+#endif
 
 /* Rotation SWAPS the axes, so these cannot be aliases. It is 0 on the
  * reference board -- both of its orientations are the panel rotating itself,
