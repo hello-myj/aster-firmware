@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import tempfile
+import struct
 from concurrent.futures import ThreadPoolExecutor
 from make_smoke import ROOT
 
@@ -42,11 +43,11 @@ static inline int ledc_update_duty(int m,int c) {(void)m;(void)c;return 0;}
         flags.append(arg)
     flags += ["-I"+str(ui),"-I"+str(shared/"launcher"),"-I"+str(ROOT/"platform/esp32s3"),
               "-I"+str(ROOT/"systems/espidf/components/aster_connectivity"),
-              "-DCONFIG_ASTER_WIFI=1","-DCONFIG_ASTER_AUDIO=1","-DCONFIG_ASTER_AUDIO_RATE=16000",
+              "-DCONFIG_ASTER_WIFI=1","-DCONFIG_ASTER_AUDIO=1","-DCONFIG_ASTER_AUDIO_RATE=16000","-DCONFIG_ASTER_FLUX_ART_CACHE=8",
               "-DCONFIG_ASTER_AUDIO_BITS=16",'-DCONFIG_ASTER_BOARD_ID="osptek-p4-st7102"']
     sources=[ui/name for name in ("ui.c","platform.c","wifi.c")]
     sources += [shared/name for name in ("launcher/flux.c","launcher/flux_font.c","gesture.c","qpanel.c","wifi_settings.c","ui_splash.c")]
-    sources += [ROOT/"platform/esp32s3/touch_ui.c",fixture/"ui_mock.c"]
+    sources += [ROOT/"platform/esp32s3/touch_ui.c",fixture/"ui_mock.c",fixture/"flux_pixels.c"]
     def compile_source(pair):
         i,source=pair;obj=out/("ui-%02d.o"%i)
         subprocess.run(["cc"]+flags+["-c",str(source),"-o",str(obj)],check=True)
@@ -65,6 +66,12 @@ static inline int ledc_update_duty(int m,int c) {(void)m;(void)c;return 0;}
                         *["-Wl,--export=aster_app_"+name for name in ("init","start","event","stop","destroy")]],check=True)
     with tempfile.TemporaryDirectory(prefix="aster-ui-sd-") as sd:
         fonts=Path(sd)/"aster/fonts";fonts.parent.mkdir();fonts.symlink_to(ROOT/"resources/fonts")
+        for i in range(9):
+            manifest=json.dumps({"id":f"test.ui.{i}","name":f"Test Card {i}","version":"1.0.0","product":"aster",
+                "target_id":"riscv","abi":{"min":"4.2","target":"4.2.0"},"permissions":[]}).encode()
+            code=guest.read_bytes();header=bytearray(64)
+            struct.pack_into("<4sHHIIIIIII",header,0,b"ASTP",1,64,0,64,len(manifest),64+len(manifest),len(code),0,0)
+            (Path(sd)/f"test.ui.{i}.ast").write_bytes(header+manifest+code)
         subprocess.run([str(out/"ui-runner"),str(out),str(guest)],check=True,timeout=25,
                        env={**os.environ,"ASTER_TEST_SD_ROOT":sd})
     try:

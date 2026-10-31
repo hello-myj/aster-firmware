@@ -28,6 +28,12 @@ config ASTER_APP_WATCHDOG_MS
     int "Maximum duration of a guest lifecycle/event callback (ms)"
     range 100 30000
     default 2000
+config ASTER_P4_AUTORUN_DIAGNOSTIC
+    bool "Run SD root app.aot/app.wasm diagnostic automatically at boot"
+    default n
+    help
+        Normally boot directly to the desktop. Run the SD root diagnostic
+        explicitly with 'aster app diagnostic' when checking the hardware.
 config ASTER_P4_AOT_INTERNAL_RESERVE_KB
     int "Internal SRAM left available when allocating AOT code (KiB)"
     range 16 256

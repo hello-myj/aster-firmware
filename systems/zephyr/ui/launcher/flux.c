@@ -46,6 +46,10 @@ LOG_MODULE_REGISTER(aster_flux, LOG_LEVEL_INF);
 #define RIBBONS 5
 #define FLUX_FRAME_MS 16
 #define KV_ID "aster.launcher.flux"
+#ifndef CONFIG_ASTER_FLUX_ART_CACHE
+#define CONFIG_ASTER_FLUX_ART_CACHE 0
+#endif
+static uint32_t art_bakes,art_hits;
 enum { HOME, FILTERS, MIXER, FILES, CLOCK, SYSTEM };
 enum { ACT_NONE, ACT_BACK, ACT_FILTERS, ACT_MIXER, ACT_PREV, ACT_NEXT,
        ACT_OPEN, ACT_WIFI, ACT_QUIET, ACT_MOTION, ACT_SYSTEM,
@@ -362,6 +366,46 @@ static void ribbon_art_drop(lv_draw_buf_t *art)
  aster_psram_free(art->unaligned_data);
  lv_free(art);
 }
+#if CONFIG_ASTER_FLUX_ART_CACHE > 0
+/* Only detached textures are cached. The five visible ribbons retain sole
+ * ownership of their images; changing page/catalog/fonts clears old bakes. */
+static struct {int entry;lv_draw_buf_t *art;} art_cache[CONFIG_ASTER_FLUX_ART_CACHE];
+static unsigned art_cursor;
+static void ribbon_cache_clear(void)
+{
+ for(unsigned i=0;i<ARRAY_SIZE(art_cache);i++) {
+  ribbon_art_drop(art_cache[i].art);art_cache[i].art=NULL;
+ }
+ art_cursor=0;
+}
+static void ribbon_cache_store(int slot)
+{
+ if(!ribbons[slot].art)return;
+ unsigned chosen=art_cursor++%ARRAY_SIZE(art_cache);
+ for(unsigned i=0;i<ARRAY_SIZE(art_cache);i++)if(!art_cache[i].art){chosen=i;break;}
+ ribbon_art_drop(art_cache[chosen].art);
+ art_cache[chosen].entry=ribbons[slot].entry;art_cache[chosen].art=ribbons[slot].art;
+ aster_flux_draw_forget(ribbons[slot].art->data);ribbons[slot].art=NULL;
+}
+static lv_draw_buf_t *ribbon_cache_take(int entry)
+{
+ for(unsigned i=0;i<ARRAY_SIZE(art_cache);i++)if(art_cache[i].art && art_cache[i].entry==entry) {
+  lv_draw_buf_t *art=art_cache[i].art;art_cache[i].art=NULL;art_hits++;return art;
+ }
+ return NULL;
+}
+#else
+static void ribbon_cache_clear(void) {}
+static void ribbon_cache_store(int slot) {(void)slot;}
+static lv_draw_buf_t *ribbon_cache_take(int entry) {(void)entry;return NULL;}
+#endif
+void aster_launcher_art_stats(uint32_t *bakes,uint32_t *hits,uint32_t *cached_bytes)
+{
+ *bakes=art_bakes;*hits=art_hits;*cached_bytes=0;
+#if CONFIG_ASTER_FLUX_ART_CACHE > 0
+ for(unsigned i=0;i<ARRAY_SIZE(art_cache);i++)if(art_cache[i].art)*cached_bytes+=art_cache[i].art->data_size;
+#endif
+}
 static lv_draw_buf_t *ribbon_bake(lv_obj_t *obj)
 {
  int32_t w,h;
@@ -386,7 +430,7 @@ static lv_draw_buf_t *ribbon_bake(lv_obj_t *obj)
   if(db) lv_free(db);
   return NULL;
  }
- return db;
+ art_bakes++;return db;
 }
 static void release_icon(int i)
 {
@@ -430,12 +474,19 @@ static void bind_ribbon(int slot,int idx)
 {
  bool same=ribbons[slot].entry==idx;
  if(same && !ribbons[slot].dirty_art) return;
+ /* Take before retiring: a full cache must not evict the very texture
+  * needed next when the five-card window wraps around the catalog. */
+ lv_draw_buf_t *cached=same?NULL:ribbon_cache_take(idx);
  lv_image_set_src(ribbons[slot].obj,NULL);
  if(same) {
   if(ribbons[slot].art) ribbon_art_drop(ribbons[slot].art);
   ribbons[slot].art=NULL;
- } else release_icon(slot);
+ } else {ribbon_cache_store(slot);release_icon(slot);}
  ribbons[slot].entry=idx;ribbons[slot].dirty_art=false;
+ if(!same && (ribbons[slot].art=cached)) {
+  aster_flux_draw_prepare(ribbons[slot].art->data,ribbons[slot].art->header.stride);
+  lv_image_set_src(ribbons[slot].obj,ribbons[slot].art);return;
+ }
  entry_t *e=&entries[idx];
  /* Bake text, color and original icon once per entry/font arrival.
   * Move/rotate the resulting RGB565 image directly: no nested label
@@ -749,6 +800,7 @@ static void build_system(void)
 }
 static void show_page(int next)
 {
+ ribbon_cache_clear();
  /* Desktop pages share one cache owner; keep hot glyphs until APP entry. */
  if(next!=HOME) {animating=false;coasting=false;phase=selected[group]*1000;pull=0;}
  for(int i=0;i<RIBBONS;i++) {ribbons[i].obj=NULL;ribbons[i].entry=-1;}
@@ -984,6 +1036,7 @@ void aster_launcher_hide(void)
  aster_plat_audio_ui_release();
  lv_obj_clean(aster_ui_lvgl_screen());
  for(int i=0;i<RIBBONS;i++) {release_icon(i);ribbons[i].obj=NULL;}
+ ribbon_cache_clear();
  sound_return=true;
  root=body=stage=bar_time=modal=toast=NULL;visible=false;hold_ms=0;clock_sec=UINT64_MAX;
 }
@@ -999,6 +1052,7 @@ void aster_launcher_pump_idle(void)
 {
  if(!aster_plat_display_count()) return;
  if(aster_ui_fonts_poll() && aster_ui_lvgl_screen()) {
+  ribbon_cache_clear();
   /* Rebaking during a flick is the hitch between cards. Glyphs that
    * arrive mid-gesture wait until the ribbon has settled. */
   if(stage && page==HOME && !drag.down && !animating && !launching) {

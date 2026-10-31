@@ -38,6 +38,8 @@ void aster_launcher_hide(void);
  * Called from the runtime worker's idle branch. */
 void aster_launcher_pump_idle(void);
 uint32_t aster_launcher_idle_wait_ms(void);
+/* UI-thread diagnostics: cumulative bakes/hits and detached PSRAM bytes. */
+void aster_launcher_art_stats(uint32_t *bakes,uint32_t *hits,uint32_t *cached_bytes);
 
 /* The app registry changed (install/uninstall/scan): flag the drawer and
  * the resident name-subset for a rebuild on the next pump. Thread-safe. */

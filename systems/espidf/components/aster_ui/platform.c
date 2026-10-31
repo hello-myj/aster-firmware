@@ -14,6 +14,18 @@ int aster_plat_display_write_at_ex(const uint8_t *data,uint32_t x,uint32_t y,uin
 {
     if(!swapped)return aster_plat_display_write_at(data,x,y,w,h,pitch);
     if(!data || !w || !h || w>480 || h>480 || pitch<w)return ASTER_EINVAL;
+    /* Restore the APP snapshot in one transfer. One DMA submission per row
+     * serializes hundreds of interrupts even though the whole image is ready. */
+    uint16_t *converted=aster_psram_alloc((size_t)w*h*2);
+    if(converted) {
+        for(uint32_t row=0;row<h;row++)for(uint32_t col=0;col<w;col++) {
+            const uint8_t *p=data+((size_t)row*pitch+col)*2;
+            converted[(size_t)row*w+col]=((uint16_t)p[0]<<8)|p[1];
+        }
+        int result=aster_plat_display_write_at((uint8_t *)converted,x,y,w,h,w);
+        aster_psram_free(converted);return result;
+    }
+    /* Bounded fallback under memory pressure. */
     uint16_t line[480];
     for(uint32_t row=0;row<h;row++) {
         const uint8_t *p=data+(size_t)row*pitch*2;

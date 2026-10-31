@@ -10,6 +10,9 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
+#include "esp_attr.h"
+#include "esp_cache.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "aster_idf_runtime.h"
@@ -146,6 +149,14 @@ static const st7102_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x29, (uint8_t []){0x00}, 0, 20},
 };
 
+static SemaphoreHandle_t lcd_copy_done;
+static bool lcd_dma2d;
+static bool IRAM_ATTR lcd_copy_complete(esp_lcd_panel_handle_t panel,
+                                      esp_lcd_dpi_panel_event_data_t *event,void *user)
+{
+    (void)panel;(void)event;(void)user;BaseType_t woke=pdFALSE;
+    xSemaphoreGiveFromISR(lcd_copy_done,&woke);return woke==pdTRUE;
+}
 static esp_err_t app_lcd_init(void)
 {
     esp_err_t ret = ESP_OK;
@@ -232,6 +243,18 @@ static esp_err_t app_lcd_init(void)
     ESP_GOTO_ON_ERROR(esp_lcd_new_panel_st7102(io_handle, &panel_config, &lcd_panel), err, TAG, "LCD init failed");
     ESP_GOTO_ON_ERROR(esp_lcd_panel_reset(lcd_panel), err, TAG, "LCD init failed");
     ESP_GOTO_ON_ERROR(esp_lcd_panel_init(lcd_panel), err, TAG, "LCD init failed");
+    lcd_copy_done=xSemaphoreCreateBinary();
+    if(lcd_copy_done) {
+        const esp_lcd_dpi_panel_event_callbacks_t callbacks={.on_color_trans_done=lcd_copy_complete};
+        esp_err_t accelerated=esp_lcd_dpi_panel_register_event_callbacks(lcd_panel,&callbacks,NULL);
+        if(accelerated==ESP_OK)accelerated=esp_lcd_dpi_panel_enable_dma2d(lcd_panel);
+        lcd_dma2d=accelerated==ESP_OK;
+        if(!lcd_dma2d) {
+            const esp_lcd_dpi_panel_event_callbacks_t none={0};
+            esp_lcd_dpi_panel_register_event_callbacks(lcd_panel,&none,NULL);
+            ESP_LOGW(TAG,"DMA2D unavailable (%s); CPU copy retained",esp_err_to_name(accelerated));
+        } else ESP_LOGI(TAG,"DMA2D framebuffer copy enabled");
+    }
     ESP_GOTO_ON_ERROR(esp_lcd_panel_disp_on_off(lcd_panel, true), err, TAG, "LCD init failed");
 
     // 打开背光
@@ -302,16 +325,24 @@ static esp_err_t app_touch_init(void)
 }
 
 
-/* IDF 6 DPI panel's CPU-copy draw path is synchronous (no DMA copy hook).
- * No WASM pointer is retained after this callback returns. */
+/* DMA2D can copy pitched rectangles in one operation. Wait for completion
+ * before returning: LVGL and WASM may immediately reuse the source pixels. */
 static int present_pixels(const uint8_t *pixels, uint32_t x, uint32_t y,
                           uint32_t w, uint32_t h, uint32_t pitch)
 {
-    if (pitch == w)
-        return esp_lcd_panel_draw_bitmap(lcd_panel, x, y, x+w, y+h, pixels) == ESP_OK ? 0 : -1;
-    for (uint32_t row=0; row<h; ++row)
-        if (esp_lcd_panel_draw_bitmap(lcd_panel, x, y+row, x+w, y+row+1,
-                                     pixels+(size_t)row*pitch*2) != ESP_OK) return -1;
+    if(lcd_dma2d)xSemaphoreTake(lcd_copy_done,0);
+    esp_err_t result=esp_lcd_panel_draw_bitmap_2d(lcd_panel,x,y,x+w,y+h,pixels,pitch,h,0,0,w,h);
+    if(result!=ESP_OK)return -1;
+    if(lcd_dma2d) {
+        /* A successful submission owns the source until its completion ISR;
+         * don't time out and permit a caller to free a still-live buffer. */
+        xSemaphoreTake(lcd_copy_done,portMAX_DELAY);
+        /* DMA wrote the scanout. Drop stale CPU lines before snapshot/restore.
+         * Entire panel rows are 64-byte aligned, including narrow updates. */
+        void *frame=NULL;
+        if(esp_lcd_dpi_panel_get_frame_buffer(lcd_panel,1,&frame)==ESP_OK)
+            esp_cache_msync((uint8_t *)frame+y*480*2,h*480*2,ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    }
     return 0;
 }
 

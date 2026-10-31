@@ -27,7 +27,7 @@ static void event(void *arg,esp_event_base_t base,int32_t id,void *data)
 }
 static int command(int argc,char **argv)
 {
-    if(argc>=2 && !strcmp(argv[1],"app") && app_command) {
+    if(argc>=2 && (!strcmp(argv[1],"app") || !strcmp(argv[1],"ui")) && app_command) {
         int result=app_command(argc,argv);printf("APP command result=%d\n",result);return result?1:0;
     }
     if (argc<3 || strcmp(argv[1],"wifi")) {

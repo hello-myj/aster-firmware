@@ -5,6 +5,7 @@
 #include "aster_app_mgr.h"
 #include "aster_storage.h"
 #include "aster_pkg.h"
+#include "launcher.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -25,7 +26,7 @@ static void worker(void *unused)
     int ui=aster_idf_ui_init(aster_idf_apps_launch);
     if(ui)ESP_LOGW("aster_apps","Desktop unavailable: %d",ui);
     for(;;) {
-        if(xQueueReceive(queue,&job,pdMS_TO_TICKS(10))!=pdTRUE){aster_idf_ui_idle();continue;}
+        if(xQueueReceive(queue,&job,pdMS_TO_TICKS(aster_launcher_idle_wait_ms()))!=pdTRUE){aster_idf_ui_idle();continue;}
         aster_idf_ui_before_app();
         int result=ASTER_ENOENT;
         if(job.diagnostic) {
@@ -102,14 +103,18 @@ int aster_idf_apps_start(void)
         vQueueDelete(queue);vSemaphoreDelete(state_lock);
         queue=NULL;state_lock=NULL;return ASTER_ENOMEM;
     }
+#if CONFIG_ASTER_P4_AUTORUN_DIAGNOSTIC
     FILE *file=fopen("/SD/app.aot","rb");
     if(!file)file=fopen("/SD/app.wasm","rb");
     if(file){fclose(file);return launch(NULL,true);}
+#endif
     return 0;
 }
 int aster_idf_apps_command(int argc,char **argv)
 {
+    if(argc>=2 && !strcmp(argv[1],"ui"))return aster_idf_ui_command(argc,argv);
     if(argc<3 || strcmp(argv[1],"app"))return ASTER_EINVAL;
+    if(argc==3 && !strcmp(argv[2],"diagnostic"))return launch(NULL,true);
     if(!strcmp(argv[2],"list") && argc==3) {
         aster_app_rec_t rec;
         for(int i=0;aster_app_mgr_snapshot(i,&rec);i++)

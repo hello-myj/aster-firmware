@@ -173,7 +173,11 @@
 void aster_ui_lvgl_assert(void);
 #define LV_ASSERT_HANDLER aster_ui_lvgl_assert();
 
+#ifdef ASTER_SYSTEM_ESP_IDF
+#define LV_DEF_REFR_PERIOD 16
+#else
 #define LV_DEF_REFR_PERIOD 33
+#endif
 #define LV_DPI_DEF 130
 
 #endif /* LV_CONF_H */

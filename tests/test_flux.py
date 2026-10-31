@@ -253,6 +253,8 @@ int main(void) {
  assert(aster_flux_draw_image(1,1,src,&coords,720,&clip,&task,&d)==1);
  d.colorkey=NULL;
  d.antialias=0;layer.color_format=1;
+ assert(aster_flux_draw_image(1,1,src,&coords,720,&clip,&task,&d)==0);
+ layer.color_format=3;
  assert(aster_flux_draw_image(1,1,src,&coords,720,&clip,&task,&d)==1);
  return 0;
 }

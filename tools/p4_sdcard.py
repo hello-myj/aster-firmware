@@ -13,7 +13,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output",type=Path,default=ROOT/"build/osptek-p4/sd-desktop")
     parser.add_argument("--package",type=Path,action="append",default=[])
-    parser.add_argument("--demo",action="store_true",help="Include the auto-start display diagnostic")
+    parser.add_argument("--demo",action="store_true",help="Include SD root diagnostic; run with 'aster app diagnostic'")
     args=parser.parse_args()
     sources=[(path,Path("aster/fonts")/path.name) for path in sorted((ROOT/"resources/fonts").glob("ui_*.cpfont"))]
     if not sources:parser.error("resources/fonts/ui_*.cpfont is missing")

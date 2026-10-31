@@ -6,6 +6,7 @@
 #include "aster_app_mgr.h"
 #include "font_sd.h"
 #include "ui_lvgl.h"
+#include "launcher.h"
 #include "qpanel.h"
 #include "wifi_service.h"
 #include <aster/time.h>
@@ -55,20 +56,31 @@ int aster_time_read(aster_time_info_t *out)
 int main(int argc,char **argv)
 {
     if(argc!=3 || aster_storage_init() || aster_app_mgr_init()<0)return 2;
+    for(unsigned i=0;i<9;i++) {
+        char path[64];snprintf(path,sizeof(path),"/SD:/test.ui.%u.ast",i);
+        if(aster_app_mgr_install(path))return 10;
+    }
     const aster_idf_io_t io={480,480,present,touch};aster_idf_set_io(&io);aster_idf_set_capture(capture);
     if(aster_idf_ui_init(launch))return 3;
+    extern void check_flux_pixels(void);check_flux_pixels();
     /* Give the actual cpfont reader and FLUX splash/catalog warmup time. */
     for(unsigned n=0;n<14000;n+=50) {
         pump(50);
         if(n>1000 && aster_font_sd_get(ASTER_FONT_UI_PX) && !aster_font_sd_busy()) {pump(300);break;}
     }
     if(save(argv[1],"desktop"))return 4;
+    /* Cross more entries than the visible five, then revisit them. Exercise
+     * real bake/retire/rebind paths, and require cached pixels to be reused. */
+    for(unsigned i=0;i<20;i++){aster_launcher_step_page(1);pump(350);}
+    uint32_t bakes,hits,cached;aster_launcher_art_stats(&bakes,&hits,&cached);
+    if(!hits || !cached)return 11;
     memcpy(snapshot,pixels,sizeof(pixels));
     x=20;y=5;contact=true;pump(50);y=80;pump(50);contact=false;pump(100);
     /* FLUX maps the home pull-down to its full mixer page, not the APP sheet. */
     if(!memcmp(snapshot,pixels,sizeof(pixels))) {fputs("host desktop pull-down failed\n",stderr);return 5;}
     if(save(argv[1],"desktop-panel"))return 6;
     aster_qpanel_force_close();aster_idf_ui_before_app();
+    aster_launcher_art_stats(&bakes,&hits,&cached);if(cached)return 12;
     for(unsigned i=0;i<480*480;i++)pixels[i]=0x001f;
     aster_qpanel_open(ASTER_QPANEL_OVER_APP);
     for(unsigned i=0;i<20;i++){aster_qpanel_tick();aster_ui_lvgl_pump();pause_ms(5);}

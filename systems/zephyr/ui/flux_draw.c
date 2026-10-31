@@ -11,7 +11,7 @@
 #include "misc/lv_area_private.h"
 #include "flux_draw.h"
 #include "aster_mem.h"
-#if defined(CONFIG_SOC_SERIES_ESP32S3)
+#if defined(CONFIG_SOC_SERIES_ESP32S3) || defined(CONFIG_IDF_TARGET_ESP32P4)
 #include <esp_attr.h>
 #define FLUX_FAST IRAM_ATTR __attribute__((optimize("O3")))
 #else
@@ -92,8 +92,10 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
     d->recolor_opa>LV_OPA_MIN || d->colorkey || d->clip_radius ||
     d->blend_mode!=LV_BLEND_MODE_NORMAL || !d->scale_x || !d->scale_y ||
     lv_area_get_width(coords)!=360 || lv_area_get_height(coords)!=140 ||
-    !layer->draw_buf || layer->color_format!=LV_COLOR_FORMAT_RGB565_SWAPPED)
+    !layer->draw_buf || (layer->color_format!=LV_COLOR_FORMAT_RGB565_SWAPPED &&
+                        layer->color_format!=LV_COLOR_FORMAT_RGB565))
   return LV_RESULT_INVALID;
+ bool swapped=layer->color_format==LV_COLOR_FORMAT_RGB565_SWAPPED;
  lv_area_t area;
  if(!lv_area_intersect(&area,clipped,&t->clip_area) ||
     !lv_area_intersect(&area,&area,&layer->buf_area)) return LV_RESULT_OK;
@@ -155,8 +157,11 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
       if(run<1) run=1;
       if(run>area.x2-x+1) run=area.x2-x+1;
       if(mix>=32) {
-       uint16_t value=swap16(solid);for(int k=0;k<run;k++) dst[k]=value;
-      } else for(int k=0;k<run;k++) dst[k]=swap16(mix565(solid,swap16(dst[k]),mix));
+       uint16_t value=swapped?swap16(solid):solid;for(int k=0;k<run;k++) dst[k]=value;
+      } else for(int k=0;k<run;k++) {
+       uint16_t bg=swapped?swap16(dst[k]):dst[k],value=mix565(solid,bg,mix);
+       dst[k]=swapped?swap16(value):value;
+      }
       sx+=dxs*(run-1);sy+=dys*(run-1);dst+=run-1;x+=run-1;
       continue;
      }
@@ -171,7 +176,7 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
       const uint16_t *b=(const uint16_t *)((const uint8_t *)source+(iy+1)*stride);
       pixels[0]=a[ix];pixels[1]=a[ix+1];pixels[2]=b[ix];pixels[3]=b[ix+1];
      } else {
-      uint16_t bg=swap16(*dst);
+      uint16_t bg=swapped?swap16(*dst):*dst;
       for(int v=0;v<2;v++) for(int u=0;u<2;u++) {
        int xx=ix+u,yy=iy+v;
        pixels[v*2+u]=(unsigned)xx<360 && (unsigned)yy<140?
@@ -185,7 +190,9 @@ int FLUX_FAST aster_flux_draw_image(int transformed,int format,const void *sourc
     if((unsigned)ix>=360 || (unsigned)iy>=140) continue;
     fg=((const uint16_t *)((const uint8_t *)source+iy*stride))[ix];
    }
-   *dst=swap16(mix>=32?fg:mix565(fg,swap16(*dst),mix));
+   uint16_t bg=swapped?swap16(*dst):*dst;
+   uint16_t value=mix>=32?fg:mix565(fg,bg,mix);
+   *dst=swapped?swap16(value):value;
   }
 
  }
