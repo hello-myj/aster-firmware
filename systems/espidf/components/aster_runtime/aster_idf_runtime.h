@@ -20,6 +20,9 @@ typedef struct {
     /* Fixed hardware slots; returns active bitmask, negative = no valid frame. */
     int (*touch_frame)(aster_idf_touch_point_t points[ASTER_IDF_MAX_TOUCH]);
     uint32_t max_touch_points;
+    /* Native LVGL RGB888 byte layout is B,G,R; synchronous source lifetime. */
+    int (*present_bgr888)(const uint8_t *,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
+    const uint8_t *(*capture_bgr888)(void);
 } aster_idf_io_t;
 void aster_idf_set_io(const aster_idf_io_t *io);
 

@@ -13,3 +13,6 @@ int aster_idf_display_count(void);
 
 uint32_t aster_idf_touch_mask(void);
 bool aster_idf_touch_pending(void);
+
+int aster_idf_present_bgr888(const uint8_t *,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
+const uint8_t *aster_idf_capture_bgr888(void);

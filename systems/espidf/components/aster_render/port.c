@@ -74,10 +74,17 @@ void *aster_dram_alloc(size_t n) { return heap_caps_malloc(n,MALLOC_CAP_INTERNAL
 void aster_dram_free(void *p) { free(p); }
 
 #include <lvgl.h>
+#ifndef ASTER_IDF_HOST_TEST
+#include "render_workers.h"
+#endif
 void aster_idf_render_init(void)
 {
     static bool ready;
-    if (!ready) { lv_init();ready=true; }
+    if (!ready) { lv_init();ready=true;
+#ifndef ASTER_IDF_HOST_TEST
+        aster_idf_render_workers_init();
+#endif
+    }
 }
 
 void aster_ui_lvgl_assert(void) { fputs("Aster LVGL assertion failed\n",stderr);abort(); }

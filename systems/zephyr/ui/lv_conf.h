@@ -106,7 +106,11 @@
 #define LV_USE_BUTTON 1
 #define LV_USE_BUTTONMATRIX 1
 #define LV_USE_CALENDAR 0
+#ifdef ASTER_SYSTEM_ESP_IDF
+#define LV_USE_CANVAS 1
+#else
 #define LV_USE_CANVAS 0
+#endif
 #define LV_USE_CHART 0
 #define LV_USE_CHECKBOX 0
 #define LV_USE_DROPDOWN 0

@@ -40,8 +40,15 @@
 #define EXAMPLE_LCD_H_RES   (480)
 #define EXAMPLE_LCD_V_RES   (480)
 
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+#include "soc/mipi_dsi_bridge_struct.h"
+#include "soc/mipi_dsi_host_struct.h"
+#define MIPI_DPI_PX_FORMAT LCD_COLOR_FMT_RGB888
+#define BSP_LCD_COLOR_DEPTH 18
+#else
 #define MIPI_DPI_PX_FORMAT LCD_COLOR_FMT_RGB565
 #define BSP_LCD_COLOR_DEPTH 16
+#endif
 
 // “VDD_MIPI_DPHY”应供电 2.5V，可从内部 LDO 稳压器或外部 LDO 芯片获取电源
 #define EXAMPLE_MIPI_DSI_PHY_PWR_LDO_CHAN 3 // LDO_VO3 连接至 VDD_MIPI_DPHY
@@ -54,7 +61,7 @@
 
 /* Touch settings */
 #define EXAMPLE_TOUCH_I2C_NUM       (1)
-#define EXAMPLE_TOUCH_I2C_CLK_HZ    (100000)
+#define EXAMPLE_TOUCH_I2C_CLK_HZ    (CONFIG_ASTER_P4_TOUCH_I2C_HZ)
 
 /* LCD touch pins */
 #define EXAMPLE_TOUCH_I2C_SCL       (CONFIG_ASTER_P4_TOUCH_SCL_GPIO)
@@ -70,7 +77,21 @@ static esp_lcd_panel_io_handle_t io_handle = NULL;
 static esp_lcd_touch_handle_t touch_handle = NULL;
 static esp_lcd_panel_io_handle_t touch_io;
 static const uint8_t *scanout;
-static const uint8_t *capture_scanout(void) {return scanout;}
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+static uint8_t *native_frame;
+#endif
+static const uint8_t *capture_scanout(void) {
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+    if(native_frame && scanout)for(unsigned i=0;i<480*480;i++) {
+        const uint8_t *p=native_frame+i*3;
+        ((uint16_t *)scanout)[i]=((uint16_t)(p[2]>>3)<<11)|((uint16_t)(p[1]>>2)<<5)|(p[0]>>3);
+    }
+#endif
+    return scanout;
+}
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+static const uint8_t *capture_native(void) {return native_frame;}
+#endif
 
 static void example_bsp_enable_dsi_phy_power(void)
 {
@@ -244,6 +265,24 @@ static esp_err_t app_lcd_init(void)
     };
     ESP_GOTO_ON_ERROR(esp_lcd_new_panel_st7102(io_handle, &panel_config, &lcd_panel), err, TAG, "LCD init failed");
     ESP_GOTO_ON_ERROR(esp_lcd_panel_reset(lcd_panel), err, TAG, "LCD init failed");
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+    /* IDF 6.0's public format enum omits RGB666. Its RGB888 input DMA and
+     * memory layout stay intact. Change only the documented rev3 output
+     * registers BEFORE panel_init starts video, paired with COLMOD=0x66.
+     * Host 18-bit configuration 1, packed (DT=0x1e); bridge layout 0. */
+    MIPI_DSI_BRIDGE.pixel_type.dpi_type=1;
+    MIPI_DSI_BRIDGE.pixel_type.dpi_config=0;
+    MIPI_DSI_HOST.dpi_color_coding.dpi_color_coding=3;
+    MIPI_DSI_HOST.dpi_color_coding.loosely18_en=0;
+    ESP_GOTO_ON_FALSE(MIPI_DSI_BRIDGE.pixel_type.raw_type==0 &&
+        MIPI_DSI_BRIDGE.pixel_type.dpi_type==1 &&
+        MIPI_DSI_HOST.dpi_color_coding.dpi_color_coding==3 &&
+        !MIPI_DSI_HOST.dpi_color_coding.loosely18_en,
+        ESP_ERR_INVALID_STATE,err,TAG,"RGB666 register configuration failed");
+    ESP_LOGW(TAG,"Experimental RGB666 packed output: RGB888 675 KiB framebuffer, COLMOD=0x66, bridge=0->1 host=3");
+#else
+    ESP_LOGI(TAG,"RGB565 output: RGB565 450 KiB framebuffer, COLMOD=0x55");
+#endif
     ESP_GOTO_ON_ERROR(esp_lcd_panel_init(lcd_panel), err, TAG, "LCD init failed");
     lcd_copy_done=xSemaphoreCreateBinary();
     if(lcd_copy_done) {
@@ -333,6 +372,23 @@ static esp_err_t app_touch_init(void)
 static int present_pixels(const uint8_t *pixels, uint32_t x, uint32_t y,
                           uint32_t w, uint32_t h, uint32_t pitch)
 {
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+    /* The UI and existing apps still provide RGB565. Expand to the native
+     * RGB888 framebuffer; native color-test below bypasses this conversion. */
+    if(!native_frame || !scanout)return -1;
+    uint16_t *shadow=(uint16_t *)scanout;
+    const uint16_t *source=(const uint16_t *)pixels;
+    for(uint32_t row=0;row<h;row++)for(uint32_t col=0;col<w;col++) {
+        uint16_t c=source[(size_t)row*pitch+col];
+        unsigned r=(c>>11)&31,g=(c>>5)&63,b=c&31;
+        uint8_t *out=native_frame+((size_t)(y+row)*480+x+col)*3;
+        out[0]=(b<<3)|(b>>2);out[1]=(g<<2)|(g>>4);out[2]=(r<<3)|(r>>2);
+        shadow[(size_t)(y+row)*480+x+col]=c;
+    }
+    uintptr_t start=((uintptr_t)native_frame+y*480*3)&~(uintptr_t)63;
+    uintptr_t end=((uintptr_t)native_frame+(y+h)*480*3+63)&~(uintptr_t)63;
+    return esp_cache_msync((void *)start,end-start,ESP_CACHE_MSYNC_FLAG_DIR_C2M)==ESP_OK?0:-1;
+#else
     if(lcd_dma2d)xSemaphoreTake(lcd_copy_done,0);
     esp_err_t result=esp_lcd_panel_draw_bitmap_2d(lcd_panel,x,y,x+w,y+h,pixels,pitch,h,0,0,w,h);
     if(result!=ESP_OK)return -1;
@@ -347,13 +403,34 @@ static int present_pixels(const uint8_t *pixels, uint32_t x, uint32_t y,
             esp_cache_msync((uint8_t *)frame+y*480*2,h*480*2,ESP_CACHE_MSYNC_FLAG_DIR_M2C);
     }
     return 0;
+#endif
 }
+
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+/* RGB888-native LVGL and app buffers preserve all channel bits through DMA2D. */
+static int present_bgr888(const uint8_t *p,uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t pitch)
+{
+    if(lcd_dma2d)xSemaphoreTake(lcd_copy_done,0);
+    esp_err_t r=esp_lcd_panel_draw_bitmap_2d(lcd_panel,x,y,x+w,y+h,p,pitch,h,0,0,w,h);
+    if(r!=ESP_OK)return -1;
+    if(lcd_dma2d) {
+        xSemaphoreTake(lcd_copy_done,portMAX_DELAY);
+        uintptr_t start=((uintptr_t)native_frame+y*480*3)&~(uintptr_t)63;
+        uintptr_t end=((uintptr_t)native_frame+(y+h)*480*3+63)&~(uintptr_t)63;
+        if(esp_cache_msync((void *)start,end-start,ESP_CACHE_MSYNC_FLAG_DIR_M2C)!=ESP_OK)return -1;
+    }
+    return 0;
+}
+#endif
 
 /* ST7123 protocol: five fixed 7-byte records at 0x0014..0x0036.
  * Keep their indices: the generic driver compacts valid points and loses IDs.
  * Read through the LAST supported record to acknowledge the controller frame. */
 static int read_touch_frame(aster_idf_touch_point_t points[ASTER_IDF_MAX_TOUCH])
 {
+    /* INT remains asserted until the last coordinate record is consumed.
+     * An idle-high line is not a release and needs no synchronous I2C read. */
+    if(gpio_get_level(EXAMPLE_TOUCH_INT))return -1;
     uint8_t report[4+7*ASTER_IDF_MAX_TOUCH];
     if(esp_lcd_panel_io_rx_param(touch_io,0x0010,report,sizeof(report))!=ESP_OK)return -1;
     if(!(report[0]&0x08))return -1; /* No updated coordinates, retain last state. */
@@ -367,6 +444,31 @@ static int read_touch_frame(aster_idf_touch_point_t points[ASTER_IDF_MAX_TOUCH])
     }
     return mask;
 }
+
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+/* Runs on the same display/VM worker as the launcher, with no concurrent LVGL
+ * or guest drawing. Four rows R/G/B/gray, upper half quantized 565, lower true 666. */
+static int color_test(void)
+{
+    for(unsigned y=0;y<480;y++)for(unsigned x=0;x<480;x++) {
+        unsigned v=x*64/480, c=(v<<2)|(v>>4), row=y/120;
+        unsigned r=(row==0 || row==3)?c:0;
+        unsigned g=(row==1 || row==3)?c:0;
+        unsigned b=(row==2 || row==3)?c:0;
+        if(y%120<60) {r=(r>>3)*255/31;g=(g>>2)*255/63;b=(b>>3)*255/31;}
+        uint8_t *p=native_frame+((size_t)y*480+x)*3;
+        p[0]=b;p[1]=g;p[2]=r;
+    }
+    ESP_RETURN_ON_ERROR(esp_cache_msync(native_frame,480*480*3,ESP_CACHE_MSYNC_FLAG_DIR_C2M),TAG,"Color-test cache sync failed");
+    ESP_LOGI(TAG,"COLOR TEST: R/G/B/gray rows; each upper=RGB565, lower=true RGB666 (64 channel levels); tap to exit or 'aster app stop'");
+    while(!aster_idf_stop_is_requested()) {
+        aster_idf_touch_point_t points[ASTER_IDF_MAX_TOUCH];
+        if(read_touch_frame(points)>0)break;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    return 0;
+}
+#endif
 
 /* Experimental board bring-up plus the core Aster lifecycle subset. */
 void osptek_storage_start(void);
@@ -387,7 +489,14 @@ void app_main(void)
     for (int y = 0; y < 480; ++y)
         for (int x = 0; x < 480; ++x)
             pixels[y * 480 + x] = bars[x / 80];
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+    void *native=NULL;
+    ESP_ERROR_CHECK(esp_lcd_dpi_panel_get_frame_buffer(lcd_panel,1,&native));
+    native_frame=native;scanout=(uint8_t *)pixels; /* reuse boot image as RGB565 snapshot shadow */
+    ESP_ERROR_CHECK(present_pixels((uint8_t *)pixels,0,0,480,480,480));
+#else
     ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(lcd_panel, 0, 0, 480, 480, pixels));
+#endif
     /* Retain the buffer until shutdown; the panel transfer may be asynchronous. */
     vTaskDelay(pdMS_TO_TICKS(200));
     esp_err_t ret = app_touch_init();
@@ -397,18 +506,27 @@ void app_main(void)
         .width=480, .height=480, .present=present_pixels,
         .touch_frame=ret == ESP_OK ? read_touch_frame : NULL,
         .max_touch_points=ASTER_IDF_MAX_TOUCH,
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+        .present_bgr888=present_bgr888,.capture_bgr888=capture_native,
+#endif
     };
     /* The runtime owns touch reads; do not poll the controller from app_main. */
     aster_idf_set_io(&io);
     void *frame=NULL;
     if(esp_lcd_dpi_panel_get_frame_buffer(lcd_panel,1,&frame)==ESP_OK) {
-        scanout=frame;aster_idf_set_capture(capture_scanout);
+#ifndef CONFIG_ASTER_P4_RGB666_OUTPUT
+        scanout=frame;
+#endif
+        aster_idf_set_capture(capture_scanout);
     }
-    ESP_LOGI(TAG, "Aster RGB565 display ready; touch=%s", io.touch_frame ? "ready (5 points)" : "unavailable");
+    ESP_LOGI(TAG, "Aster display ready; touch=%s", io.touch_frame ? "ready (5 points)" : "unavailable");
     osptek_storage_start();
     extern int aster_idf_audio_start(void);
     int audio=aster_idf_audio_start();
     if(audio)ESP_LOGW(TAG,"Audio unavailable: %d",audio);
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+    aster_idf_apps_set_color_test(color_test);
+#endif
     int apps=aster_idf_apps_start();
     if(apps)ESP_LOGE(TAG,"Application worker unavailable: %d",apps);
     aster_idf_set_app_command(aster_idf_apps_command);

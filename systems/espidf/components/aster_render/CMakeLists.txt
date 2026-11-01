@@ -4,7 +4,7 @@ set(IMG "${ROOT}/modules/imgdec")
 file(GLOB_RECURSE LV_SOURCES "${ROOT}/third_party/lvgl/src/*.c")
 list(FILTER LV_SOURCES EXCLUDE REGEX "/(examples|tests|demos|libs)/")
 list(FILTER LV_SOURCES EXCLUDE REGEX "/stdlib/(uefi|rtthread|micropython)/")
-idf_component_register(SRCS "port.c" "ppa_fill.c"
+idf_component_register(SRCS "port.c" "ppa_fill.c" "render_workers.c"
     "${UI}/ui_gfx.c" "${UI}/pp_gfx.c" "${UI}/ui_font.c" "${UI}/font_sd.c" "${UI}/flux_draw.c"
     "${IMG}/imgdec.c" "${IMG}/imgdec_jpg.c" "${IMG}/imgdec_png.c"
     "${ROOT}/third_party/lvgl/src/libs/bin_decoder/lv_bin_decoder.c"

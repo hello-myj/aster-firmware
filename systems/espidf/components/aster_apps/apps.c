@@ -17,9 +17,11 @@
 static QueueHandle_t queue;
 static SemaphoreHandle_t state_lock;
 static bool busy;
+static int (*color_test)(void);
+void aster_idf_apps_set_color_test(int (*test)(void)) {color_test=test;}
 static void watchdog(void *unused)
 {(void)unused;for(;;){aster_idf_check_watchdog();vTaskDelay(pdMS_TO_TICKS(20));}}
-typedef struct { char id[64]; bool diagnostic; } job_t;
+typedef struct { char id[64]; unsigned diagnostic; } job_t;
 static void worker(void *unused)
 {
     (void)unused;job_t job;
@@ -29,7 +31,9 @@ static void worker(void *unused)
         if(xQueueReceive(queue,&job,pdMS_TO_TICKS(aster_launcher_idle_wait_ms()))!=pdTRUE){aster_idf_ui_idle();continue;}
         aster_idf_ui_before_app();
         int result=ASTER_ENOENT;
-        if(job.diagnostic) {
+        if(job.diagnostic==2) {
+            result=color_test?color_test():ASTER_ENOTSUP;
+        } else if(job.diagnostic) {
             FILE *aot=fopen("/SD/app.aot","rb");
             if(aot){fclose(aot);result=aster_idf_run_queued_diagnostic("/SD/app.aot");}
             if(!aot || (result==ASTER_EABI && !aster_idf_stop_is_requested()))
@@ -71,7 +75,7 @@ static void worker(void *unused)
         xSemaphoreTake(state_lock,portMAX_DELAY);busy=false;xSemaphoreGive(state_lock);
     }
 }
-static int launch(const char *id,bool diagnostic)
+static int launch(const char *id,unsigned diagnostic)
 {
     if(!queue || !state_lock)return ASTER_ESTATE;
     if(!diagnostic && (!id || !*id || strlen(id)>=64))return ASTER_EINVAL;
@@ -98,7 +102,11 @@ int aster_idf_apps_start(void)
     if(xTaskCreate(watchdog,"aster_vm_guard",3072,NULL,5,&monitor)!=pdPASS) {
         vQueueDelete(queue);vSemaphoreDelete(state_lock);queue=NULL;state_lock=NULL;return ASTER_ENOMEM;
     }
+#if CONFIG_ASTER_P4_DUAL_CORE_RENDER
+    if(xTaskCreatePinnedToCore(worker,"aster_vm",24576,NULL,4,NULL,1)!=pdPASS) {
+#else
     if(xTaskCreate(worker,"aster_vm",24576,NULL,4,NULL)!=pdPASS) {
+#endif
         vTaskDelete(monitor);
         vQueueDelete(queue);vSemaphoreDelete(state_lock);
         queue=NULL;state_lock=NULL;return ASTER_ENOMEM;
@@ -114,6 +122,7 @@ int aster_idf_apps_command(int argc,char **argv)
 {
     if(argc>=2 && !strcmp(argv[1],"ui"))return aster_idf_ui_command(argc,argv);
     if(argc<3 || strcmp(argv[1],"app"))return ASTER_EINVAL;
+    if(argc==3 && !strcmp(argv[2],"color-test"))return color_test?launch(NULL,2):ASTER_ENOTSUP;
     if(argc==3 && !strcmp(argv[2],"diagnostic"))return launch(NULL,true);
     if(!strcmp(argv[2],"list") && argc==3) {
         aster_app_rec_t rec;

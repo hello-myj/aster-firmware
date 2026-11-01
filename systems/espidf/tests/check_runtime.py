@@ -62,7 +62,7 @@ def main():
         compile_command += ["-I"+str(f) for f in includes]+[str(f) for f in sources]
     if render:
         # Compile the shared renderer once, in parallel; reuse it for both runners.
-        all_sources=sources+[component/"runtime.c",component/"aot_profile.c",component/"devices.c",component/"graphics.c",component/"files.c",component/"timers.c",component/"apps.c",component/"clock.c",component/"images.c"]
+        all_sources=sources+[component/"runtime.c",component/"aot_profile.c",component/"devices.c",component/"graphics.c",component/"gfx_rgb888.c",component/"files.c",component/"timers.c",component/"apps.c",component/"clock.c",component/"images.c"]
         flags=[]
         skip=False
         for arg in compile_command[1:]:
@@ -155,17 +155,27 @@ def main():
                   else str(out/"multitouch-runner") if arg==str(out/"runner") else arg for arg in compile_command]
     subprocess.run(multi_runner,check=True)
     subprocess.run([str(out/"multitouch-runner"),str(multi_wasm)],check=True,timeout=8)
+    if render:
+        rgb_wasm=out/"rgb888.wasm"
+        rgb_command=[str(fixture/"rgb888_app.c") if arg==str(fixture/"graphics_app.c")
+                     else str(rgb_wasm) if arg==str(wasm) else arg for arg in wasm_command]
+        subprocess.run(rgb_command,check=True)
+        rgb_runner=[str(fixture/"rgb888_mock.c") if arg==str(out/"main.c")
+                    else str(out/"rgb888-runner") if arg==str(out/"runner") else arg for arg in compile_command]
+        subprocess.run(rgb_runner,check=True)
+        subprocess.run([str(out/"rgb888-runner"),str(rgb_wasm)],check=True,timeout=15)
     # Native-host AOT exercises the same loader/bridges/termination contract.
     # The separately generated RISC-V image is cross-compiled, never host-run.
     wamrc=ROOT.parent/"aster-sdk/toolchain/wamrc"
     if wamrc.is_file():
-        for source in (wasm,stop_wasm,pause_wasm,multi_wasm):
+        for source in (wasm,stop_wasm,pause_wasm,multi_wasm)+((rgb_wasm,) if render else ()):
             aot=source.with_suffix(".aot")
             prepared=source.with_suffix(".interruptible.wasm")
             prepared.write_bytes(interruptible_wasm(source.read_bytes()))
             subprocess.run([str(wamrc),"--target=x86_64","--cpu=x86-64","--enable-multi-thread",
                             "--bounds-checks=1","--stack-bounds-checks=1","-o",str(aot),str(prepared)],check=True)
             if source==wasm:subprocess.run([str(out/"graphics-runner"),str(aot)],check=True)
+            elif render and source==rgb_wasm:subprocess.run([str(out/"rgb888-runner"),str(aot)],check=True,timeout=15)
             elif source==multi_wasm:subprocess.run([str(out/"multitouch-runner"),str(aot)],check=True,timeout=8)
             elif source==stop_wasm:
                 subprocess.run([str(out/"stop-runner"),str(aot)],check=True,timeout=8)

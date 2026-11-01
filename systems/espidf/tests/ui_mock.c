@@ -15,11 +15,29 @@
 #include <stdlib.h>
 #include <time.h>
 static uint16_t pixels[480*480],snapshot[480*480];
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+static uint8_t native_pixels[480*480*3],native_snapshot[480*480*3];
+static const uint8_t *capture_native(void){return native_pixels;}
+static int present_native(const uint8_t *p,uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t pitch)
+{
+    for(unsigned row=0;row<h;row++)for(unsigned col=0;col<w;col++) {
+        const uint8_t *a=p+((size_t)row*pitch+col)*3;uint8_t *b=native_pixels+((y+row)*480+x+col)*3;
+        memcpy(b,a,3);pixels[(y+row)*480+x+col]=((uint16_t)(a[2]>>3)<<11)|((uint16_t)(a[1]>>2)<<5)|(a[0]>>3);
+    }
+    return 0;
+}
+#endif
 static uint32_t x,y;static bool contact;static int volume=70;
 static int present(const uint8_t *source,uint32_t left,uint32_t top,uint32_t width,uint32_t height,uint32_t pitch)
 {
     if(left+width>480 || top+height>480 || pitch<width)return -1;
     for(unsigned row=0;row<height;row++)memcpy(pixels+(top+row)*480+left,source+row*pitch*2,width*2);
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+    for(unsigned row=0;row<height;row++)for(unsigned col=0;col<width;col++) {
+        uint16_t c=pixels[(top+row)*480+left+col];uint8_t *b=native_pixels+((top+row)*480+left+col)*3;
+        b[0]=(c&31)*255/31;b[1]=((c>>5)&63)*255/63;b[2]=(c>>11)*255/31;
+    }
+#endif
     return 0;
 }
 static int touch(uint32_t *out_x,uint32_t *out_y) {*out_x=x;*out_y=y;return contact;}
@@ -33,6 +51,9 @@ static int save(const char *directory,const char *name)
     FILE *file=fopen(path,"wb");if(!file)return 1;fprintf(file,"P6\n480 480\n255\n");
     for(unsigned i=0;i<480*480;i++) {
         uint16_t p=pixels[i];uint8_t rgb[]={(uint8_t)(((p>>11)&31)*255/31),(uint8_t)(((p>>5)&63)*255/63),(uint8_t)((p&31)*255/31)};
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+        rgb[0]=native_pixels[i*3+2];rgb[1]=native_pixels[i*3+1];rgb[2]=native_pixels[i*3];
+#endif
         fwrite(rgb,1,3,file);
     }
     return fclose(file)!=0;
@@ -60,7 +81,11 @@ int main(int argc,char **argv)
         char path[64];snprintf(path,sizeof(path),"/SD:/test.ui.%u.ast",i);
         if(aster_app_mgr_install(path))return 10;
     }
-    const aster_idf_io_t io={.width=480,.height=480,.present=present,.touch=touch};aster_idf_set_io(&io);aster_idf_set_capture(capture);
+    const aster_idf_io_t io={.width=480,.height=480,.present=present,.touch=touch,
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+        .present_bgr888=present_native,.capture_bgr888=capture_native,
+#endif
+    };aster_idf_set_io(&io);aster_idf_set_capture(capture);
     if(aster_idf_ui_init(launch))return 3;
     extern void check_flux_pixels(void);check_flux_pixels();
     /* Give the actual cpfont reader and FLUX splash/catalog warmup time. */
@@ -82,13 +107,22 @@ int main(int argc,char **argv)
     aster_qpanel_force_close();aster_idf_ui_before_app();
     aster_launcher_art_stats(&bakes,&hits,&cached);if(cached)return 12;
     for(unsigned i=0;i<480*480;i++)pixels[i]=0x001f;
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+    /* Low bits must survive opening/closing the panel, even if not 565-representable. */
+    for(unsigned i=0;i<480*480;i++){native_pixels[i*3]=0x17;native_pixels[i*3+1]=0x29;native_pixels[i*3+2]=0x3b;}
+    memcpy(native_snapshot,native_pixels,sizeof(native_pixels));
+#endif
     aster_qpanel_open(ASTER_QPANEL_OVER_APP);
     for(unsigned i=0;i<20;i++){aster_qpanel_tick();aster_ui_lvgl_pump();pause_ms(5);}
     if(!aster_idf_app_glass_frozen() || save(argv[1],"app-panel"))return 7;
     memcpy(snapshot,pixels,sizeof(pixels));
     if(aster_idf_run_wasm(argv[2]) || memcmp(snapshot,pixels,sizeof(pixels)))return 8;
     aster_qpanel_close(true);
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+    if(memcmp(native_pixels,native_snapshot,sizeof(native_pixels)))return 9;
+#else
     for(unsigned i=0;i<480*480;i++)if(pixels[i]!=0x001f)return 9;
+#endif
     aster_idf_ui_after_app();
     puts("PASS native FLUX render, pull-down gesture, APP overlay freeze/restore and panel-canvas hint fallback");
     return 0;

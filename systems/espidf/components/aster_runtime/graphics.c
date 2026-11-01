@@ -7,6 +7,7 @@
 #include "font_sd.h"
 #include "aster_mem.h"
 #include "files.h"
+#include "gfx_rgb888.h"
 #include <lvgl.h>
 #include <stdio.h>
 #endif
@@ -21,10 +22,31 @@ const uint8_t *aster_idf_capture(void) {return capture_callback?capture_callback
 static int guest_present(const uint8_t *p,uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t pitch)
 {return aster_idf_app_glass_frozen()?0:io.present(p,x,y,w,h,pitch);}
 static struct {
-    uint32_t handle, pixels, width, height;
+    uint32_t handle, pixels, width, height, format, bpp;
     bool scale_fit;
 } surface;
-static uint16_t *scaled_pixels;
+static uint8_t *scaled_pixels;
+int aster_idf_present_bgr888(const uint8_t *p,uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t pitch)
+{
+    if(!io.present_bgr888)return ASTER_ENOTSUP;
+    if(!p || !w || !h || x>=io.width || y>=io.height || w>io.width-x || h>io.height-y || pitch<w)return ASTER_EINVAL;
+    return io.present_bgr888(p,x,y,w,h,pitch)?ASTER_EIO:0;
+}
+const uint8_t *aster_idf_capture_bgr888(void) {return io.capture_bgr888?io.capture_bgr888():NULL;}
+static uint32_t native_format(void) {return io.present_bgr888?ASTER_PIXEL_BGR888:ASTER_PIXEL_RGB565;}
+static uint64_t formats(void) {return ASTER_FMT_BIT(ASTER_PIXEL_RGB565)|(io.present_bgr888?ASTER_FMT_BIT(ASTER_PIXEL_RGB888):0);}
+static int surface_present(const uint8_t *p,uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t pitch)
+{
+    if(aster_idf_app_glass_frozen())return 0;
+    if(surface.format==ASTER_PIXEL_RGB565)return guest_present(p,x,y,w,h,pitch);
+    if(surface.format==ASTER_PIXEL_BGR888)return aster_idf_present_bgr888(p,x,y,w,h,pitch);
+    uint8_t *copy=malloc((size_t)w*h*3);if(!copy)return ASTER_ENOMEM;
+    for(uint32_t row=0;row<h;row++)for(uint32_t col=0;col<w;col++) {
+        const uint8_t *a=p+((size_t)row*pitch+col)*3;uint8_t *b=copy+((size_t)row*w+col)*3;
+        b[0]=a[2];b[1]=a[1];b[2]=a[0];
+    }
+    int result=aster_idf_present_bgr888(copy,x,y,w,h,w);free(copy);return result;
+}
 static uint32_t serial;
 static aster_idf_touch_point_t contacts[ASTER_IDF_MAX_TOUCH];
 static uint32_t contact_mask, delivered_mask;
@@ -88,13 +110,15 @@ void aster_idf_map_touch(aster_event_t *event)
 }
 static int present_scaled(wasm_module_inst_t instance)
 {
-    const uint16_t *source=guest(instance,surface.pixels,surface.width*surface.height*2);
+    const uint8_t *source=guest(instance,surface.pixels,surface.width*surface.height*surface.bpp);
     if(!source || !scaled_pixels)return ASTER_EINVAL;
     uint32_t w,h,x,y;fit_geometry(&w,&h,&x,&y);
-    memset(scaled_pixels,0,(size_t)io.width*io.height*2);
+    memset(scaled_pixels,0,(size_t)io.width*io.height*surface.bpp);
     for(uint32_t row=0;row<h;row++)for(uint32_t col=0;col<w;col++)
-        scaled_pixels[(y+row)*io.width+x+col]=source[((uint64_t)row*surface.height/h)*surface.width+(uint64_t)col*surface.width/w];
-    return guest_present((uint8_t *)scaled_pixels,0,0,io.width,io.height,io.width)?ASTER_EIO:0;
+        memcpy(scaled_pixels+((size_t)(y+row)*io.width+x+col)*surface.bpp,
+            source+((uint64_t)row*surface.height/h*surface.width+(uint64_t)col*surface.width/w)*surface.bpp,surface.bpp);
+    return surface_present(scaled_pixels,0,0,io.width,io.height,io.width);
+
 }
 
 static int32_t display_info(wasm_exec_env_t env, uint32_t index, uint32_t off, uint32_t bytes)
@@ -106,8 +130,8 @@ static int32_t display_info(wasm_exec_env_t env, uint32_t index, uint32_t off, u
     aster_display_info_t value = {
         .size=sizeof(value), .version=1, .width=io.width, .height=io.height,
         .app_width=surface.scale_fit?surface.width:io.width, .app_height=surface.scale_fit?surface.height:io.height,
-        .native_format=ASTER_PIXEL_RGB565,
-        .supported_formats=ASTER_FMT_BIT(ASTER_PIXEL_RGB565),
+        .native_format=native_format(),
+        .supported_formats=formats(),
         .orientation=ASTER_ORIENT_PORTRAIT,
     };
     memcpy(dst, &value, sizeof(value));
@@ -127,33 +151,34 @@ static int32_t create(wasm_exec_env_t env, uint32_t off, uint32_t bytes, uint32_
     bool fit=(desc.flags&ASTER_SURFACE_F_SCALE_FIT)!=0;
     if(fit && ((desc.flags&ASTER_SURFACE_F_PANEL_CANVAS) || !desc.width || !desc.height))return ASTER_EINVAL;
     /* PANEL_CANVAS is a hint. Decline it with an ordinary guest buffer. */
-    if (desc.format != ASTER_PIXEL_RGB565 && desc.format != ASTER_PIXEL_NATIVE)
-        return ASTER_ENOTSUP;
+    uint32_t format=desc.format==ASTER_PIXEL_NATIVE?native_format():desc.format;
+    if(format!=ASTER_PIXEL_RGB565 && (!io.present_bgr888 || (format!=ASTER_PIXEL_RGB888 && format!=ASTER_PIXEL_BGR888)))return ASTER_ENOTSUP;
+    uint32_t bpp=format==ASTER_PIXEL_RGB565?2:3;
     uint32_t width = desc.width ? desc.width : io.width;
     uint32_t height = desc.height ? desc.height : io.height;
-    if(!width || !height || width>4096 || height>4096 || (uint64_t)width*height*2>16*1024*1024 ||
+    if(!width || !height || width>4096 || height>4096 || (uint64_t)width*height*bpp>16*1024*1024 ||
        (!fit && (width>io.width || height>io.height)))return ASTER_EINVAL;
     if (surface.handle) return ASTER_EBUSY;
     void *native = NULL;
-    uint32_t pixels = wasm_runtime_module_malloc(INST, width * height * 2, &native);
+    uint32_t pixels = wasm_runtime_module_malloc(INST, width * height * bpp, &native);
     if (!pixels) return ASTER_ENOMEM;
     if(fit) {
 #ifdef ESP_PLATFORM
-        scaled_pixels=aster_psram_alloc((size_t)io.width*io.height*2);
+        scaled_pixels=aster_psram_alloc((size_t)io.width*io.height*bpp);
 #else
-        scaled_pixels=malloc((size_t)io.width*io.height*2);
+        scaled_pixels=malloc((size_t)io.width*io.height*bpp);
 #endif
         if(!scaled_pixels){wasm_runtime_module_free(INST,pixels);return ASTER_ENOMEM;}
     }
     /* module_malloc can grow guest memory: reacquire all output addresses. */
     void *dst = guest(INST, out, 4);
     if (!dst) { wasm_runtime_module_free(INST, pixels);free(scaled_pixels);scaled_pixels=NULL;return ASTER_EINVAL; }
-    memset(native, 0, width * height * 2);
+    memset(native, 0, width * height * bpp);
     serial=(serial & 0x00ffffffu)+1;
     if (serial>0x00ffffffu)serial=1;
     serial |= ASTER_HTYPE_SURFACE;
     surface.handle=serial; surface.pixels=pixels; surface.width=width; surface.height=height;
-    surface.scale_fit=fit;
+    surface.scale_fit=fit;surface.format=format;surface.bpp=bpp;
     memcpy(dst, &serial, 4);
     return ASTER_OK;
 }
@@ -172,7 +197,7 @@ static int32_t acquire(wasm_exec_env_t env, uint32_t handle, uint32_t off, uint3
     if (!handle || handle != surface.handle) return ASTER_EBADF;
     /* Wire representation is always WASM32, including when tests run on x86_64. */
     struct { uint32_t size, version, ptr, width, height, pitch, format, flags; } value = {
-        32, 1, surface.pixels, surface.width, surface.height, surface.width*2, ASTER_PIXEL_RGB565, surface.scale_fit?ASTER_SURFACE_F_SCALE_FIT:0
+        32, 1, surface.pixels, surface.width, surface.height, surface.width*surface.bpp, surface.format, surface.scale_fit?ASTER_SURFACE_F_SCALE_FIT:0
     };
     if (bytes < sizeof(value)) return ASTER_EINVAL;
     void *dst = guest(INST, off, sizeof(value));
@@ -187,24 +212,24 @@ static int32_t flush(wasm_exec_env_t env, uint32_t handle, uint32_t off,
     if (!handle || handle != surface.handle) return ASTER_EBADF;
     if (!w || !h || x >= surface.width || y >= surface.height ||
         w > surface.width-x || h > surface.height-y || pitch < w) return ASTER_EINVAL;
-    uint64_t span = ((uint64_t)(h-1)*pitch + w)*2;
+    uint64_t span = ((uint64_t)(h-1)*pitch + w)*surface.bpp;
     if (span > UINT32_MAX) return ASTER_EINVAL;
     void *src = guest(INST, off, (uint32_t)span);
     if (!src) return ASTER_EINVAL;
     if(surface.scale_fit) {
-        void *destination=guest(INST,surface.pixels,surface.width*surface.height*2);
+        void *destination=guest(INST,surface.pixels,surface.width*surface.height*surface.bpp);
         if(!destination)return ASTER_EINVAL;
 #ifdef ESP_PLATFORM
-        uint8_t *copy=aster_psram_alloc((size_t)w*h*2);
+        uint8_t *copy=aster_psram_alloc((size_t)w*h*surface.bpp);
 #else
-        uint8_t *copy=malloc((size_t)w*h*2);
+        uint8_t *copy=malloc((size_t)w*h*surface.bpp);
 #endif
         if(!copy)return ASTER_ENOMEM;
-        for(uint32_t row=0;row<h;row++)memcpy(copy+(size_t)row*w*2,(uint8_t *)src+(size_t)row*pitch*2,w*2);
-        for(uint32_t row=0;row<h;row++)memcpy((uint8_t *)destination+((size_t)(y+row)*surface.width+x)*2,copy+(size_t)row*w*2,w*2);
+        for(uint32_t row=0;row<h;row++)memcpy(copy+(size_t)row*w*surface.bpp,(uint8_t *)src+(size_t)row*pitch*surface.bpp,w*surface.bpp);
+        for(uint32_t row=0;row<h;row++)memcpy((uint8_t *)destination+((size_t)(y+row)*surface.width+x)*surface.bpp,copy+(size_t)row*w*surface.bpp,w*surface.bpp);
         free(copy);return present_scaled(INST);
     }
-    return guest_present(src, x, y, w, h, pitch) == 0 ? ASTER_OK : ASTER_EIO;
+    return surface_present(src, x, y, w, h, pitch);
 }
 
 static int32_t present(wasm_exec_env_t env, uint32_t handle)
@@ -292,7 +317,7 @@ int aster_plat_display_get_info(uint32_t index,aster_display_info_t *out)
     if (index || !io.present || !out) return ASTER_ENODEV;
     *out=(aster_display_info_t){.size=sizeof(*out),.version=1,
         .width=io.width,.height=io.height,.app_width=io.width,.app_height=io.height,
-        .native_format=ASTER_PIXEL_RGB565,.supported_formats=ASTER_FMT_BIT(ASTER_PIXEL_RGB565)};
+        .native_format=native_format(),.supported_formats=formats()};
     return 0;
 }
 int aster_plat_display_write_at(const uint8_t *p,uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t pitch)
@@ -318,7 +343,31 @@ static int32_t gfx_exec(wasm_exec_env_t env, uint32_t handle, uint32_t cmd_off,
                         uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
     if (!handle || handle!=surface.handle) return ASTER_EBADF;
-    if (n==ASTER_GFX_FRAME_CONTROL) return ASTER_ENOTSUP;
+    if(n==ASTER_GFX_FRAME_CONTROL) {
+        if(!io.present_bgr888)return ASTER_ENOTSUP;
+        if(x!=ASTER_GFX_FRAME_MAGIC || y!=1 || w || h || arena_len!=sizeof(aster_gfx_frame_control_t))return ASTER_EINVAL;
+        aster_gfx_frame_control_t *dst=guest(INST,arena_off,sizeof(*dst)),control;
+        if(!dst)return ASTER_EINVAL;
+        memcpy(&control,dst,sizeof(control));
+        if(control.size!=sizeof(control) || control.version!=1 || control.action!=ASTER_GFX_FRAME_QUERY || control.frame_id || control.flags || control.error)return ASTER_EINVAL;
+        control.flags=ASTER_GFX_RGB888_SUPPORTED;memcpy(dst,&control,sizeof(control));return 0;
+    }
+    if(n==ASTER_GFX_RGB888_BATCH) {
+        if(surface.bpp!=3)return ASTER_ENOTSUP;
+        if(!x || x>256 || y!=1 || w || h || arena_len>ASTER_GFX_FRAME_MAX_ARENA)return ASTER_EINVAL;
+        const void *input=guest(INST,cmd_off,x*sizeof(aster_gfx_rgb888_cmd_t));
+        const void *text=arena_len?guest(INST,arena_off,arena_len):NULL;
+        if(!input || (arena_len && !text))return ASTER_EINVAL;
+        aster_gfx_rgb888_cmd_t *commands=malloc(x*sizeof(*commands));uint8_t *arena=arena_len?malloc(arena_len):NULL;
+        if(!commands || (arena_len && !arena)){free(commands);free(arena);return ASTER_ENOMEM;}
+        memcpy(commands,input,x*sizeof(*commands));if(arena_len)memcpy(arena,text,arena_len);
+        uint8_t *pixels=guest(INST,surface.pixels,surface.width*surface.height*3);
+        int result=pixels?aster_idf_gfx888(pixels,surface.width,surface.height,surface.format==ASTER_PIXEL_RGB888,commands,x,arena,arena_len):ASTER_EINVAL;
+        free(commands);free(arena);
+        if(result>=0){int error=surface.scale_fit?present_scaled(INST):surface_present(pixels,0,0,surface.width,surface.height,surface.width);if(error)result=error;}
+        return result;
+    }
+    if(surface.bpp==3)return ASTER_ENOTSUP;
     if (n>256 || arena_len>ASTER_GFX_FRAME_MAX_ARENA) return ASTER_EINVAL;
     if ((w==0)!=(h==0) || (w && (x>=surface.width || y>=surface.height ||
         w>surface.width-x || h>surface.height-y))) return ASTER_EINVAL;

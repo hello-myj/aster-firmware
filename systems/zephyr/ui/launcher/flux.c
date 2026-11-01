@@ -418,13 +418,18 @@ static lv_draw_buf_t *ribbon_bake(lv_obj_t *obj)
  w=lv_obj_get_width(obj);
  h=lv_obj_get_height(obj);
  if(w<=0 || h<=0) return NULL;
- stride=lv_draw_buf_width_to_stride((uint32_t)w,LV_COLOR_FORMAT_RGB565);
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+ lv_color_format_t cf=LV_COLOR_FORMAT_RGB888;
+#else
+ lv_color_format_t cf=LV_COLOR_FORMAT_RGB565;
+#endif
+ stride=lv_draw_buf_width_to_stride((uint32_t)w,cf);
  bytes=(size_t)stride*(size_t)h;
  px=aster_psram_alloc(bytes);
  db=lv_malloc_zeroed(sizeof(*db));
  if(!px || !db ||
-    lv_draw_buf_init(db,(uint32_t)w,(uint32_t)h,LV_COLOR_FORMAT_RGB565,stride,px,(uint32_t)bytes)!=LV_RESULT_OK ||
-    lv_snapshot_take_to_draw_buf(obj,LV_COLOR_FORMAT_RGB565,db)!=LV_RESULT_OK) {
+    lv_draw_buf_init(db,(uint32_t)w,(uint32_t)h,cf,stride,px,(uint32_t)bytes)!=LV_RESULT_OK ||
+    lv_snapshot_take_to_draw_buf(obj,cf,db)!=LV_RESULT_OK) {
   LOG_WRN("ribbon bake failed (%dx%d)",(int)w,(int)h);
   aster_psram_free(px);
   if(db) lv_free(db);
@@ -484,7 +489,7 @@ static void bind_ribbon(int slot,int idx)
  } else {ribbon_cache_store(slot);release_icon(slot);}
  ribbons[slot].entry=idx;ribbons[slot].dirty_art=false;
  if(!same && (ribbons[slot].art=cached)) {
-  aster_flux_draw_prepare(ribbons[slot].art->data,ribbons[slot].art->header.stride);
+  aster_flux_draw_prepare_format(ribbons[slot].art->data,ribbons[slot].art->header.stride,ribbons[slot].art->header.cf);
   lv_image_set_src(ribbons[slot].obj,ribbons[slot].art);return;
  }
  entry_t *e=&entries[idx];
@@ -531,7 +536,7 @@ static void bind_ribbon(int slot,int idx)
  design_px=0;
  lv_obj_delete(o);
  if(ribbons[slot].art) {
-  aster_flux_draw_prepare(ribbons[slot].art->data,ribbons[slot].art->header.stride);
+  aster_flux_draw_prepare_format(ribbons[slot].art->data,ribbons[slot].art->header.stride,ribbons[slot].art->header.cf);
   lv_image_set_src(ribbons[slot].obj,ribbons[slot].art);
  }
 }

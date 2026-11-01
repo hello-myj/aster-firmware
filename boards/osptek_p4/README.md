@@ -291,3 +291,86 @@ GPIO source: `esp32-p4c5-module-dev-board-main.zip`, English User Guide
 https://github.com/osptek/esp32-p4c5-core-board ,
 `images/c5-p4-connection.png`. The archived standalone V1.3 schematic and
 the V1.5 schematic embedded in the newer guide are separate revisions.
+
+### RGB666 输出实验（P4 v3 / IDF 6.0）
+
+在 `menuconfig` 中启用 `CONFIG_ASTER_P4_RGB666_OUTPUT`（默认关闭），重新构建并烧录。
+实验使用 480×480 RGB888 原生帧缓冲，691200 字节 / 675 KiB；原有启动彩条
+450 KiB 启动缓冲复用为兼容 RGB565 截图影子，仅在旧截图接口需要时转换。
+LVGL 绘制缓冲为 675 KiB，Launcher 卡片缓存也使用 RGB888，任意角度旋转、双线性采样和
+透明混合保留八位通道。RGB888 的原生绘制缓冲经 DMA2D 复制到屏幕，PPA 填充支持
+RGB565/RGB888 并在启动时验证颜色、裁剪及缓存一致性。
+已有 RGB565 应用维持旧 ABI，经 CPU 扩展到原生屏幕缓冲，保留其原有颜色精度。
+设置面板对应用画面的截图和恢复使用 RGB888，避免打开面板时损失色阶。
+
+原生应用画布支持 RGB888（R/G/B 字节）和 BGR888（B/G/R 字节）；本机原生格式为
+BGR888，兼容 LVGL 与 P4 DMA 内存布局。支持缩放适配、带行距的区域写入及边界检查。
+`contract/include/aster/gfx_rgb888.h` 定义可协商的高色深命令协议，复用现有
+`aster_gfx_exec` 导入，不修改旧 RGB565 命令。查询的 RGB888 标志不代表帧事务支持。
+新命令包含全色彩清屏、矩形/圆角、渐变、文字、线、圆与三角形；验证完整批次后再绘制。
+原有 RGB565 图标和图像解码接口保持原有精度，新的 RGB 图片可由 SDK 原生像素/贴图接口绘制。
+
+IDF 6.0 的公开颜色枚举没有 RGB666；板级实验在启动视频前配置 rev3 的
+DSI bridge `raw_type=0`（RGB888）、`dpi_type=1`（RGB666）、`dpi_config=0`，
+DSI host 使用 18-bit configuration 1，关闭 loosely18，面板 COLMOD=0x66。
+输出为 packed RGB666；MIPI 两通道 620 Mbps、DPI 30 MHz、时序不变。
+
+通过串口执行 `aster app color-test`（先停止正在运行的应用）。原生诊断由同一个显示工作
+线程运行，直接以 RGB888 绘制六位渐变，再由硬件输出 RGB666，绕过应用 RGB565 量化。
+屏幕四组由上到下为红、绿、蓝、灰；每组上半部分模拟 RGB565，下半部分保留 RGB666。
+红蓝上半各 32 级、下半各 64 级；绿色两者都是 64 级。点击屏幕或发送 `aster app stop`
+退出并返回桌面。用户已确认此原生对比图下半更细腻，颜色和画面正常。
+
+使用 SDK `feat/p4-rgb888-rendering` 分支的 `apps/rgb888` 可验证完整 APP 路径，
+`aster_color.h` 根据运行时显示格式和协议能力选择后端：P4 使用原生高色深，RGB565
+设备使用原有 RGB565 画布及原生固件绘制，额外的透明图形采用有界的客端 RGB565 绘制。
+RGB565 后端不分配 RGB888 帧缓冲；不支持的透明文字明确返回 ENOTSUP。
+同一源码分别构建 RISC-V / Xtensa AOT；不声称同一个 AOT 文件能跨 CPU 执行。
+
+验证：138 项固件测试通过（3 项跳过）；109 项 SDK 测试通过；新增 RGB565/原生后端路由
+和有界队列测试通过。真实 WASM 与主机 AOT 验证了 RGB/BGR 字节序、低位颜色、超过
+50 个六位红色阶、原子验证与带行距写入；真实 LVGL 主机测试覆盖 RGB565/RGB888 的
+Launcher 绘制、缓存/未缓存变换像素一致性、裁剪，以及设置面板恢复不丢低位颜色。
+lckfb-s3 固件与示例 Xtensa AOT 构建通过；没有进行本轮 lckfb 实机验证。
+
+P4 v3.2 实机：RGB565+RGB888 PPA 自检通过，示例通过串口安装并以 AOT 运行，
+画布 480×480、pitch=1440、format=0x1903，状态 RUNNING。用户已确认显示、触点正常，
+设置面板关闭后画面恢复正常。
+相同 `aster ui bench 8` 方法下，高色深初版 14.3 FPS，优化后 20.5 FPS，render 平均
+37.6 ms、间隔 p95 61 ms，PPA 错误 0；此前 RGB565 约 31 FPS。
+这是颜色精度升级的当前性能代价，实验开关默认关闭，不宣称帧率已追平旧路径。
+原始记录位于忽略目录 `build/osptek-p4/hardware/` 的 `rgb888-*-bench.log`、
+`rgb888-final-app.log`。
+
+参考：乐鑫 `mipi_dsi_bridge_struct.h` 的 rev3 寄存器定义，以及 `mipi_dsi_host_ll.h`
+的 18-bit configuration 1 编码。实验前 RGB565 固件留存于忽略目录
+`build/osptek-p4/hardware/rgb565-before-rgb666.bin`，便于恢复已验证的显示模式。
+
+### 高色深 Launcher 的双核优化
+
+`CONFIG_ASTER_P4_DUAL_CORE_RENDER` 在 RGB666 模式下默认启用：单一 LVGL/VM 工作任务
+固定到 CPU1，CPU0 的持久像素任务只处理另一段独立像素行。每张卡片绘制完成后才继续
+下一张，LVGL 对象、卡片缓存和源图生命周期均由主任务掌握。分段边界按目标缓存行
+（64 字节）对齐；小区域、无法对齐或辅助任务不可用时自动回到串行路径。
+辅助任务栈为 6 KiB，没有新增完整帧缓冲。FreeRTOS 队列发布任务，信号量完成同步；
+主任务等待完成后才允许释放源图或向屏幕提交。主机 pthread 回归验证并行/串行输出
+逐字节一致，覆盖旋转、缩放、透明度、边缘采样和裁剪。
+
+ST7123 使用中断 GPIO21 判断新帧，空闲时不做同步 I2C 读取；中断高电平保持最后触点
+状态，不合成抬指。有数据时仍读到最后一个槽位以确认整帧。协议 V01.11 的时钟上限
+为 400 kHz，因此 `CONFIG_ASTER_P4_TOUCH_I2C_HZ` 默认 400000；不同布线可设回100000。
+参考：https://dl.espressif.com/AE/esp-iot-solution/ST7123+TDDI+Interface+Protocol+V01.11.pdf 。
+PPA 继续负责大块填充、DMA2D 负责原生 RGB888 提交，MIPI 时序与颜色精度保持不变。
+PPA SRM 只支持直角旋转，当前卡片的小角度旋转仍由双核像素程序完成；未改变抗锯齿
+和采样质量来提高计数，也没有提高 CPU 主频。
+
+P4 v3.2 同样 `aster ui bench 8`、2秒预热/8秒统计的两轮实测：
+第一轮 31.8 FPS（255帧/8009ms），第二轮31.7 FPS（254帧/7989ms）；平均渲染约25.4ms，
+帧间隔p95 39/40ms。相比前版20.5 FPS提升约55%；达到平均30 FPS目标，不代表每一帧
+都短于33.3ms。两轮PPA错误均为0；SMP分别执行833/828个并行任务，实际核ID为
+owner_core=1、helper_core=0。任务时间由运行时记录，不以编译配置推断核利用。
+原始日志：`build/osptek-p4/hardware/rgb888-smp-bench.log`、`rgb888-smp-repeat.log`。
+
+138项固件测试通过（3项跳过）；真实WASM/主机AOT与RGB565/RGB888原生UI回归通过。
+lckfb-s3仍走原有RGB565代码，其固件编译回归通过；本轮未进行lckfb实机验证。
+用户已确认双核版滑动更流畅，画面和触摸正常，并按提示测试了惯性和下拉设置。

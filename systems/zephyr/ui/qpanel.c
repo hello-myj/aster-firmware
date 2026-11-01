@@ -1,4 +1,13 @@
+#ifdef ASTER_SYSTEM_ESP_IDF
+#include "sdkconfig.h"
+#endif
 #include <zephyr/sys/util.h>
+#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+#include "aster_idf_display.h"
+#define SNAP_BPP 3u
+#else
+#define SNAP_BPP 2u
+#endif
 /* SPDX-License-Identifier: MIT
  * Quick-settings sheet. See qpanel.h for the contract: what it may ask of
  * the screen under it, why it is torn down by the same call that rebuilds
@@ -353,7 +362,13 @@ static bool snapshot_take(void)
 	 * still streaming (glass_note_full's alias_ok), so reading it before
 	 * the wire is idle is a read of memory the DMA is walking. */
 	aster_plat_display_flush_drain();
-	if (!aster_plat_display_glass_frame(&gb, &w, &h, &pitch)) {
+	#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+    gb=aster_idf_capture_bgr888();w=lw;h=lh;pitch=lw;
+    if(!gb)
+#else
+    if (!aster_plat_display_glass_frame(&gb, &w, &h, &pitch))
+#endif
+    {
 		/* Reachable, not theoretical: a build without
 		 * CONFIG_ASTER_SCREENSHOT keeps no shadow, so the record survives
 		 * only the *whole-panel* writes (a flip or a canvas present) and
@@ -377,14 +392,14 @@ static bool snapshot_take(void)
 		return false;
 	}
 	if (!s_snap) {
-		s_snap = aster_psram_alloc((size_t)lw * lh * 2u);
+		s_snap = aster_psram_alloc((size_t)lw * lh * SNAP_BPP);
 		if (!s_snap) {
 			LOG_ERR("qpanel: no PSRAM for the %u B glass snapshot",
-				(unsigned)(lw * lh * 2u));
+				(unsigned)(lw * lh * SNAP_BPP));
 			return false;
 		}
 	}
-	memcpy(s_snap, gb, (size_t)lw * lh * 2u);
+	memcpy(s_snap, gb, (size_t)lw * lh * SNAP_BPP);
 	return true;
 }
 
@@ -399,7 +414,11 @@ static void glass_put_back(void)
 	 * passing bytes/row makes the staging gather step twice as far per row
 	 * as the buffer holds and read off its end. `true` is the byte order:
 	 * the glass record is panel order, which is what the record wants. */
-	aster_plat_display_write_at_ex(s_snap, 0, 0, lw, lh, lw, true);
+	#ifdef CONFIG_ASTER_P4_RGB666_OUTPUT
+    aster_idf_present_bgr888(s_snap,0,0,lw,lh,lw);
+#else
+    aster_plat_display_write_at_ex(s_snap, 0, 0, lw, lh, lw, true);
+#endif
 	/* write_at_ex hands a whole-panel rect to the async worker and returns
 	 * before the wire is finished. The guest resumes the moment this
 	 * function returns, so without the drain its next present would race

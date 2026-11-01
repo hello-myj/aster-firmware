@@ -45,6 +45,7 @@ static inline int ledc_update_duty(int m,int c) {(void)m;(void)c;return 0;}
               "-I"+str(ROOT/"systems/espidf/components/aster_connectivity"),
               "-DCONFIG_ASTER_WIFI=1","-DCONFIG_ASTER_AUDIO=1","-DCONFIG_ASTER_AUDIO_RATE=16000","-DCONFIG_ASTER_FLUX_ART_CACHE=8",
               "-DCONFIG_ASTER_AUDIO_BITS=16",'-DCONFIG_ASTER_BOARD_ID="osptek-p4-st7102"']
+    if os.environ.get("ASTER_TEST_RGB888")=="1":flags.append("-DCONFIG_ASTER_P4_RGB666_OUTPUT=1")
     sources=[ui/name for name in ("ui.c","platform.c","wifi.c")]
     sources += [shared/name for name in ("launcher/flux.c","launcher/flux_font.c","gesture.c","qpanel.c","wifi_settings.c","ui_splash.c")]
     sources += [ROOT/"platform/esp32s3/touch_ui.c",fixture/"ui_mock.c",fixture/"flux_pixels.c"]

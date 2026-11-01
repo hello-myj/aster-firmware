@@ -1,4 +1,4 @@
-idf_component_register(SRCS "runtime.c" "aot_profile.c" "graphics.c" "files.c" "timers.c" "apps.c" "wifi.c" "clock.c" "network.c" "audio.c" "images.c" "devices.c" "../../../zephyr/services/aster_pkg.c"
+idf_component_register(SRCS "runtime.c" "aot_profile.c" "graphics.c" "gfx_rgb888.c" "files.c" "timers.c" "apps.c" "wifi.c" "clock.c" "network.c" "audio.c" "images.c" "devices.c" "../../../zephyr/services/aster_pkg.c"
  "../../../zephyr/services/aster_app_mgr.c" "../../../zephyr/services/aster_versions.c"
  "../../../zephyr/services/aster_storage.c" "../../../zephyr/services/aster_sig.c" "../../../zephyr/services/aster_kv.c" INCLUDE_DIRS "." "../../../../contract/include" REQUIRES aster_render aster_connectivity aster_transport aster_audio wamr esp_timer heap freertos)
 

@@ -49,3 +49,36 @@ config ASTER_VENDOR_PUBKEY
     string "Trusted P-256 public key (130 hexadecimal characters)"
     depends on ASTER_SIGNATURE_VERIFY
     default ""
+
+config ASTER_P4_RGB666_OUTPUT
+    bool "Experimental packed RGB666 MIPI output (P4 rev3, RGB888 framebuffer)"
+    depends on ESP32P4_REV_MIN_300
+    default n
+    help
+        Use a 675 KiB RGB888 framebuffer, converted by the rev3 DSI bridge
+        into packed RGB666 (18 bits/pixel). LVGL and launcher caches use
+        RGB888; apps may negotiate native RGB888 drawing or retain RGB565.
+        The boot image is reused as a 450 KiB RGB565 capture shadow.
+        ESP-IDF 6.0 has no public RGB666 output API; the board applies the
+        documented bridge/host register settings before starting video.
+        PPA fills and DMA2D copies support the native RGB888 path. Old 565
+        apps retain their source precision and use CPU format conversion.
+        Run 'aster app color-test' for four gradient rows, upper halves RGB565,
+        lower halves RGB666. Tap the screen or use 'aster app stop' to exit.
+        Disable this option to return to the validated RGB565 output path.
+
+config ASTER_P4_DUAL_CORE_RENDER
+    bool "Split high-color launcher pixel rows across both HP cores"
+    depends on ASTER_P4_RGB666_OUTPUT
+    default y
+    help
+        Pin the sole LVGL/VM owner to CPU1 and run independent, cache-line
+        separated pixel rows on CPU0. Join before any LVGL task/cache changes.
+        The helper owns a 6 KiB stack. LVGL APIs remain single-owner.
+config ASTER_P4_TOUCH_I2C_HZ
+    int "ST7123 I2C clock (Hz)"
+    range 100000 400000
+    default 400000
+    help
+        ST7123 protocol V01.11 supports up to 400 kHz. Use 100000 if a board
+        with different wiring/pull-ups requires the reference-example rate.
