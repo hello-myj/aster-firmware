@@ -147,17 +147,26 @@ def main():
                   else str(out/"pause-runner") if arg==str(out/"runner") else arg for arg in compile_command]
     subprocess.run(pause_runner,check=True)
     subprocess.run([str(out/"pause-runner"),str(pause_wasm)],check=True,timeout=8)
+    multi_wasm=out/"multitouch.wasm"
+    multi_command=[str(fixture/"multitouch_app.c") if arg==str(fixture/"graphics_app.c")
+                   else str(multi_wasm) if arg==str(wasm) else arg for arg in wasm_command]
+    subprocess.run(multi_command,check=True)
+    multi_runner=[str(fixture/"multitouch_mock.c") if arg==str(out/"main.c")
+                  else str(out/"multitouch-runner") if arg==str(out/"runner") else arg for arg in compile_command]
+    subprocess.run(multi_runner,check=True)
+    subprocess.run([str(out/"multitouch-runner"),str(multi_wasm)],check=True,timeout=8)
     # Native-host AOT exercises the same loader/bridges/termination contract.
     # The separately generated RISC-V image is cross-compiled, never host-run.
     wamrc=ROOT.parent/"aster-sdk/toolchain/wamrc"
     if wamrc.is_file():
-        for source in (wasm,stop_wasm,pause_wasm):
+        for source in (wasm,stop_wasm,pause_wasm,multi_wasm):
             aot=source.with_suffix(".aot")
             prepared=source.with_suffix(".interruptible.wasm")
             prepared.write_bytes(interruptible_wasm(source.read_bytes()))
             subprocess.run([str(wamrc),"--target=x86_64","--cpu=x86-64","--enable-multi-thread",
                             "--bounds-checks=1","--stack-bounds-checks=1","-o",str(aot),str(prepared)],check=True)
             if source==wasm:subprocess.run([str(out/"graphics-runner"),str(aot)],check=True)
+            elif source==multi_wasm:subprocess.run([str(out/"multitouch-runner"),str(aot)],check=True,timeout=8)
             elif source==stop_wasm:
                 subprocess.run([str(out/"stop-runner"),str(aot)],check=True,timeout=8)
                 subprocess.run([str(out/"stop-runner"),str(aot),"watchdog"],check=True,timeout=8)

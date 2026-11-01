@@ -74,7 +74,7 @@ RISC-V AOT 已在 P4 v3.2 执行：600 帧显示诊断达到帧数上限后返�
 ## 已接入的软件
 
 - FLUX 桌面、字体、触摸手势、快捷设置、返回桌面及原生 Wi-Fi 设置页。
-- ST7102 RGB565 显示与 ST7123 单点触摸；错误读数不合成为抬手。
+- ST7102 RGB565 显示与 ST7123 五点触摸；保留控制器固定槽位，错误读数不合成为抬手。
 - RGB565 surface、脏矩形、居中等比缩放和反向触摸映射；原图形引擎、字体、BMP/JPEG/PNG。
 - WASM 和 RISC-V AOT，应用生命周期、暂停/恢复、停止、回调超时终止与资源清理。
 - SD 文件、目录、应用沙箱、权限、KV；ASTP 安装、扫描、卸载与双版本代码目录。
@@ -180,8 +180,32 @@ aster wifi forget
 ```
 
 Wi-Fi 工作在后台；连接成功后才保存凭据。热点从桌面 Wi-Fi 设置页控制，无路由/NAT。
-SD 挂载不会自动格式化。此端口当前通过 SD/控制台安装包，未接入 Zephyr 的 USB
-ASTERFS 文件传输与硬件调试命令集。
+SD 挂载不会自动格式化。此端口支持 SD 安装和共享 UART 上的 ASTERFS 3 应用包传输；
+尚未提供独立 USB-CDC 文件服务和完整的硬件调试命令集。
+
+共享下载串口支持现有 SDK 的 `ASTERPING / ASTERPUT`、512 字节逐块 ACK、CRC32
+及 `.part` 断点续传。只接收 SD 根目录或 `/SD:/aster/install/` 下的 `.ast` 安装包，
+拒绝路径穿越、直接覆盖已安装应用目录及其他类型文件。完整校验通过后才发布包文件。
+UART 正文直接读驱动，保留二进制 CR/LF/NUL；接收期间由控制台线程独占输入。
+
+```text
+python tools/deploy.py dist/riscv/aster.touchtest.ast --target riscv --port COM11 --run
+```
+
+以上命令在 SDK 仓库运行，端口按实际设备修改。P4 控制台提供标准提示符
+`aster:~$`、`installed OK` 和 `started <id>` 应答；`aster app start` 与 `run` 均支持。
+已使用原有 SDK 部署工具在实机上传、安装并启动 TouchTest：480×480、RISC-V AOT、
+状态 RUNNING。早期单点适配已由用户确认显示与单指轨迹正常。
+现已接通五点输入：按控制器原始槽位上报 DOWN/MOVE/UP，同帧事件在绘制前交付，
+`aster_input_touch` 返回全部有效触点（兼容原有 12 字节点结构，稳定槽位见事件）。
+读取失败或没有新坐标帧时保留原状态；多指期间抑制应用上方的单指系统手势，直到全部抬起。
+五指事件、稀疏槽位、独立抬起、复用、坐标越界与异常读取已通过真实 WASM/x86 AOT
+桥接回归；新版已烧录实机，TouchTest AOT 运行时报告 `reported_max=5`；
+屏幕五指交叉与独立抬起的最终实机效果待用户确认。
+应用将最大内存改为 2 MiB，以容纳 480×480 画布及初始内存/托管堆预算。
+138 项固件测试通过（跳过 3 项），包含实际接收核心的分片、CRC、断点恢复、
+坏包不覆盖旧包、已完整部分文件发布及路径限制测试。部署日志见本机
+`build/osptek-p4/hardware/touchtest-serial-final-deploy.log`、`touchtest-running.log`。
 
 `check_runtime.py` 另行生成 `build/osptek-p4/sdcard/app.wasm` 和 `app.aot`。
 放到卡根目录后用 `aster app diagnostic` 运行蓝/橙格子诊断，最多 600 帧

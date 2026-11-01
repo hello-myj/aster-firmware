@@ -47,8 +47,8 @@ int aster_plat_input_poll(aster_touch_evt_t *out,int capacity)
 {
     if(!capacity)return 0;
     aster_event_t event;if(!aster_idf_touch_event(&event))return 0;
-    *out=(aster_touch_evt_t){.x=event.u.touch.x,.y=event.u.touch.y,.action=event.u.touch.action,.slot=0,
-        .contact_mask=event.u.touch.action==ASTER_TOUCH_UP?0:1};return 1;
+    *out=(aster_touch_evt_t){.x=event.u.touch.x,.y=event.u.touch.y,.action=event.u.touch.action,.slot=event.u.touch.slot,
+        .contact_mask=aster_idf_touch_mask()};return 1;
 }
 int aster_plat_input_keys_poll(aster_key_evt_t *out,int capacity) {(void)out;(void)capacity;return 0;}
 int aster_plat_backlight_set(bool on,uint8_t level)

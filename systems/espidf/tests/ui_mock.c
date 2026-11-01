@@ -60,7 +60,7 @@ int main(int argc,char **argv)
         char path[64];snprintf(path,sizeof(path),"/SD:/test.ui.%u.ast",i);
         if(aster_app_mgr_install(path))return 10;
     }
-    const aster_idf_io_t io={480,480,present,touch};aster_idf_set_io(&io);aster_idf_set_capture(capture);
+    const aster_idf_io_t io={.width=480,.height=480,.present=present,.touch=touch};aster_idf_set_io(&io);aster_idf_set_capture(capture);
     if(aster_idf_ui_init(launch))return 3;
     extern void check_flux_pixels(void);check_flux_pixels();
     /* Give the actual cpfont reader and FLUX splash/catalog warmup time. */

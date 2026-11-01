@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "aster_idf_ui.h"
 #include "aster_idf_runtime.h"
+#include "graphics.h"
 #include "aster_platform.h"
 #include "ui_lvgl.h"
 #include "ui_font.h"
@@ -147,6 +148,23 @@ int aster_runtime_launch_async(const char *id) {return launch_callback?launch_ca
 static bool touch(void *value)
 {
     aster_event_t *event=value;bool down=event->u.touch.action!=ASTER_TOUCH_UP;
+    static bool suppress_multi;
+    static uint32_t primary=UINT32_MAX;
+    uint32_t mask=aster_idf_touch_mask();
+    bool open=aster_qpanel_is_open();
+    if(mask && (mask&(mask-1))) {
+        suppress_multi=true;primary=UINT32_MAX;
+        aster_gesture_reset();
+        aster_ui_lvgl_pointer(event->u.touch.x,event->u.touch.y,0);
+    }
+    if(suppress_multi) {
+        if(!mask)suppress_multi=false;
+        return open;
+    }
+    if(event->u.touch.action==ASTER_TOUCH_DOWN &&
+       (primary==UINT32_MAX || !(mask&(1u<<primary))))primary=event->u.touch.slot;
+    if(primary!=event->u.touch.slot)return open;
+    if(!down)primary=UINT32_MAX;
     bool was_open=aster_qpanel_is_open();
     aster_gest_t gesture=aster_gesture_feed(event->u.touch.x,event->u.touch.y,down,
         aster_qpanel_allow(false),aster_ui_lvgl_height());

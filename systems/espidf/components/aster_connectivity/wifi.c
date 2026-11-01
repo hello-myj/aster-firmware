@@ -71,7 +71,7 @@ void aster_idf_network_start(void)
     esp_console_repl_config_t config=ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     /* Package parsing/install paths exceed the default 4 KiB REPL stack. */
     config.task_stack_size=16384;
-    config.prompt="aster> ";
+    config.prompt="aster:~$ ";
     esp_console_dev_uart_config_t uart=ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
     r=esp_console_new_repl_uart(&uart,&config,&repl);
     if (r!=ESP_OK) {ESP_LOGE(TAG,"Console unavailable: %s",esp_err_to_name(r));return;}

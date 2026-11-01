@@ -10,3 +10,6 @@ void aster_idf_map_touch(aster_event_t *event);
 void aster_idf_graphics_reset_touch(void);
 int aster_idf_feature(uint32_t bit);
 int aster_idf_display_count(void);
+
+uint32_t aster_idf_touch_mask(void);
+bool aster_idf_touch_pending(void);

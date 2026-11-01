@@ -1,1 +1,1 @@
-idf_component_register(SRCS "main.c" "storage.c" INCLUDE_DIRS "." REQUIRES aster_apps aster_connectivity esp_lcd_st7102 esp_lcd_touch_st7123 esp_driver_i2c esp_driver_gpio esp_hw_support esp_psram esp_mm aster_runtime fatfs sdmmc esp_driver_sdmmc bootloader_support)
+idf_component_register(SRCS "main.c" "storage.c" INCLUDE_DIRS "." REQUIRES aster_apps aster_transfer aster_connectivity esp_lcd_st7102 esp_lcd_touch_st7123 esp_driver_i2c esp_driver_gpio esp_hw_support esp_psram esp_mm aster_runtime fatfs sdmmc esp_driver_sdmmc bootloader_support)

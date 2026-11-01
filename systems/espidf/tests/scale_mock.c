@@ -16,7 +16,7 @@ static int touch(uint32_t *x,uint32_t *y) {*x=*y=240;return reads++==0;}
 int main(int argc,char **argv)
 {
     if(argc!=2)return 2;
-    const aster_idf_io_t io={480,480,present,touch};aster_idf_set_io(&io);
+    const aster_idf_io_t io={.width=480,.height=480,.present=present,.touch=touch};aster_idf_set_io(&io);
     int r=aster_idf_run_wasm(argv[1]);
     if(r || wrong || calls!=1 || reads!=2)return 1;
     puts("PASS scale-fit pixels, black margins and inverse touch/poll mapping");return 0;

@@ -128,8 +128,16 @@ int aster_idf_apps_command(int argc,char **argv)
     if(argc==3 && (!strcmp(argv[2],"pause") || !strcmp(argv[2],"resume")))
         return aster_idf_request_pause(!strcmp(argv[2],"pause"));
     if(argc!=4)return ASTER_EINVAL;
-    if(!strcmp(argv[2],"run"))return aster_idf_apps_launch(argv[3]);
-    if(!strcmp(argv[2],"install"))return aster_app_mgr_install(argv[3]);
+    if(!strcmp(argv[2],"run") || !strcmp(argv[2],"start")) {
+        int result=aster_idf_apps_launch(argv[3]);
+        if(!result)printf("started %s\n",argv[3]);
+        return result;
+    }
+    if(!strcmp(argv[2],"install")) {
+        int result=aster_app_mgr_install(argv[3]);
+        if(result)printf("install failed: %d\n",result);else puts("installed OK");
+        return result;
+    }
     if(!strcmp(argv[2],"uninstall"))return aster_app_mgr_uninstall(argv[3]);
     return ASTER_EINVAL;
 }

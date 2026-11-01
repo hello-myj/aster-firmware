@@ -364,7 +364,8 @@ static int run_wasm(const char *path,const char *id,uint32_t perms,unsigned fram
         memset(event, 0, sizeof(*event));
         event->size = sizeof(*event);
         event->version = 1;
-        if (aster_idf_touch_event(event)) {
+        for(unsigned input_count=0;input_count<ASTER_IDF_MAX_TOUCH;input_count++) {
+            if(!aster_idf_touch_event(event))break;
             event->timestamp_ms = (uint64_t)esp_timer_get_time()/1000;
             args[0] = event_offset;
             bool consumed=ui_hooks.touch && ui_hooks.touch(event);
@@ -375,6 +376,7 @@ static int run_wasm(const char *path,const char *id,uint32_t perms,unsigned fram
             event = wasm_runtime_addr_app_to_native(instance, event_offset);
             memset(event, 0, sizeof(*event));
             event->size=sizeof(*event); event->version=1;
+            if(!aster_idf_touch_pending())break;
         }
         if(ui_hooks.tick)ui_hooks.tick();
         aster_event_t timer_event;

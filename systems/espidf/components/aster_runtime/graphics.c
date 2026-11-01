@@ -26,9 +26,21 @@ static struct {
 } surface;
 static uint16_t *scaled_pixels;
 static uint32_t serial;
-static bool down;
-static uint32_t touch_x, touch_y, touch_action;
-void aster_idf_graphics_reset_touch(void) {down=false;touch_action=0;}
+static aster_idf_touch_point_t contacts[ASTER_IDF_MAX_TOUCH];
+static uint32_t contact_mask, delivered_mask;
+static uint32_t actions[ASTER_IDF_MAX_TOUCH];
+static aster_event_t touch_queue[ASTER_IDF_MAX_TOUCH];
+static unsigned touch_next, touch_count;
+static bool has_touch(void) { return io.touch || io.touch_frame; }
+static uint32_t touch_capacity(void) {
+    return io.touch_frame ? io.max_touch_points : (io.touch ? 1 : 0);
+}
+uint32_t aster_idf_touch_mask(void) { return delivered_mask; }
+bool aster_idf_touch_pending(void) { return touch_next < touch_count; }
+void aster_idf_graphics_reset_touch(void) {
+    contact_mask=delivered_mask=touch_next=touch_count=0;
+    memset(contacts,0,sizeof(contacts));memset(actions,0,sizeof(actions));
+}
 
 void aster_idf_set_io(const aster_idf_io_t *value)
 {
@@ -36,7 +48,9 @@ void aster_idf_set_io(const aster_idf_io_t *value)
     /* Bound all multiplication used by the ABI, even with an invalid backend. */
     if (!io.width || !io.height || io.width > 480 || io.height > 480)
         memset(&io, 0, sizeof(io));
-    down = false;
+    if(io.touch_frame && (!io.max_touch_points || io.max_touch_points>ASTER_IDF_MAX_TOUCH))
+        io.touch_frame=NULL;
+    aster_idf_graphics_reset_touch();
 }
 
 int aster_idf_display_count(void) { return io.present ? 1 : 0; }
@@ -44,7 +58,7 @@ int aster_idf_feature(uint32_t bit)
 {
     if (bit == ASTER_FEATURE_DISPLAY || bit == ASTER_FEATURE_FRAMEBUFFER)
         return io.present != NULL;
-    if (bit == ASTER_FEATURE_TOUCH) return io.touch != NULL;
+    if (bit == ASTER_FEATURE_TOUCH) return has_touch();
     return 0;
 }
 
@@ -206,42 +220,58 @@ static int32_t input_info(wasm_exec_env_t env, uint32_t off, uint32_t bytes)
     void *dst = guest(INST, off, sizeof(aster_input_info_t));
     if (!dst) return ASTER_EINVAL;
     aster_input_info_t value = {.size=sizeof(value), .version=1,
-        .kinds=io.touch ? ASTER_INPUT_TOUCH : 0, .max_points=io.touch ? 1 : 0};
+        .kinds=has_touch() ? ASTER_INPUT_TOUCH : 0, .max_points=touch_capacity()};
     memcpy(dst, &value, sizeof(value));
     return ASTER_OK;
 }
 
 bool aster_idf_touch_event(aster_event_t *event)
 {
-    if (!io.touch) return false;
-    uint32_t x=0, y=0;
-    int count = io.touch(&x, &y);
-    if (count < 0) return false; /* An I/O failure is not a release. */
-    if (!count && !down) return false;
-    if (count) {
-        if (x >= io.width || y >= io.height) return false;
-        if (down && x == touch_x && y == touch_y) return false;
-        touch_action = down ? ASTER_TOUCH_MOVE : ASTER_TOUCH_DOWN;
-        touch_x=x; touch_y=y; down=true;
-    } else {
-        touch_action=ASTER_TOUCH_UP; down=false;
+    if (!has_touch()) return false;
+    if(touch_next==touch_count) {
+        aster_idf_touch_point_t next[ASTER_IDF_MAX_TOUCH]={0};
+        int mask=io.touch_frame ? io.touch_frame(next) : io.touch(&next[0].x,&next[0].y);
+        if(mask<0)return false; /* No frame / I/O error must not release fingers. */
+        if((uint32_t)mask & ~((1u<<touch_capacity())-1u))return false;
+        for(unsigned slot=0;slot<touch_capacity();slot++)
+            if((mask&(1u<<slot)) && (next[slot].x>=io.width || next[slot].y>=io.height))return false;
+        touch_next=touch_count=0;
+        for(unsigned slot=0;slot<touch_capacity();slot++) {
+            bool was=(contact_mask&(1u<<slot))!=0, now=(mask&(1u<<slot))!=0;
+            uint32_t action;
+            if(now) {
+                action=was?ASTER_TOUCH_MOVE:ASTER_TOUCH_DOWN;
+                if(was && next[slot].x==contacts[slot].x && next[slot].y==contacts[slot].y)continue;
+                contacts[slot]=next[slot];
+            } else {
+                if(!was)continue;
+                action=ASTER_TOUCH_UP;
+            }
+            actions[slot]=action;
+            aster_event_t *out=&touch_queue[touch_count++];
+            memset(out,0,sizeof(*out));out->size=sizeof(*out);out->version=1;out->type=ASTER_EVENT_TOUCH;
+            out->u.touch.x=contacts[slot].x;out->u.touch.y=contacts[slot].y;
+            out->u.touch.action=action;out->u.touch.slot=slot;
+        }
+        contact_mask=(uint32_t)mask;
+        if(!touch_count)return false;
     }
-    memset(event, 0, sizeof(*event));
-    event->size=sizeof(*event); event->version=1; event->type=ASTER_EVENT_TOUCH;
-    event->u.touch.x=touch_x; event->u.touch.y=touch_y;
-    event->u.touch.action=touch_action; event->u.touch.slot=0;
+    *event=touch_queue[touch_next++];delivered_mask=contact_mask;
     return true;
 }
 
 static int32_t touch(wasm_exec_env_t env, uint32_t off, uint32_t max)
 {
-    if (!io.touch || !max || !down) return 0;
-    aster_event_t event={0};event.u.touch.x=touch_x;event.u.touch.y=touch_y;aster_idf_map_touch(&event);
-    aster_touch_point_t value = {event.u.touch.x, event.u.touch.y, touch_action};
-    void *dst=guest(INST, off, sizeof(value));
-    if (!dst) return ASTER_EINVAL;
-    memcpy(dst, &value, sizeof(value));
-    return 1;
+    if (!has_touch() || !max || !contact_mask) return 0;
+    aster_touch_point_t values[ASTER_IDF_MAX_TOUCH];unsigned count=0;
+    for(unsigned slot=0;slot<touch_capacity() && count<max;slot++) {
+        if(!(contact_mask&(1u<<slot)))continue;
+        aster_event_t event={0};event.u.touch.x=contacts[slot].x;event.u.touch.y=contacts[slot].y;
+        aster_idf_map_touch(&event);
+        values[count++]=(aster_touch_point_t){event.u.touch.x,event.u.touch.y,actions[slot]};
+    }
+    void *dst=guest(INST,off,count*sizeof(values[0]));if(!dst)return ASTER_EINVAL;
+    memcpy(dst,values,count*sizeof(values[0]));return count;
 }
 
 void aster_idf_graphics_cleanup(wasm_module_inst_t instance)
@@ -249,7 +279,7 @@ void aster_idf_graphics_cleanup(wasm_module_inst_t instance)
     if (surface.handle) wasm_runtime_module_free(instance, surface.pixels);
     free(scaled_pixels);scaled_pixels=NULL;
     memset(&surface, 0, sizeof(surface));
-    down=false; touch_action=0;
+    aster_idf_graphics_reset_touch();
 #ifdef ESP_PLATFORM
     aster_gfx_drop_all();
 #endif

@@ -18,6 +18,7 @@
 #include "aster_idf_runtime.h"
 #include "aster_idf_wifi.h"
 #include "aster_idf_apps.h"
+#include "transfer.h"
 #include <string.h>
 #include "esp_log.h"
 #include "esp_check.h"
@@ -67,6 +68,7 @@ static const char *TAG = "EXAMPLE";
 static esp_lcd_panel_handle_t lcd_panel = NULL;
 static esp_lcd_panel_io_handle_t io_handle = NULL;
 static esp_lcd_touch_handle_t touch_handle = NULL;
+static esp_lcd_panel_io_handle_t touch_io;
 static const uint8_t *scanout;
 static const uint8_t *capture_scanout(void) {return scanout;}
 
@@ -321,6 +323,7 @@ static esp_err_t app_touch_init(void)
         },
     };
 
+    touch_io=tp_io_handle;
     return esp_lcd_touch_new_i2c_st7123(tp_io_handle, &tp_cfg, &touch_handle);
 }
 
@@ -346,15 +349,23 @@ static int present_pixels(const uint8_t *pixels, uint32_t x, uint32_t y,
     return 0;
 }
 
-static int read_touch(uint32_t *x, uint32_t *y)
+/* ST7123 protocol: five fixed 7-byte records at 0x0014..0x0036.
+ * Keep their indices: the generic driver compacts valid points and loses IDs.
+ * Read through the LAST supported record to acknowledge the controller frame. */
+static int read_touch_frame(aster_idf_touch_point_t points[ASTER_IDF_MAX_TOUCH])
 {
-    if (esp_lcd_touch_read_data(touch_handle) != ESP_OK) return -1;
-    uint16_t tx, ty, strength;
-    uint8_t count=0;
-    if (!esp_lcd_touch_get_coordinates(touch_handle, &tx, &ty, &strength, &count, 1)) return 0;
-    if (!count) return 0;
-    *x=tx; *y=ty;
-    return 1;
+    uint8_t report[4+7*ASTER_IDF_MAX_TOUCH];
+    if(esp_lcd_panel_io_rx_param(touch_io,0x0010,report,sizeof(report))!=ESP_OK)return -1;
+    if(!(report[0]&0x08))return -1; /* No updated coordinates, retain last state. */
+    int mask=0;
+    for(unsigned slot=0;slot<ASTER_IDF_MAX_TOUCH;slot++) {
+        const uint8_t *p=report+4+slot*7;
+        if(!(p[0]&0x80))continue;
+        points[slot].x=((uint32_t)(p[0]&0x3f)<<8)|p[1];
+        points[slot].y=((uint32_t)p[2]<<8)|p[3];
+        mask|=1u<<slot;
+    }
+    return mask;
 }
 
 /* Experimental board bring-up plus the core Aster lifecycle subset. */
@@ -384,7 +395,8 @@ void app_main(void)
         ESP_LOGW(TAG, "Touch unavailable: %s; display remains available", esp_err_to_name(ret));
     aster_idf_io_t io = {
         .width=480, .height=480, .present=present_pixels,
-        .touch=ret == ESP_OK ? read_touch : NULL,
+        .touch_frame=ret == ESP_OK ? read_touch_frame : NULL,
+        .max_touch_points=ASTER_IDF_MAX_TOUCH,
     };
     /* The runtime owns touch reads; do not poll the controller from app_main. */
     aster_idf_set_io(&io);
@@ -392,7 +404,7 @@ void app_main(void)
     if(esp_lcd_dpi_panel_get_frame_buffer(lcd_panel,1,&frame)==ESP_OK) {
         scanout=frame;aster_idf_set_capture(capture_scanout);
     }
-    ESP_LOGI(TAG, "Aster RGB565 display ready; touch=%s", io.touch ? "ready" : "unavailable");
+    ESP_LOGI(TAG, "Aster RGB565 display ready; touch=%s", io.touch_frame ? "ready (5 points)" : "unavailable");
     osptek_storage_start();
     extern int aster_idf_audio_start(void);
     int audio=aster_idf_audio_start();
@@ -401,4 +413,6 @@ void app_main(void)
     if(apps)ESP_LOGE(TAG,"Application worker unavailable: %d",apps);
     aster_idf_set_app_command(aster_idf_apps_command);
     aster_idf_network_start();
+    int transfer=aster_idf_transfer_register();
+    if(transfer)ESP_LOGW(TAG,"Serial package transfer unavailable: %d",transfer);
 }

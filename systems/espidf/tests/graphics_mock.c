@@ -35,7 +35,7 @@ static int touch(uint32_t *x,uint32_t *y)
 int main(int argc,char **argv)
 {
     if (argc!=2) return 2;
-    const aster_idf_io_t io={480,480,present,touch};
+    const aster_idf_io_t io={.width=480,.height=480,.present=present,.touch=touch};
     aster_idf_set_io(&io);
     for (int run=0;run<2;++run) {
         calls=reads=mismatch=0;
