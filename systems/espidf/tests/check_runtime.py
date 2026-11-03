@@ -48,9 +48,9 @@ def main():
         (out / "esp_log.h").write_text('#include <stdio.h>\n#define ESP_LOG_INFO 3\n#define ESP_LOGI(tag,...) ((void)(tag),fprintf(stderr,__VA_ARGS__))\n#define ESP_LOGW ESP_LOGI\n#define ESP_LOGE ESP_LOGI\n#define ESP_LOGD ESP_LOGI\n')
         heap=out / "esp_heap_caps.h"
         heap.write_text(heap.read_text()+"\n#define MALLOC_CAP_INTERNAL 4\n#define MALLOC_CAP_DMA 8\n")
-        includes=[render_root/"compat",ui,ROOT/"systems/zephyr/core",ROOT/"systems/zephyr/services",
+        includes=[ROOT/"common/include",ROOT/"common/package",ROOT/"common/net",render_root/"compat",ui,ROOT/"systems/zephyr/core",ROOT/"systems/zephyr/services",
                   ROOT/"modules/prettypoly",ROOT/"platform",img,lv,lv/"src"]
-        sources=[render_root/"port.c"]+[ROOT/"systems/zephyr/services"/name for name in ("aster_pkg.c","aster_app_mgr.c","aster_versions.c","aster_storage.c","aster_sig.c","aster_kv.c")]+[ui/name for name in ("ui_gfx.c","pp_gfx.c","font_sd.c","ui_font.c","flux_draw.c")]
+        sources=[ROOT/"common/package/aster_pkg_decode.c",render_root/"port.c"]+[ROOT/"systems/zephyr/services"/name for name in ("aster_pkg.c","aster_app_mgr.c","aster_versions.c","aster_storage.c","aster_sig.c","aster_kv.c")]+[ui/name for name in ("ui_gfx.c","pp_gfx.c","font_sd.c","ui_font.c","flux_draw.c")]
         sources += [img/name for name in ("imgdec.c","imgdec_png.c","imgdec_jpg.c","vendor/miniz.c","vendor/tjpgd.c")]
         sources += [f for f in (lv/"src").rglob("*.c") if not any(n in f.relative_to(lv/"src").parts for n in ("libs","uefi","rtthread","micropython"))]
         sources += [lv/"src/libs/bin_decoder/lv_bin_decoder.c",lv/"src/libs/rle/lv_rle.c"]

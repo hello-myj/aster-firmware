@@ -11,6 +11,7 @@ target_sources(app PRIVATE
 	aster_file_svc.c
 	aster_sig.c
 	aster_time.c
+    ${ASTER_COMMON_PACKAGE_SOURCES}
 )
 
 if(CONFIG_ASTER_NET)
@@ -26,18 +27,18 @@ if(CONFIG_ASTER_NET_POOL_MONITOR)
 endif()
 
 if(CONFIG_ASTER_HTTP)
-  target_sources(app PRIVATE aster_http.c aster_http_codec.c)
+  target_sources(app PRIVATE aster_http.c ${ASTER_COMMON_HTTP_SOURCES})
 endif()
 if(CONFIG_ASTER_HTTP_TLS)
   target_sources(app PRIVATE aster_http_tls.c)
 endif()
 
 if(CONFIG_ASTER_MQTT)
-  target_sources(app PRIVATE aster_mqtt.c aster_mqtt_codec.c)
+  target_sources(app PRIVATE aster_mqtt.c ${ASTER_COMMON_MQTT_SOURCES})
 endif()
 
 if(CONFIG_ASTER_WEBSOCKET)
-  target_sources(app PRIVATE aster_ws.c aster_ws_codec.c)
+  target_sources(app PRIVATE aster_ws.c ${ASTER_COMMON_WS_SOURCES})
 endif()
 
 if(CONFIG_ASTER_MDNS)

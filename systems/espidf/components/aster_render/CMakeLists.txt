@@ -1,3 +1,4 @@
+include(${CMAKE_CURRENT_LIST_DIR}/../../../../common/sources.cmake)
 set(ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../..")
 set(UI "${ROOT}/systems/zephyr/ui")
 set(IMG "${ROOT}/modules/imgdec")
@@ -10,7 +11,7 @@ idf_component_register(SRCS "port.c" "ppa_fill.c" "render_workers.c"
     "${ROOT}/third_party/lvgl/src/libs/bin_decoder/lv_bin_decoder.c"
     "${ROOT}/third_party/lvgl/src/libs/rle/lv_rle.c"
     "${IMG}/vendor/tjpgd.c" "${IMG}/vendor/miniz.c" ${LV_SOURCES}
-    INCLUDE_DIRS "." "compat" "${UI}" "${ROOT}/contract/include" "${ROOT}/platform"
+    INCLUDE_DIRS ${ASTER_COMMON_INCLUDE_DIRS} "." "compat" "${UI}" "${ROOT}/contract/include" "${ROOT}/platform"
       "${ROOT}/systems/zephyr/core" "${ROOT}/systems/zephyr/services"
       "${ROOT}/modules/prettypoly" "${IMG}" "${ROOT}/third_party/lvgl" "${ROOT}/third_party/lvgl/src"
     REQUIRES esp_timer heap log esp_driver_ppa)

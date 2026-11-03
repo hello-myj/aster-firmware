@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 class OldPackages(unittest.TestCase):
  def test_real_parser_accepts_frozen_ast_and_rejects_wrong_version(self):
   pkg=(ROOT/'systems/zephyr/services/aster_pkg.c').read_text()
-  impl=pkg[pkg.index('static bool in_bounds('):pkg.index('/* Load a whole file into memory */')]
+  impl=pkg[pkg.index('static void package_diagnostic('):pkg.index('/* Load a whole file into memory */')]
   source=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -18,8 +18,8 @@ class OldPackages(unittest.TestCase):
 #include "aster_bytes.h"
 #define k_malloc malloc
 #define k_free free
-#define LOG_ERR(...) ((void)0)
-#define LOG_WRN(...) ((void)0)
+#define LOG_ERR(...) ((void)fprintf(stderr,__VA_ARGS__))
+#define LOG_WRN(...) ((void)fprintf(stderr,__VA_ARGS__))
 #define CONFIG_ASTER_TARGET_ID "xtensa"
 static bool aster_sysinfo_feature_by_name(const char *name) {(void)name;return true;}
 ''' + impl + r'''
@@ -36,7 +36,7 @@ int main(int argc,char **argv) {
 '''
   with tempfile.TemporaryDirectory() as d:
    c=Path(d)/'parse.c';exe=Path(d)/'parse';c.write_text(source)
-   result=subprocess.run(['cc','-std=c11','-Werror','-Wall','-Wextra','-I'+str(ROOT/'contract/include'),'-I'+str(ROOT/'systems/zephyr/services'),'-I'+str(ROOT/'systems/zephyr/core'),str(c),'-o',str(exe)],text=True,capture_output=True)
+   result=subprocess.run(['cc','-std=c11','-Werror','-Wall','-Wextra','-I'+str(ROOT/'contract/include'),'-I'+str(ROOT/'systems/zephyr/services'), '-I'+str(ROOT/'common/include'), '-I'+str(ROOT/'common/package'), '-I'+str(ROOT/'common/net'),'-I'+str(ROOT/'systems/zephyr/core'),str(c),str(ROOT/'common/package/aster_pkg_decode.c'),'-o',str(exe)],text=True,capture_output=True)
    self.assertEqual(result.returncode,0,result.stderr)
    base=ROOT/'tests/fixtures/compatibility';items=json.loads((base/'manifest.json').read_text())['packages']
    paths=[str(base/i['file']) for i in items]

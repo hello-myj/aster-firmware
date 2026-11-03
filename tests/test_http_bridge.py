@@ -16,9 +16,9 @@ class HttpBridge(unittest.TestCase):
                 '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-g',
                 '-I' + str(ROOT/'tests'), '-I' + str(ROOT/'contract/include'),
                 '-I' + str(ROOT/'systems/zephyr/core'),
-                '-I' + str(ROOT/'systems/zephyr/services'),
+                '-I' + str(ROOT/'systems/zephyr/services'), '-I'+str(ROOT/'common/include'), '-I'+str(ROOT/'common/package'), '-I'+str(ROOT/'common/net'),
                 str(ROOT/'tests/http_bridge_host.c'),
-                str(ROOT/'systems/zephyr/services/aster_http_codec.c'),
+                str(ROOT/'common/net/aster_http_codec.c'),
                 '-o', exe], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             result = subprocess.run([exe], capture_output=True, text=True, timeout=20)

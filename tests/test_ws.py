@@ -11,8 +11,8 @@ class WebSocketTests(unittest.TestCase):
             binary=str(pathlib.Path(folder)/'websocket')
             args=['cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined']
             if tls:args+=['-DASTER_WS_TLS_TEST=1']
-            args+=['-I'+str(ROOT/'tests'),'-I'+str(ROOT/'systems/zephyr/core'),'-I'+str(ROOT/'systems/zephyr/services'),str(ROOT/'tests'/source),str(ROOT/'systems/zephyr/services/aster_http_codec.c')]
-            if source=='ws_codec_host.c':args+=[str(ROOT/'systems/zephyr/services/aster_ws_codec.c')]
+            args+=['-I'+str(ROOT/'tests'),'-I'+str(ROOT/'systems/zephyr/core'),'-I'+str(ROOT/'systems/zephyr/services'), '-I'+str(ROOT/'common/include'), '-I'+str(ROOT/'common/package'), '-I'+str(ROOT/'common/net'),str(ROOT/'tests'/source),str(ROOT/'common/net/aster_http_codec.c')]
+            if source=='ws_codec_host.c':args+=[str(ROOT/'common/net/aster_ws_codec.c')]
             if source=='ws_bridge_host.c':args+=['-I'+str(ROOT/'contract/include')]
             result=subprocess.run(args+['-o',binary],capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stderr)

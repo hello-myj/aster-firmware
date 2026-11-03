@@ -9,11 +9,12 @@ from test_waveshare import ROOT, run_c
 class InstallIO(unittest.TestCase):
     def program(self):
         pkg = (ROOT / 'systems/zephyr/services/aster_pkg.c').read_text()
-        header = (ROOT / 'systems/zephyr/services/aster_pkg.h').read_text()
+        header = (ROOT / 'common/package/aster_pkg_format.h').read_text()
+        decode = (ROOT / 'common/package/aster_pkg_decode.c').read_text()
         manager = (ROOT / 'systems/zephyr/services/aster_app_mgr.c').read_text()
         manifest = header[header.index('typedef struct {'):header.index('} aster_manifest_t;') + len('} aster_manifest_t;')]
-        bounds = pkg[pkg.index('static bool in_bounds('):pkg.index('int aster_pkg_parse(')]
-        installer = pkg[pkg.index('static int json_string_field('):].split('\n#endif /* !ASTER_PKG_PARSER_ONLY */')[0]
+        bounds = decode[decode.index('bool aster_pkg_in_bounds('):decode.index('int aster_pkg_decode(')]
+        installer = pkg[pkg.index('static int json_string_field('):]
         reader = manager[manager.index('static int read_manifest_at('):manager.index('/* Record fields')]
         version_header = (ROOT / 'systems/zephyr/services/aster_versions.h').read_text()
         version_header = '\n'.join(line for line in version_header.splitlines() if not line.startswith('#include'))

@@ -32,7 +32,7 @@ static int sys_csrand_get(void *data,size_t n)
 {static unsigned seq;uint8_t *p=data;if(rng_fail)return -EIO;while(n--)*p++=++seq;return 0;}
 #include "../systems/zephyr/services/aster_http.c"
 #include "../systems/zephyr/services/aster_ws.c"
-#include "../systems/zephyr/services/aster_ws_codec.c"
+#include "../common/net/aster_ws_codec.c"
 #include <signal.h>
 #include <netinet/tcp.h>
 #include <stdio.h>

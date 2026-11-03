@@ -6,7 +6,8 @@ from test_waveshare import ROOT, run_c
 class Description(unittest.TestCase):
     def test_json_roundtrip_and_utf8_boundary(self):
         s = (ROOT / 'systems/zephyr/services/aster_pkg.c').read_text()
-        parsing = s[s.index('static const char *find_key'):s.index('int aster_json_u32')]
+        decode = (ROOT / 'common/package/aster_pkg_decode.c').read_text()
+        parsing = decode[decode.index('static const char *find_key'):decode.index('int aster_json_u32')]
         writing = s[s.index('static int json_string_field'):s.index('static int json_arr')]
         run_c(r'''
 #include <assert.h>

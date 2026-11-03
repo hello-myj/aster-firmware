@@ -13,7 +13,7 @@ class MdnsTests(unittest.TestCase):
                     '-Wall', '-Wextra', '-Werror', '-g', '-fsanitize=address,undefined',
                     '-I' + str(ROOT / 'tests'),
                     '-I' + str(ROOT / 'systems/zephyr/core'),
-                    '-I' + str(ROOT / 'systems/zephyr/services'),
+                    '-I' + str(ROOT / 'systems/zephyr/services'), '-I'+str(ROOT/'common/include'), '-I'+str(ROOT/'common/package'), '-I'+str(ROOT/'common/net'),
                     '-I' + str(ROOT / 'contract/include'),
                     str(ROOT / 'tests' / source)]
             result = subprocess.run(args + ['-o', binary], capture_output=True, text=True)

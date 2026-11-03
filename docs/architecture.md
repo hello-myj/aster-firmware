@@ -8,7 +8,15 @@
 
 接口使用 `aster_*` 和固定宽度 ABI 类型。命名空间、产品身份和固定宽度标识都已改为 Aster：ASTP 包、ASTI 图标、ASTR 资源块、ASTERFS 文件传输协议。旧 MJX 拼写一律不再接受（改名前的包和固件互相拒绝），旧 APP 需重新编译。当前 ABI 为 4.3.0。网络传输只有 `aster_net_info`、`aster_net_open`、`aster_net_io`、`aster_net_status`、`aster_net_cancel`、`aster_net_close` 六个导入；3.x 包会被拒绝。
 
-## 内部动态内存
+## 公共核心与系统后端
+
+`common/` 是 IDF 与 Zephyr 共用的内部核心，当前包含包/清单解析、HTTP/MQTT/WebSocket 编解码和字节序工具。公共代码仅依赖标准 C、ABI 契约及显式传入的端口回调，不包含 Zephyr、FreeRTOS 或 ESP-IDF 头文件。两个构建系统读取 `common/sources.cmake`，不复制公共实现。
+
+包解析的 `aster_pkg_policy_t` 由后端提供目标架构、ABI、分配器、能力查询和日志回调。因此相同解析器既可检查 P4 的 RISC-V 包，也可检查 lckfb 的 Xtensa 包。APP ABI 和安装布局保持不变。
+
+提取正在分阶段进行：安装事务、版本/注册表、网络服务状态机及 UI 中仍有两边复用但位于 `systems/zephyr` 的实现。它们尚未全部变成独立公共模块；下一步应先定义文件系统、同步、时钟和显示提交端口，再迁移相应逻辑。具体边界见 `common/README.md`。
+
+## 内部动态内存与运行时
 
 两款 ESP32-S3 板的内核堆为 96 KiB，位于 SRAM 尾部；其余区域交给 libc `malloc`。`aster sys mem` 分别报告内核堆和 libc 堆。WAMR、APP 线性内存和 LVGL 主池使用 PSRAM。网络传输使用六个导入：`aster_net_info`、`aster_net_open`、`aster_net_io`、`aster_net_status`、`aster_net_cancel`、`aster_net_close`。
 
@@ -30,9 +38,11 @@
 - `hardware/*.json`：各板卡公开属性和固件私有构建映射。
 - `boards/`：设备树定义物理接线及屏幕两种硬件窗口，不按运行模式拆固件。
 - `platform/`：统一 HAL 和各硬件端口，声明不依赖操作系统头文件。
+- `common/`：不依赖操作系统的包解析、协议编解码及基础工具。
 - `systems/zephyr/`：完整设备服务、桌面与 WAMR 适配，明确隔离 Zephyr 依赖。
+- `systems/espidf/`：P4 的 IDF/FreeRTOS 运行时、外设和系统服务适配；部分待提取服务仍复用 Zephyr 目录下的源码。
 
-项目 menuconfig 独立运行，配置先于 Zephyr 的设备树与 Kconfig 处理阶段读取。这样系统/板卡选择可以确定底层构建环境，用户不必再传 board、target 或朝向 overlay。固件 build/flash 入口始终相同。
+Zephyr 的项目 menuconfig 独立运行，配置先于设备树与 Kconfig 处理阶段读取。用户不必再传 board、target 或朝向 overlay；这些板卡共用 `tools/firmware.py` 的 build/flash 入口。P4 当前使用下述独立 IDF 入口。
 
 ## 运行期显示切换
 
@@ -46,7 +56,7 @@
 
 新增实体硬件时，添加 menuconfig 的硬件选项及 `hardware/` 映射；需要新驱动时增加 `platform/<port>/` 和其 Kconfig/CMake，实现同一个 HAL。相同硬件的屏幕工作模式不得添加成硬件型号。
 
-新增实际运行系统时，在 menuconfig 增加系统选项，增加对应构建适配和 `systems/<system>/` 的服务/ABI 实现。当前正式固件只实现 Zephyr；不能把尚未完成的后端列为受支持设备。
+新增实际运行系统时，增加对应构建适配和 `systems/<system>/` 的服务/ABI 实现。当前 lckfb 等 S3 板走根目录 Zephyr 构建；P4 使用 `boards/osptek_p4/idf` 独立 IDF 工程及 `tools/bringup.py osptek-p4 build` 入口，尚未纳入统一 menuconfig 硬件清单。两者通过公共 ABI 和核心逻辑保持应用语义一致。
 
 `systems/posix/` 只是用于在 Linux x86_64 上验证核心 ABI 和 APP 生命周期的开发工具，不列入硬件清单，不是第二款固件，也不宣称完整硬件模拟。
 

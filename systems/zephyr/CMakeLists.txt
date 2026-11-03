@@ -1,4 +1,6 @@
 # Zephyr service implementations: kernel/filesystem/UI/runtime integration.
+include(${ASTER_ROOT}/common/sources.cmake)
+target_include_directories(app PRIVATE ${ASTER_COMMON_INCLUDE_DIRS})
 add_subdirectory(core)
 add_subdirectory(services)
 add_subdirectory(shell)

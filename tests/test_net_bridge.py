@@ -12,6 +12,6 @@ class NetworkBridge(unittest.TestCase):
             subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-g',
                 '-I'+str(ROOT/'tests'), '-I'+str(ROOT/'contract/include'),
-                '-I'+str(ROOT/'systems/zephyr/core'), '-I'+str(ROOT/'systems/zephyr/services'),
+                '-I'+str(ROOT/'systems/zephyr/core'), '-I'+str(ROOT/'systems/zephyr/services'), '-I'+str(ROOT/'common/include'), '-I'+str(ROOT/'common/package'), '-I'+str(ROOT/'common/net'),
                 str(ROOT/'tests/net_bridge_host.c'), '-o', exe], check=True)
             subprocess.run([exe], check=True, timeout=20)

@@ -13,10 +13,10 @@ class MqttBridgeTests(unittest.TestCase):
                 *(['-DASTER_MQTT_TLS_TEST=1'] if tls else []),
                 '-I' + str(ROOT / 'tests'), '-I' + str(ROOT / 'contract/include'),
                 '-I' + str(ROOT / 'systems/zephyr/core'),
-                '-I' + str(ROOT / 'systems/zephyr/services'),
+                '-I' + str(ROOT / 'systems/zephyr/services'), '-I'+str(ROOT/'common/include'), '-I'+str(ROOT/'common/package'), '-I'+str(ROOT/'common/net'),
                 str(ROOT / 'tests/mqtt_bridge_host.c'),
-                str(ROOT / 'systems/zephyr/services/aster_http_codec.c'),
-                str(ROOT / 'systems/zephyr/services/aster_mqtt_codec.c'),
+                str(ROOT / 'common/net/aster_http_codec.c'),
+                str(ROOT / 'common/net/aster_mqtt_codec.c'),
                 '-o', binary], capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stderr)
             result = subprocess.run([binary], capture_output=True, text=True, timeout=45)

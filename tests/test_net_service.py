@@ -15,6 +15,8 @@ class NetServiceTests(unittest.TestCase):
                 '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
                 '-I' + str(ROOT / 'tests'),
                 '-I' + str(ROOT / 'systems/zephyr/core'),
+                '-I' + str(ROOT / 'common/include'),
+                '-I' + str(ROOT / 'common/net'),
                 str(ROOT / 'tests/net_service_host.c'), '-o', binary,
             ], check=True, capture_output=True, text=True)
             result = subprocess.run([binary], check=True, capture_output=True,
