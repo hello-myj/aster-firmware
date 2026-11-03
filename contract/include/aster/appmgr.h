@@ -47,4 +47,13 @@ ASTER_I("aster_appmgr_start") int32_t aster_appmgr_start(const char *id, uint32_
 ASTER_I("aster_appmgr_uninstall") int32_t aster_appmgr_uninstall(const char *id,
 							   uint32_t id_len);
 
+/* ABI 4.3. Requires appmgr + fs + kv. Both paths are in the caller's /data.
+ * Close all download files first. Accepting the request cleanly exits the
+ * caller; installation runs after VM teardown and then reopens the caller.
+ * Resources are a directory tree copied into the inactive code slot's assets
+ * before committing it. KV "store.install.result" receives the int32 result.
+ * Self-update is rejected. A failed install leaves the prior slot active. */
+ASTER_I("aster_appmgr_install") int32_t aster_appmgr_install(const char *package, uint32_t package_len,
+    const char *resources, uint32_t resources_len);
+
 #endif /* ASTER_APPMGR_H */

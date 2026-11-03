@@ -15,6 +15,8 @@
 #include "esp_cache.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
+#include <stdio.h>
 #include "aster_idf_runtime.h"
 #include "aster_idf_wifi.h"
 #include "aster_idf_apps.h"
@@ -54,7 +56,7 @@
 
 /* Touch settings */
 #define EXAMPLE_TOUCH_I2C_NUM       (1)
-#define EXAMPLE_TOUCH_I2C_CLK_HZ    (100000)
+#define EXAMPLE_TOUCH_I2C_CLK_HZ    (CONFIG_ASTER_P4_TOUCH_I2C_HZ)
 
 /* LCD touch pins */
 #define EXAMPLE_TOUCH_I2C_SCL       (CONFIG_ASTER_P4_TOUCH_SCL_GPIO)
@@ -153,6 +155,22 @@ static const st7102_lcd_init_cmd_t lcd_init_cmds[] = {
 
 static SemaphoreHandle_t lcd_copy_done;
 static bool lcd_dma2d;
+static DRAM_ATTR uint32_t panel_scans;
+static uint32_t scan_start,touch_reads,touch_idle,touch_errors;
+static int64_t scan_since;
+static bool IRAM_ATTR lcd_refresh_done(esp_lcd_panel_handle_t panel,esp_lcd_dpi_panel_event_data_t *event,void *user)
+{(void)panel;(void)event;(void)user;__atomic_fetch_add(&panel_scans,1,__ATOMIC_RELAXED);return false;}
+static void display_perf_reset(void)
+{scan_start=__atomic_load_n(&panel_scans,__ATOMIC_RELAXED);scan_since=esp_timer_get_time();touch_reads=touch_idle=touch_errors=0;}
+static void display_perf_report(void)
+{
+    uint32_t scans=__atomic_load_n(&panel_scans,__ATOMIC_RELAXED)-scan_start;
+    uint64_t elapsed=esp_timer_get_time()-scan_since;
+    printf("LCD SCAN hz_x10=%llu scans=%lu elapsed_ms=%llu touch_i2c_hz=%u reads=%lu idle_skip=%lu errors=%lu\n",
+        (unsigned long long)(elapsed?(uint64_t)scans*10000000/elapsed:0),(unsigned long)scans,
+        (unsigned long long)(elapsed/1000),(unsigned)EXAMPLE_TOUCH_I2C_CLK_HZ,
+        (unsigned long)touch_reads,(unsigned long)touch_idle,(unsigned long)touch_errors);
+}
 static bool IRAM_ATTR lcd_copy_complete(esp_lcd_panel_handle_t panel,
                                       esp_lcd_dpi_panel_event_data_t *event,void *user)
 {
@@ -222,7 +240,7 @@ static esp_err_t app_lcd_init(void)
             .hsync_front_porch = 120,                         \
             .vsync_back_porch = 8,                            \
             .vsync_pulse_width = 4,                           \
-            .vsync_front_porch = 200,                         \
+            .vsync_front_porch = CONFIG_ASTER_P4_LCD_VFP,                         \
         },                                                    \
                                       \
     };
@@ -247,12 +265,12 @@ static esp_err_t app_lcd_init(void)
     ESP_GOTO_ON_ERROR(esp_lcd_panel_init(lcd_panel), err, TAG, "LCD init failed");
     lcd_copy_done=xSemaphoreCreateBinary();
     if(lcd_copy_done) {
-        const esp_lcd_dpi_panel_event_callbacks_t callbacks={.on_color_trans_done=lcd_copy_complete};
+        const esp_lcd_dpi_panel_event_callbacks_t callbacks={.on_color_trans_done=lcd_copy_complete,.on_refresh_done=lcd_refresh_done};
         esp_err_t accelerated=esp_lcd_dpi_panel_register_event_callbacks(lcd_panel,&callbacks,NULL);
         if(accelerated==ESP_OK)accelerated=esp_lcd_dpi_panel_enable_dma2d(lcd_panel);
         lcd_dma2d=accelerated==ESP_OK;
         if(!lcd_dma2d) {
-            const esp_lcd_dpi_panel_event_callbacks_t none={0};
+            const esp_lcd_dpi_panel_event_callbacks_t none={.on_refresh_done=lcd_refresh_done};
             esp_lcd_dpi_panel_register_event_callbacks(lcd_panel,&none,NULL);
             ESP_LOGW(TAG,"DMA2D unavailable (%s); CPU copy retained",esp_err_to_name(accelerated));
         } else ESP_LOGI(TAG,"DMA2D framebuffer copy enabled");
@@ -354,8 +372,9 @@ static int present_pixels(const uint8_t *pixels, uint32_t x, uint32_t y,
  * Read through the LAST supported record to acknowledge the controller frame. */
 static int read_touch_frame(aster_idf_touch_point_t points[ASTER_IDF_MAX_TOUCH])
 {
-    uint8_t report[4+7*ASTER_IDF_MAX_TOUCH];
-    if(esp_lcd_panel_io_rx_param(touch_io,0x0010,report,sizeof(report))!=ESP_OK)return -1;
+    if(gpio_get_level(EXAMPLE_TOUCH_INT)){touch_idle++;return -1;}
+    uint8_t report[4+7*ASTER_IDF_MAX_TOUCH];touch_reads++;
+    if(esp_lcd_panel_io_rx_param(touch_io,0x0010,report,sizeof(report))!=ESP_OK){touch_errors++;return -1;}
     if(!(report[0]&0x08))return -1; /* No updated coordinates, retain last state. */
     int mask=0;
     for(unsigned slot=0;slot<ASTER_IDF_MAX_TOUCH;slot++) {
@@ -393,10 +412,16 @@ void app_main(void)
     esp_err_t ret = app_touch_init();
     if (ret != ESP_OK)
         ESP_LOGW(TAG, "Touch unavailable: %s; display remains available", esp_err_to_name(ret));
+    static const aster_system_info_t identity={
+        .platform="esp-idf",.board="osptek-p4-st7102",.soc="esp32p4",
+        .cpu_arch=ASTER_ARCH_RISCV,.cpu_freq_hz=400000000,.cpu_count=2,
+        .ram_internal=768*1024,.ram_external=32*1024*1024,.flash_size=16*1024*1024,
+    };
     aster_idf_io_t io = {
-        .width=480, .height=480, .present=present_pixels,
+        .width=480, .height=480, .present=present_pixels,.system_info=&identity,
         .touch_frame=ret == ESP_OK ? read_touch_frame : NULL,
         .max_touch_points=ASTER_IDF_MAX_TOUCH,
+        .display_perf_reset=display_perf_reset,.display_perf_report=display_perf_report,
     };
     /* The runtime owns touch reads; do not poll the controller from app_main. */
     aster_idf_set_io(&io);

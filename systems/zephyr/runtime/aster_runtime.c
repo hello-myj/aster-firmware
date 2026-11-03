@@ -1234,6 +1234,9 @@ static void worker_fn(void *p1, void *p2, void *p3)
 
 		current = NULL;
 		k_sem_give(&worker_done);
+        if(aster_app_mgr_finish_install(id,!crashed)) {
+            if(!crashed && aster_runtime_launch_async(id)==ASTER_OK)continue;
+        }
 
 		/* ABI 1.2 launch policy: handoff target or home UI, deferred
 		 * to sysworkq (worker cannot launch itself). After the give so

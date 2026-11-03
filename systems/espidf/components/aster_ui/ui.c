@@ -15,6 +15,7 @@
 #include "flux_draw.h"
 #ifndef ASTER_IDF_HOST_TEST
 #include "ppa_fill.h"
+#include "render_workers.h"
 #endif
 #include <stdatomic.h>
 #include <stdio.h>
@@ -33,9 +34,11 @@ static struct {
 static uint64_t bench_warm,bench_end,bench_step;
 static void perf_reset(void)
 {
+    aster_idf_graphics_perf_reset();
     memset(&perf,0,sizeof(perf));perf.since=esp_timer_get_time();aster_flux_draw_time_reset();
 #ifndef ASTER_IDF_HOST_TEST
     aster_idf_ppa_fill_reset();
+    aster_idf_render_workers_reset();
 #endif
 }
 static void perf_print(void)
@@ -51,9 +54,11 @@ static void perf_print(void)
            (unsigned long long)(perf.frames?perf.render_us/perf.frames:0),(unsigned long)perf.max_render_us,p95,
            (unsigned long long)perf.flush_us,(unsigned long)perf.flushes,(unsigned long long)perf.bytes,
            (unsigned long long)perf.pump_us,(unsigned long)perf.max_pump_us,(unsigned long)aster_flux_draw_time_reset());
+    aster_idf_graphics_perf_report();
     printf("UI ART bakes=%lu hits=%lu inactive_bytes=%lu\n",(unsigned long)bakes,(unsigned long)hits,(unsigned long)cached);
 #ifndef ASTER_IDF_HOST_TEST
     aster_idf_ppa_fill_report();
+    aster_idf_render_workers_report();
 #endif
 }
 static void perf_event(lv_event_t *event)
@@ -100,7 +105,9 @@ static void flush(lv_display_t *d,const lv_area_t *area,uint8_t *pixels)
     if(!app_active || aster_qpanel_app_holds_glass()) {
         uint32_t w=area->x2-area->x1+1,h=area->y2-area->y1+1;
         uint64_t start=esp_timer_get_time();
-        aster_plat_display_write_at(pixels,area->x1,area->y1,w,h,w);
+        uint32_t pitch=lv_display_get_horizontal_resolution(d);
+        const uint8_t *source=pixels+((size_t)area->y1*pitch+area->x1)*2;
+        aster_plat_display_write_at(source,area->x1,area->y1,w,h,pitch);
         perf.flush_us+=esp_timer_get_time()-start;perf.flushes++;perf.bytes+=(uint64_t)w*h*2;
     }
     lv_display_flush_ready(d);
@@ -112,16 +119,16 @@ int aster_ui_lvgl_init(void)
     if(display)return 0;
     extern void aster_idf_render_init(void);aster_idf_render_init();
     aster_display_info_t info;if(aster_plat_display_get_info(0,&info))return ASTER_ENODEV;
-    /* One screen-sized partial buffer avoids replaying the same transformed
-     * cards for twelve short bands. Flush remains synchronous, so a second
-     * draw buffer cannot overlap work and only reserves extra PSRAM. */
+    /* Keep a fixed full-screen stride while drawing only damaged areas.
+     * Cache-aligned rows permit PPA and independent SMP rows even for narrow
+     * damage rectangles. Flush remains synchronous with one owned buffer. */
     size_t bytes=((size_t)info.width*info.height*2+63)&~(size_t)63;
     void *a=heap_caps_aligned_alloc(64,bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     if(!a)return ASTER_ENOMEM;
     display=lv_display_create(info.width,info.height);
     if(!display){free(a);return ASTER_ENOMEM;}
     lv_tick_set_cb(tick);lv_display_set_color_format(display,LV_COLOR_FORMAT_RGB565);
-    lv_display_set_buffers(display,a,NULL,bytes,LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_set_buffers(display,a,NULL,bytes,LV_DISPLAY_RENDER_MODE_DIRECT);
     lv_display_set_flush_cb(display,flush);
     perf_reset();
     lv_display_add_event_cb(display,perf_event,LV_EVENT_RENDER_START,NULL);

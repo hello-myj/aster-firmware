@@ -2688,6 +2688,30 @@ static int32_t n_kv_delete(wasm_exec_env_t env, uint32_t key_off, uint32_t key_l
 }
 
 /* ============ appmgr (ABI 1.2, permission "appmgr") ============ */
+static int32_t n_system_get_info(wasm_exec_env_t env,uint32_t off,uint32_t size)
+{
+    if(size<sizeof(aster_system_info_t))return ASTER_EINVAL;
+    void *out=buf(env,off,sizeof(aster_system_info_t));if(!out)return ASTER_EINVAL;
+    uint32_t header[2];memcpy(header,out,sizeof(header));
+    if(header[0]<sizeof(aster_system_info_t) || header[1]!=1)return ASTER_EINVAL;
+    aster_system_info_t info;aster_sysinfo_get(&info);memcpy(out,&info,sizeof(info));return 0;
+}
+static int32_t n_appmgr_install(wasm_exec_env_t env,uint32_t p,uint32_t pn,uint32_t a,uint32_t an)
+{
+    aster_app_ctx_t *ctx=ctx_of(env);
+    if(!ctx)return ASTER_EBADF;
+    if(!aster_ctx_perm(ctx,ASTER_PERM_APPMGR) || !aster_ctx_perm(ctx,ASTER_PERM_FS) ||
+       !aster_ctx_perm(ctx,ASTER_PERM_KV))return ASTER_EPERM;
+    char package[160],assets[160],real_package[256],real_assets[256];
+    if(app_str(env,p,pn,package,sizeof(package))<0 || app_str(env,a,an,assets,sizeof(assets))<0)
+        return ASTER_EINVAL;
+    if(strncmp(package,"/data/",6) || strncmp(assets,"/data/",6) ||
+       sandbox_map(ctx,package,real_package,sizeof(real_package)) ||
+       sandbox_map(ctx,assets,real_assets,sizeof(real_assets)))return ASTER_EPERM;
+    int r=aster_app_mgr_queue_install(ctx->id,real_package,real_assets);
+    if(!r){ctx->exit_clean=true;ctx->exit_code=0;ctx->quit=true;}
+    return r;
+}
 
 static int32_t n_appmgr_count(wasm_exec_env_t env)
 {
@@ -2820,6 +2844,8 @@ static NativeSymbol syms[] = {
 	{ "aster_appmgr_count", (void *)n_appmgr_count, "()i", NULL },
 	{ "aster_appmgr_list", (void *)n_appmgr_list, "(iii)i", NULL },
 	{ "aster_appmgr_start", (void *)n_appmgr_start, "(ii)i", NULL },
+    { "aster_appmgr_install", (void *)n_appmgr_install, "(iiii)i", NULL },
+    { "aster_system_get_info", (void *)n_system_get_info, "(ii)i", NULL },
 	{ "aster_appmgr_uninstall", (void *)n_appmgr_uninstall, "(ii)i", NULL },
 	{ "aster_audio_get_info", (void *)n_audio_get_info, "(ii)i", NULL },
 	{ "aster_audio_get_lyrics", (void *)n_audio_get_lyrics, "(ii)i", NULL },

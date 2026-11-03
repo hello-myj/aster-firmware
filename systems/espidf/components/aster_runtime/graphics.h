@@ -13,3 +13,6 @@ int aster_idf_display_count(void);
 
 uint32_t aster_idf_touch_mask(void);
 bool aster_idf_touch_pending(void);
+
+void aster_idf_graphics_perf_reset(void);
+void aster_idf_graphics_perf_report(void);

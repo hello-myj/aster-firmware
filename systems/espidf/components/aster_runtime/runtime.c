@@ -142,6 +142,18 @@ static int32_t has_feature(wasm_exec_env_t env, uint32_t bit)
     return aster_idf_feature(bit);
 }
 bool aster_sysinfo_has_feature(uint32_t bit) {return has_feature(NULL,bit)!=0;}
+static int32_t system_info(wasm_exec_env_t env,uint32_t off,uint32_t size)
+{
+    wasm_module_inst_t inst=wasm_runtime_get_module_inst(env);
+    if(size<sizeof(aster_system_info_t) || !off ||
+       !wasm_runtime_validate_app_addr(inst,off,sizeof(aster_system_info_t)))return ASTER_EINVAL;
+    uint32_t header[2];memcpy(header,wasm_runtime_addr_app_to_native(inst,off),sizeof(header));
+    if(header[0]<sizeof(aster_system_info_t) || header[1]!=1)return ASTER_EINVAL;
+    aster_system_info_t info;aster_idf_system_info(&info);
+    info.size=sizeof(info);info.version=1;info.abi_version=ASTER_ABI_VERSION;
+    for(unsigned bit=0;bit<32;bit++)if(has_feature(env,bit))info.feature_flags|=UINT64_C(1)<<bit;
+    memcpy(wasm_runtime_addr_app_to_native(inst,off),&info,sizeof(info));return 0;
+}
 
 static int32_t display_count(wasm_exec_env_t env)
 {
@@ -175,6 +187,7 @@ static void app_log(wasm_exec_env_t env, uint32_t level, uint32_t offset, uint32
 
 static NativeSymbol symbols[] = {
     {"aster_system_get_abi_version", (void *)abi_version, "()i", NULL},
+    {"aster_system_get_info", (void *)system_info, "(ii)i", NULL},
     {"aster_system_has_feature", (void *)has_feature, "(i)i", NULL},
     {"aster_log", (void *)app_log, "(iii)", NULL},
     {"aster_time_now_ms", (void *)now_ms, "()i", NULL},
@@ -249,6 +262,12 @@ static int run_wasm(const char *path,const char *id,uint32_t perms,unsigned fram
         snprintf(identity,sizeof(identity),"%s",manifest.id);
         perms=aster_perm_mask(manifest.permissions,manifest.permissions_n);
         wasm_bytes=(uint8_t *)code;wasm_size=(uint32_t)length;
+    }
+#endif
+#ifdef ASTER_REQUIRE_AOT
+    if(wasm_size<4 || memcmp(wasm_bytes,"\0aot",4)) {
+        fprintf(stderr,"runtime: AOT required; portable WASM execution is disabled\n");
+        free(bytes);return ASTER_EABI;
     }
 #endif
 #ifdef ESP_PLATFORM
@@ -344,6 +363,8 @@ static int run_wasm(const char *path,const char *id,uint32_t perms,unsigned fram
     uint32_t event_offset = (uint32_t)wasm_runtime_module_malloc(instance, sizeof(aster_event_t), &native);
     if (!event_offset) goto cleanup;
     bool paused=false;
+    int64_t next_frame_us=esp_timer_get_time();
+    uint32_t paced_fps=fps, frame_fraction=0;
     for (unsigned frame = 0; (!frame_limit || frame < frame_limit) && !exited && !atomic_load(&stop_requested);) {
         bool want_pause=atomic_load(&pause_requested);
         if(want_pause!=paused) {
@@ -358,7 +379,7 @@ static int run_wasm(const char *path,const char *id,uint32_t perms,unsigned fram
             aster_event_t input;
             if(aster_idf_touch_event(&input) && ui_hooks.touch)ui_hooks.touch(&input);
             if(ui_hooks.tick)ui_hooks.tick();
-            vTaskDelay(pdMS_TO_TICKS(10));continue;
+            vTaskDelay(pdMS_TO_TICKS(10));next_frame_us=esp_timer_get_time();frame_fraction=0;continue;
         }
         aster_event_t *event = wasm_runtime_addr_app_to_native(instance, event_offset);
         memset(event, 0, sizeof(*event));
@@ -405,8 +426,20 @@ static int run_wasm(const char *path,const char *id,uint32_t perms,unsigned fram
         args[0] = event_offset;
         if (!call(instance, env, "aster_app_event", 1, args)) goto cleanup;
         frame++;
-        TickType_t ticks = pdMS_TO_TICKS(1000 / fps);
-        vTaskDelay(ticks ? ticks : 1);
+        /* Pace the entire frame, including guest drawing and DMA submission.
+         * Sleeping a full period AFTER drawing caps a 10 ms scene at ~38 FPS
+         * despite its requested 60. Carry the fractional microseconds rather
+         * than truncating 60 Hz to 16 ms, and drop debt after an overrun. */
+        int64_t now=esp_timer_get_time();
+        if(paced_fps!=fps){paced_fps=fps;next_frame_us=now;frame_fraction=0;}
+        next_frame_us+=1000000/paced_fps;
+        frame_fraction+=1000000%paced_fps;
+        if(frame_fraction>=paced_fps){next_frame_us++;frame_fraction-=paced_fps;}
+        int64_t remaining=next_frame_us-now;
+        if(remaining<=0){next_frame_us=now;frame_fraction=0;}
+        TickType_t ticks=remaining>0?pdMS_TO_TICKS((uint32_t)(remaining/1000)):0;
+        /* Always yield for watchdog/stop handling, including overloaded APPs. */
+        vTaskDelay(ticks?ticks:1);
     }
     wasm_runtime_module_free(instance, event_offset);
     if (!call(instance, env, "aster_app_stop", 0, args)) goto cleanup;

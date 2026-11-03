@@ -87,6 +87,10 @@ bool aster_app_mgr_is_live(const char *id);
 /* Selected slot cached by scan; immutable until a serialized registry change. */
 bool aster_app_mgr_code_slot(const char *id, int *slot);
 int  aster_app_mgr_install(const char *src_path);
+int aster_app_mgr_queue_install(const char *owner,const char *package,const char *resources);
+/* Worker only, after STOPPED/cleanup; returns true when this owner's request
+ * was consumed, including a cancelled request. Stores a durable result. */
+bool aster_app_mgr_finish_install(const char *owner,bool execute);
 int  aster_app_mgr_uninstall(const char *id);
 /* read manifest.json fields into rec (used by scan) */
 int  aster_app_mgr_read_manifest(const char *id, aster_manifest_t *m);

@@ -34,10 +34,6 @@ config ASTER_P4_AUTORUN_DIAGNOSTIC
     help
         Normally boot directly to the desktop. Run the SD root diagnostic
         explicitly with 'aster app diagnostic' when checking the hardware.
-config ASTER_P4_AOT_INTERNAL_RESERVE_KB
-    int "Internal SRAM left available when allocating AOT code (KiB)"
-    range 16 256
-    default 64
 config ASTER_SIGNATURE_VERIFY
     bool "Verify package signatures"
     default n
@@ -49,3 +45,21 @@ config ASTER_VENDOR_PUBKEY
     string "Trusted P-256 public key (130 hexadecimal characters)"
     depends on ASTER_SIGNATURE_VERIFY
     default ""
+
+config ASTER_P4_DUAL_CORE_RENDER
+    bool "Split launcher pixel rows across both HP cores"
+    default y
+    help
+        CPU1 owns LVGL and VM. CPU0 processes disjoint, cache-aligned rows
+        of each ribbon. All jobs join before the next draw or cache release.
+config ASTER_P4_TOUCH_I2C_HZ
+    int "ST7123 I2C clock (Hz)"
+    range 100000 400000
+    default 400000
+config ASTER_P4_LCD_VFP
+    int "LCD vertical front porch (lines)"
+    range 160 240
+    default 182
+    help
+        30 MHz / ((480+140+2+120)*(480+8+4+182)) is about 60 Hz.
+        The reference example uses 200 lines (about 58.4 Hz).

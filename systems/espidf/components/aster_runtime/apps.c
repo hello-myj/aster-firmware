@@ -57,8 +57,24 @@ static int32_t uninstall(wasm_exec_env_t env,uint32_t off,uint32_t len)
 bool aster_idf_take_handoff(char out[64])
 {if(!handoff[0])return false;memcpy(out,handoff,64);handoff[0]=0;return true;}
 void aster_idf_reset_handoff(void) {handoff[0]=0;}
+static int32_t install(wasm_exec_env_t env,uint32_t p,uint32_t pn,uint32_t a,uint32_t an)
+{
+    if(!aster_idf_has_permission(ASTER_PERM_APPMGR) || !aster_idf_has_permission(ASTER_PERM_FS) ||
+       !aster_idf_has_permission(ASTER_PERM_KV))return ASTER_EPERM;
+    const char *package=guest(env,p,pn),*assets=guest(env,a,an);
+    if(!package || !assets || pn<7 || an<7 || pn>=160 || an>=160 ||
+       memchr(package,0,pn) || memchr(assets,0,an) ||
+       memcmp(package,"/data/",6) || memcmp(assets,"/data/",6))return ASTER_EINVAL;
+    char real_package[256],real_assets[256];
+    int r=aster_idf_resolve_path(env,p,pn,false,real_package);if(r)return r;
+    r=aster_idf_resolve_path(env,a,an,false,real_assets);if(r)return r;
+    r=aster_app_mgr_queue_install(aster_idf_app_identity(),real_package,real_assets);
+    if(!r)aster_idf_exit_current(0);
+    return r;
+}
 static NativeSymbol symbols[]={
  {"aster_appmgr_count",(void *)count,"()i",NULL},{"aster_appmgr_list",(void *)list,"(iii)i",NULL},
  {"aster_appmgr_start",(void *)start,"(ii)i",NULL},{"aster_appmgr_uninstall",(void *)uninstall,"(ii)i",NULL},
+ {"aster_appmgr_install",(void *)install,"(iiii)i",NULL},
 };
 NativeSymbol *aster_idf_app_symbols(uint32_t *n) {*n=sizeof(symbols)/sizeof(symbols[0]);return symbols;}

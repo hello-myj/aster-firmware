@@ -797,6 +797,59 @@ static int extract_mjr1(const uint8_t *blob, size_t len, const char *appdir)
 	return ASTER_OK;
 }
 
+static int copy_bundle_file(const char *src,const char *dst,uint32_t size)
+{
+    struct fs_dirent st;
+    if(fs_stat(dst,&st)!=-ENOENT)return ASTER_EEXIST;
+    struct fs_file_t input,output;fs_file_t_init(&input);fs_file_t_init(&output);
+    if(fs_open(&input,src,FS_O_READ))return ASTER_EIO;
+    if(fs_open(&output,dst,FS_O_CREATE|FS_O_WRITE|FS_O_TRUNC)){fs_close(&input);return ASTER_EIO;}
+    uint8_t bytes[2048];int result=0;
+    while(size) {
+        unsigned n=size>sizeof(bytes)?sizeof(bytes):size;
+        int got=fs_read(&input,bytes,n);
+        if(got<=0 || (unsigned)got>n){result=ASTER_EIO;break;}
+        unsigned done=0;
+        while(done<(unsigned)got) {
+            int written=fs_write(&output,bytes+done,(unsigned)got-done);
+            if(written<=0 || (unsigned)written>(unsigned)got-done){result=ASTER_EIO;break;}
+            done+=(unsigned)written;
+        }
+        if(result)break;
+        size-=(unsigned)got;
+    }
+    if(!result && fs_read(&input,bytes,1)!=0)result=ASTER_EIO;
+    if(!result && fs_sync(&output))result=ASTER_EIO;
+    if(fs_close(&input))result=ASTER_EIO;
+    if(fs_close(&output))result=ASTER_EIO;
+    return result;
+}
+static int copy_bundle_tree(const char *src,const char *dst,unsigned depth,unsigned *count,uint64_t *bytes)
+{
+    if(depth>16)return ASTER_EINVAL;
+    if(aster_storage_mkdir_p(dst))return ASTER_EIO;
+    struct fs_dir_t dir;fs_dir_t_init(&dir);
+    if(fs_opendir(&dir,src))return ASTER_EIO;
+    struct fs_dirent ent;int result=0,read;
+    while((read=fs_readdir(&dir,&ent))==0 && ent.name[0]) {
+        if(!strcmp(ent.name,".") || !strcmp(ent.name,"..") ||
+           strchr(ent.name,'/') || strchr(ent.name,'\\') || strchr(ent.name,':')) {result=ASTER_EINVAL;break;}
+        char a[256],b[256];
+        if(snprintf(a,sizeof(a),"%s/%s",src,ent.name)>=(int)sizeof(a) ||
+           snprintf(b,sizeof(b),"%s/%s",dst,ent.name)>=(int)sizeof(b)){result=ASTER_EINVAL;break;}
+        if(ent.type==FS_DIR_ENTRY_DIR)result=copy_bundle_tree(a,b,depth+1,count,bytes);
+        else {
+            (*count)++;*bytes+=ent.size;
+            if(*count>4096 || *bytes>UINT64_C(1073741824)){result=ASTER_EMSGSIZE;break;}
+            result=copy_bundle_file(a,b,ent.size);
+        }
+        if(result)break;
+    }
+    if(read<0)result=ASTER_EIO;
+    if(fs_closedir(&dir))result=ASTER_EIO;
+    return result;
+}
+
 static bool install_id_valid(const char *id)
 {
 	if (!id[0] || strstr(id, "..")) { return false; }
@@ -821,7 +874,7 @@ static void pkg_trace(const char *stage)
 static void pkg_trace(const char *stage) { (void)stage; }
 #endif
 
-static int pkg_install_locked(const char *src_path)
+static int pkg_install_locked(const char *src_path,const char *resources,const char *caller)
 {
 	uint8_t *img = NULL;
 	size_t size = 0;
@@ -850,6 +903,7 @@ static int pkg_install_locked(const char *src_path)
 		aster_psram_free(img);
 		return ASTER_ECORRUPT;
 	}
+    if(caller && !strcmp(caller,m.id)){aster_psram_free(img);return ASTER_EPERM;}
 
 	/* A package carries exactly ONE AOT image, built for one target
 	 * (pack_mja.py writes that id at header offset 36). Whether it matches
@@ -857,7 +911,7 @@ static int pkg_install_locked(const char *src_path)
 	 * manifest's "aot" flag both read it, so they cannot disagree. */
 	bool aot_ok = alen && atarget == CONFIG_ASTER_AOT_TARGET_ID;
 	if (!aot_ok) {
-#ifndef ASTER_SYSTEM_ESP_IDF
+#if !defined(ASTER_SYSTEM_ESP_IDF) || defined(ASTER_REQUIRE_AOT)
 		LOG_ERR("install: %s requires AOT target %u (package target=%u, bytes=%u)",
 			m.id, (unsigned)CONFIG_ASTER_AOT_TARGET_ID, atarget, (unsigned)alen);
 		aster_psram_free(img);
@@ -986,6 +1040,12 @@ static int pkg_install_locked(const char *src_path)
 		}
 	}
 
+    if(resources) {
+        char assets[192];unsigned count=0;uint64_t bytes=0;
+        if(snprintf(assets,sizeof(assets),"%s/assets",appdir)>=(int)sizeof(assets))err=ASTER_EINVAL;
+        else err=copy_bundle_tree(resources,assets,0,&count,&bytes);
+        if(err){aster_psram_free(img);return err;}
+    }
 	/* Normalize the manifest.
 	 *
 	 * The whole line is composed AND validated before the file is created.
@@ -1140,12 +1200,19 @@ static int pkg_install_locked(const char *src_path)
 int aster_pkg_install_file(const char *src_path)
 {
 	aster_app_mgr_files_lock();
-	int err = pkg_install_locked(src_path);
+	int err = pkg_install_locked(src_path,NULL,NULL);
 #ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
 	pkg_fault.active[0] = 0;
 #endif
 	aster_app_mgr_files_unlock();
 	return err;
+}
+
+int aster_pkg_install_bundle_file(const char *src,const char *resources,const char *caller)
+{
+    aster_app_mgr_files_lock();
+    int result=pkg_install_locked(src,resources,caller);
+    aster_app_mgr_files_unlock();return result;
 }
 
 #endif /* !ASTER_PKG_PARSER_ONLY */

@@ -4,6 +4,7 @@
 #include "aster_perms.h"
 #include "aster_storage.h"
 #include "aster_versions.h"
+#include "aster_kv.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -559,4 +560,32 @@ bool aster_app_mgr_find_snapshot(const char *id,aster_app_rec_t *out)
     k_mutex_lock(&reg_lock,K_FOREVER);aster_app_rec_t *r=find_mut(id);
     if(r)*out=*r;
     k_mutex_unlock(&reg_lock);return r!=NULL;
+}
+
+static struct {char owner[64],package[256],resources[256];} pending_install;
+int aster_app_mgr_queue_install(const char *owner,const char *package,const char *resources)
+{
+    if(!owner || !package || !resources || strlen(owner)>=64 ||
+       strlen(package)>=256 || strlen(resources)>=256)return ASTER_EINVAL;
+    aster_app_mgr_files_lock();
+    int r=pending_install.owner[0]?ASTER_EBUSY:0;
+    if(!r) {
+        int initial=ASTER_EAGAIN;
+        if(aster_kv_set(owner,"store.install.result",&initial,sizeof(initial))) {
+            aster_app_mgr_files_unlock();return ASTER_EIO;
+        }
+        strcpy(pending_install.owner,owner);strcpy(pending_install.package,package);
+        strcpy(pending_install.resources,resources);
+    }
+    aster_app_mgr_files_unlock();return r;
+}
+bool aster_app_mgr_finish_install(const char *owner,bool execute)
+{
+    aster_app_mgr_files_lock();
+    if(!pending_install.owner[0] || strcmp(owner,pending_install.owner)){aster_app_mgr_files_unlock();return false;}
+    int r=execute?aster_pkg_install_bundle_file(pending_install.package,pending_install.resources,owner):ASTER_ESTATE;
+    int scanned=aster_app_mgr_scan();if(!r && scanned<0)r=ASTER_EIO;
+    (void)aster_kv_set(owner,"store.install.result",&r,sizeof(r));
+    memset(&pending_install,0,sizeof(pending_install));
+    aster_app_mgr_files_unlock();return true;
 }

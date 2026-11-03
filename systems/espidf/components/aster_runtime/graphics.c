@@ -15,13 +15,17 @@
 #include <stdlib.h>
 
 static aster_idf_io_t io;
+void aster_idf_system_info(aster_system_info_t *info)
+{*info=io.system_info?*io.system_info:(aster_system_info_t){0};}
+void aster_idf_graphics_perf_reset(void) {if(io.display_perf_reset)io.display_perf_reset();}
+void aster_idf_graphics_perf_report(void) {if(io.display_perf_report)io.display_perf_report();}
 static const uint8_t *(*capture_callback)(void);
 void aster_idf_set_capture(const uint8_t *(*capture)(void)) {capture_callback=capture;}
 const uint8_t *aster_idf_capture(void) {return capture_callback?capture_callback():NULL;}
 static int guest_present(const uint8_t *p,uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint32_t pitch)
 {return aster_idf_app_glass_frozen()?0:io.present(p,x,y,w,h,pitch);}
 static struct {
-    uint32_t handle, pixels, width, height;
+    uint32_t handle, allocation, pixels, width, height;
     bool scale_fit;
 } surface;
 static uint16_t *scaled_pixels;
@@ -90,10 +94,19 @@ static int present_scaled(wasm_module_inst_t instance)
 {
     const uint16_t *source=guest(instance,surface.pixels,surface.width*surface.height*2);
     if(!source || !scaled_pixels)return ASTER_EINVAL;
+    if(surface.width==io.width && surface.height==io.height)
+        return guest_present((const uint8_t *)source,0,0,io.width,io.height,io.width)?ASTER_EIO:0;
     uint32_t w,h,x,y;fit_geometry(&w,&h,&x,&y);
+    /* The mapping is separable: divide once per column/row, rather than two
+     * software 64-bit divisions for every destination pixel on RV32. */
+    uint16_t columns[480];
+    for(uint32_t col=0;col<w;col++)columns[col]=(uint64_t)col*surface.width/w;
     memset(scaled_pixels,0,(size_t)io.width*io.height*2);
-    for(uint32_t row=0;row<h;row++)for(uint32_t col=0;col<w;col++)
-        scaled_pixels[(y+row)*io.width+x+col]=source[((uint64_t)row*surface.height/h)*surface.width+(uint64_t)col*surface.width/w];
+    for(uint32_t row=0;row<h;row++) {
+        const uint16_t *src=source+((uint64_t)row*surface.height/h)*surface.width;
+        uint16_t *dst=scaled_pixels+(y+row)*io.width+x;
+        for(uint32_t col=0;col<w;col++)dst[col]=src[columns[col]];
+    }
     return guest_present((uint8_t *)scaled_pixels,0,0,io.width,io.height,io.width)?ASTER_EIO:0;
 }
 
@@ -135,24 +148,29 @@ static int32_t create(wasm_exec_env_t env, uint32_t off, uint32_t bytes, uint32_
        (!fit && (width>io.width || height>io.height)))return ASTER_EINVAL;
     if (surface.handle) return ASTER_EBUSY;
     void *native = NULL;
-    uint32_t pixels = wasm_runtime_module_malloc(INST, width * height * 2, &native);
-    if (!pixels) return ASTER_ENOMEM;
+    /* Keep the backing allocation for free(), but publish cache-line aligned
+     * pixels. The tail padding also belongs to us when PPA syncs whole lines. */
+    uint32_t allocation = wasm_runtime_module_malloc(INST, ((width * height * 2 + 63u) & ~63u) + 63u, &native);
+    if (!allocation) return ASTER_ENOMEM;
+    uint32_t padding = (uint32_t)(-(uintptr_t)native & 63u);
+    uint32_t pixels = allocation + padding;
+    native = (uint8_t *)native + padding;
     if(fit) {
 #ifdef ESP_PLATFORM
         scaled_pixels=aster_psram_alloc((size_t)io.width*io.height*2);
 #else
         scaled_pixels=malloc((size_t)io.width*io.height*2);
 #endif
-        if(!scaled_pixels){wasm_runtime_module_free(INST,pixels);return ASTER_ENOMEM;}
+        if(!scaled_pixels){wasm_runtime_module_free(INST,allocation);return ASTER_ENOMEM;}
     }
     /* module_malloc can grow guest memory: reacquire all output addresses. */
     void *dst = guest(INST, out, 4);
-    if (!dst) { wasm_runtime_module_free(INST, pixels);free(scaled_pixels);scaled_pixels=NULL;return ASTER_EINVAL; }
+    if (!dst) { wasm_runtime_module_free(INST, allocation);free(scaled_pixels);scaled_pixels=NULL;return ASTER_EINVAL; }
     memset(native, 0, width * height * 2);
     serial=(serial & 0x00ffffffu)+1;
     if (serial>0x00ffffffu)serial=1;
     serial |= ASTER_HTYPE_SURFACE;
-    surface.handle=serial; surface.pixels=pixels; surface.width=width; surface.height=height;
+    surface.handle=serial; surface.allocation=allocation; surface.pixels=pixels; surface.width=width; surface.height=height;
     surface.scale_fit=fit;
     memcpy(dst, &serial, 4);
     return ASTER_OK;
@@ -161,7 +179,7 @@ static int32_t create(wasm_exec_env_t env, uint32_t off, uint32_t bytes, uint32_
 static int32_t destroy(wasm_exec_env_t env, uint32_t handle)
 {
     if (!handle || handle != surface.handle) return ASTER_EBADF;
-    wasm_runtime_module_free(INST, surface.pixels);
+    wasm_runtime_module_free(INST, surface.allocation);
     free(scaled_pixels);scaled_pixels=NULL;
     memset(&surface, 0, sizeof(surface));
     return ASTER_OK;
@@ -276,7 +294,7 @@ static int32_t touch(wasm_exec_env_t env, uint32_t off, uint32_t max)
 
 void aster_idf_graphics_cleanup(wasm_module_inst_t instance)
 {
-    if (surface.handle) wasm_runtime_module_free(instance, surface.pixels);
+    if (surface.handle) wasm_runtime_module_free(instance, surface.allocation);
     free(scaled_pixels);scaled_pixels=NULL;
     memset(&surface, 0, sizeof(surface));
     aster_idf_graphics_reset_touch();

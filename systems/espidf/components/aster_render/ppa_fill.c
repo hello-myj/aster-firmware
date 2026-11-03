@@ -17,6 +17,27 @@ static ppa_client_handle_t client;
 static bool failed;
 static uint32_t jobs,errors;
 static uint64_t pixels;
+static uint32_t app_jobs;
+bool aster_idf_ppa_fill_rgb565(uint16_t *data,uint32_t pitch,uint32_t height,
+                             uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint16_t color)
+{
+    size_t bytes=(size_t)pitch*height*2;
+    if(!client || failed || !w || !h || (uint64_t)w*h<4096 ||
+       ((uintptr_t)data&63) || (bytes&63) || x>pitch || w>pitch-x ||
+       y>height || h>height-y)return false;
+    /* Expand endpoint bits so the hardware's RGB888 -> RGB565 truncation
+     * reproduces every ABI colour exactly. This call completes source use. */
+    uint32_t r=color>>11,g=(color>>5)&63,b=color&31;
+    ppa_fill_oper_config_t config={
+        .out={.buffer=data,.buffer_size=bytes,.pic_w=pitch,.pic_h=height,
+              .block_offset_x=x,.block_offset_y=y,.fill_cm=PPA_FILL_COLOR_MODE_RGB565},
+        .fill_block_w=w,.fill_block_h=h,
+        .fill_argb_color={.val=0xff000000u|((r<<3|r>>2)<<16)|((g<<2|g>>4)<<8)|(b<<3|b>>2)},
+        .mode=PPA_TRANS_MODE_BLOCKING,
+    };
+    if(ppa_do_fill(client,&config)!=ESP_OK){errors++;failed=true;return false;}
+    app_jobs++;pixels+=(uint64_t)w*h;return true;
+}
 static esp_err_t fill(lv_draw_buf_t *buf,const lv_area_t *area,lv_color_t color)
 {
     ppa_fill_oper_config_t config={
@@ -92,6 +113,6 @@ int aster_idf_ppa_fill_init(void)
     unit->name="ASTER_PPA_FILL";unit->evaluate_cb=evaluate;unit->dispatch_cb=dispatch;
     ESP_LOGI("aster_ppa","RGB565/cache self-test passed; large fill acceleration ready");return 0;
 }
-void aster_idf_ppa_fill_reset(void) {jobs=errors=0;pixels=0;}
+void aster_idf_ppa_fill_reset(void) {jobs=app_jobs=errors=0;pixels=0;}
 void aster_idf_ppa_fill_report(void)
-{printf("UI PPA fills=%lu pixels=%llu errors=%lu\n",(unsigned long)jobs,(unsigned long long)pixels,(unsigned long)errors);}
+{printf("UI PPA fills=%lu app_fills=%lu pixels=%llu errors=%lu\n",(unsigned long)jobs,(unsigned long)app_jobs,(unsigned long long)pixels,(unsigned long)errors);}

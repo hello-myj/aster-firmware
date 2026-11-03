@@ -41,6 +41,9 @@
 #include "gfx_shapes.h"
 #include "aster_color565.h" /* ch_up / blend565, shared with pp_gfx.c */
 #include <lvgl.h>
+#if defined(ASTER_SYSTEM_ESP_IDF) && !defined(ASTER_IDF_HOST_TEST)
+#include "ppa_fill.h"
+#endif
 
 LOG_MODULE_REGISTER(aster_gfx, LOG_LEVEL_INF);
 
@@ -208,6 +211,14 @@ static void fill_row(uint16_t *dst, uint32_t n, uint16_t c)
 	}
 }
 
+static void fill_rect(ppg_target_t *t,uint32_t x,uint32_t y,uint32_t w,uint32_t h,uint16_t c)
+{
+#if defined(ASTER_SYSTEM_ESP_IDF) && !defined(ASTER_IDF_HOST_TEST)
+    if(!s_out_be && aster_idf_ppa_fill_rgb565(t->px,t->pitch,t->h,x,y,w,h,c))return;
+#endif
+    for(uint32_t row=0;row<h;row++)fill_row(row_at(t,y+row)+x,w,c);
+}
+
 /* ---------------- ops (draw + merge their clipped bounds) ---------------- */
 
 static void op_clear(ppg_target_t *t, const aster_gfx_cmd_t *c, acc_t *acc)
@@ -227,9 +238,7 @@ static void op_clear(ppg_target_t *t, const aster_gfx_cmd_t *c, acc_t *acc)
 			y1 = t->h;
 		}
 	}
-	for (uint32_t y = y0; y < y1; y++) {
-		fill_row(row_at(t, y) + x0, x1 - x0, col);
-	}
+	fill_rect(t,x0,y0,x1-x0,y1-y0,col);
 	acc_merge(acc, x0, y0, x1, y1);
 }
 
@@ -244,9 +253,7 @@ static void op_rect(ppg_target_t *t, const aster_gfx_cmd_t *c, acc_t *acc)
 	}
 	uint16_t col = ASTER_GFX_U16(c->w[3]);
 
-	for (uint32_t y = 0; y < ch; y++) {
-		fill_row(row_at(t, cy + y) + cx, cw, col);
-	}
+	fill_rect(t,cx,cy,cw,ch,col);
 	acc_merge(acc, cx, cy, cx + cw, cy + ch);
 }
 

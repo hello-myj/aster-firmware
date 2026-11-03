@@ -91,6 +91,7 @@ int aster_pkg_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 
 /* Install a package file into /SD:/aster/apps/<id>. Validates ABI + caps. */
 int aster_pkg_install_file(const char *src_path);
+int aster_pkg_install_bundle_file(const char *src_path,const char *resources,const char *caller);
 
 #ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
 int aster_pkg_fault_arm(const char *id, const char *stage, const char *operation,

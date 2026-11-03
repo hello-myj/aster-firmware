@@ -32,8 +32,12 @@ static void worker(void *unused)
         if(job.diagnostic) {
             FILE *aot=fopen("/SD/app.aot","rb");
             if(aot){fclose(aot);result=aster_idf_run_queued_diagnostic("/SD/app.aot");}
+#ifndef ASTER_REQUIRE_AOT
             if(!aot || (result==ASTER_EABI && !aster_idf_stop_is_requested()))
                 result=aster_idf_run_queued_diagnostic("/SD/app.wasm");
+#else
+            if(!aot)ESP_LOGE("aster_apps","AOT diagnostic required: /SD/app.aot");
+#endif
         } else {
             aster_app_mgr_files_lock();
             aster_app_rec_t rec;
@@ -49,6 +53,7 @@ static void worker(void *unused)
                 /* Map the service's Zephyr-style volume path to IDF VFS. */
                 char actual[256];snprintf(actual,sizeof(actual),"/SD%s",path+4);
                 result=aster_idf_run_installed(actual,job.id,rec.perm_mask);
+#ifndef ASTER_REQUIRE_AOT
                 if(rec.has_aot && result==ASTER_EABI && !aster_idf_stop_is_requested()) {
                     /* AOT failure before guest entry (including SRAM pressure)
                      * can fall back; never rerun an app after a guest failure. */
@@ -56,12 +61,20 @@ static void worker(void *unused)
                     ESP_LOGW("aster_apps","AOT unavailable for %s; retry portable WASM",job.id);
                     result=aster_idf_run_installed(actual,job.id,rec.perm_mask);
                 }
+#else
+                if(result==ASTER_EABI)ESP_LOGE("aster_apps","AOT required for %s; WASM fallback disabled",job.id);
+#endif
                 aster_app_mgr_set_state(job.id,result?ASTER_APP_STATE_CRASHED:ASTER_APP_STATE_STOPPED,result);
             } else aster_app_mgr_files_unlock();
         }
         ESP_LOGI("aster_apps","APP %s finished, result=%d",job.diagnostic?"diagnostic":job.id,result);
+        bool installed=aster_app_mgr_finish_install(job.id,!result && !aster_idf_stop_is_requested());
         aster_idf_ui_after_app();
         char next[64];
+        if(installed && !result && !aster_idf_stop_is_requested()) {
+            aster_idf_clear_stop();
+            if(xQueueSend(queue,&job,0)==pdTRUE)continue;
+        }
         if(!result && !aster_idf_stop_is_requested() && aster_idf_take_handoff(next)) {
             /* Retain the single-worker reservation until the successor starts. */
             memset(&job,0,sizeof(job));snprintf(job.id,sizeof(job.id),"%s",next);
@@ -98,14 +111,20 @@ int aster_idf_apps_start(void)
     if(xTaskCreate(watchdog,"aster_vm_guard",3072,NULL,5,&monitor)!=pdPASS) {
         vQueueDelete(queue);vSemaphoreDelete(state_lock);queue=NULL;state_lock=NULL;return ASTER_ENOMEM;
     }
+#if CONFIG_ASTER_P4_DUAL_CORE_RENDER
+    if(xTaskCreatePinnedToCore(worker,"aster_vm",24576,NULL,4,NULL,1)!=pdPASS) {
+#else
     if(xTaskCreate(worker,"aster_vm",24576,NULL,4,NULL)!=pdPASS) {
+#endif
         vTaskDelete(monitor);
         vQueueDelete(queue);vSemaphoreDelete(state_lock);
         queue=NULL;state_lock=NULL;return ASTER_ENOMEM;
     }
 #if CONFIG_ASTER_P4_AUTORUN_DIAGNOSTIC
     FILE *file=fopen("/SD/app.aot","rb");
+#ifndef ASTER_REQUIRE_AOT
     if(!file)file=fopen("/SD/app.wasm","rb");
+#endif
     if(file){fclose(file);return launch(NULL,true);}
 #endif
     return 0;

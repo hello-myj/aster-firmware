@@ -63,7 +63,8 @@ int main(void) {
     def test_install_rejects_missing_or_wrong_cpu_aot_before_writing(self):
         source = (ROOT / 'systems/zephyr/services/aster_pkg.c').read_text()
         code = source[source.index('static bool install_id_valid('):source.index('\t/* Signature gate BEFORE')]
-        run_c(r'''
+        code = code.replace('size_t size = 0;', 'size_t size = 0; (void)resources;')
+        harness = r'''
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -73,6 +74,7 @@ int main(void) {
 #define ASTER_ECORRUPT -14
 #define ASTER_OK 0
 #define ASTER_EIO -7
+#define ASTER_EPERM -4
 #define ASTER_EABI -13
 #define ASTER_ENOTSUP -3
 #define CONFIG_ASTER_AOT_TARGET_ID 1
@@ -88,9 +90,12 @@ static int aster_pkg_parse(uint8_t *img,size_t n,aster_manifest_t *m,const uint8
  return ASTER_OK;
 }
 int main(void) {
- aot_len=0;target_id=1;assert(pkg_install_locked("test.ast")==ASTER_ENOTSUP && frees==1);
- aot_len=8;target_id=99;assert(pkg_install_locked("test.ast")==ASTER_EABI && frees==2);
- target_id=1;assert(pkg_install_locked("test.ast")==ASTER_OK && frees==2);
+ aot_len=0;target_id=1;assert(pkg_install_locked("test.ast",NULL,NULL)==ASTER_ENOTSUP && frees==1);
+ aot_len=8;target_id=99;assert(pkg_install_locked("test.ast",NULL,NULL)==ASTER_EABI && frees==2);
+ target_id=1;assert(pkg_install_locked("test.ast",NULL,NULL)==ASTER_OK && frees==2);
  return 0;
 }
-''')
+'''
+        for policy in ('', '#define ASTER_SYSTEM_ESP_IDF 1\n#define ASTER_REQUIRE_AOT 1\n'):
+            with self.subTest(policy=policy):
+                run_c(policy + harness)

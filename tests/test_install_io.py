@@ -40,10 +40,14 @@ class InstallIO(unittest.TestCase):
 #include <sys/wait.h>
 #define ASTER_OK 0
 #define ASTER_EIO -7
+#define ASTER_EINVAL -1
 #define ASTER_EBUSY -5
 #define ASTER_ENOMEM -2
 #define ASTER_ECORRUPT -14
 #define ASTER_EABI -13
+#define ASTER_EPERM -4
+#define ASTER_EEXIST -9
+#define ASTER_EMSGSIZE -22
 #define ASTER_ENOTSUP -3
 #define ASTER_MANIFEST_MAX 1152
 #define ASTER_APP_DESCRIPTION_MAX 128
@@ -115,6 +119,7 @@ static int fs_sync(struct fs_file_t *f) {
  if(fault("sync",f->path)) return result(-EIO);
  return result(fflush(f->stream)?-errno:0);
 }
+static int fs_write(struct fs_file_t *f,const void *data,size_t len) {return aster_fs_write_safe(f,data,len);}
 static int fs_close(struct fs_file_t *f) {
  bool bad=fault("close",f->path);closes++;int err=fclose(f->stream);
  return result(bad?-EIO:err?-errno:0);
@@ -142,6 +147,7 @@ static int fs_readdir(struct fs_dir_t *d,struct fs_dirent *entry) {
   snprintf(entry->name,sizeof(entry->name),"%s",de->d_name);
   struct stat st;assert(!fstatat(dirfd(d->dir),de->d_name,&st,0));
   entry->type=S_ISDIR(st.st_mode)?FS_DIR_ENTRY_DIR:FS_DIR_ENTRY_FILE;
+  entry->size=(size_t)st.st_size;
   return result(0);
  }
  entry->name[0]=0;return result(0);
@@ -226,6 +232,25 @@ static unsigned selected_revision(void) {
  snprintf(path,sizeof(path),"%s/icon.bin",code);expect_file(path,bytes,sizeof(bytes));
  snprintf(path,sizeof(path),"%s/assets/test.bin",code);expect_file(path,bytes,sizeof(bytes));
  check_user_data();return selected;
+}
+''')
+
+    def test_external_bundle_streams_into_inactive_slot_and_failure_keeps_old_assets(self):
+        run_c(self.program() + r'''
+int main(void) {
+ prepare_upgrade();char resources[160],file[192];
+ snprintf(resources,sizeof(resources),"%s/source-resources",root);assert(!aster_storage_mkdir_p(resources));
+ snprintf(file,sizeof(file),"%s/extra.bin",resources);FILE *f=fopen(file,"wb");assert(f);
+ for(unsigned i=0;i<1048576;i++)assert(fputc(i%251,f)!=EOF);assert(!fclose(f));
+ assert(!aster_pkg_install_bundle_file("v3.ast",resources,"aster.store"));assert(selected_revision()==3);
+ char code[160];assert(!aster_storage_app_code_dir(code,sizeof(code),"test.app"));
+ snprintf(file,sizeof(file),"%s/assets/extra.bin",code);struct stat st;assert(!stat(file,&st)&&st.st_size==1048576);
+ f=fopen(file,"rb");assert(f);for(unsigned i=0;i<1048576;i++)assert(fgetc(f)==(int)(i%251));assert(!fclose(f));
+ revision=4;fail_path="extra.bin";fail_op="write";
+ assert(aster_pkg_install_bundle_file("v4.ast",resources,"aster.store")==ASTER_EIO);fail_op=NULL;
+ assert(selected_revision()==3);
+ assert(aster_pkg_install_bundle_file("self.ast",resources,"test.app")==ASTER_EPERM);
+ assert(selected_revision()==3);assert(!rmrf(root));return 0;
 }
 ''')
 

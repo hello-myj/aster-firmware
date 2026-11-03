@@ -7,6 +7,7 @@ int aster_idf_run_queued_diagnostic(const char *path);
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <aster/system.h>
 /* Call before starting the VM; callbacks run synchronously on its owning task.
  * present must finish reading guest pixels before returning. */
 #define ASTER_IDF_MAX_TOUCH 5
@@ -20,6 +21,9 @@ typedef struct {
     /* Fixed hardware slots; returns active bitmask, negative = no valid frame. */
     int (*touch_frame)(aster_idf_touch_point_t points[ASTER_IDF_MAX_TOUCH]);
     uint32_t max_touch_points;
+    void (*display_perf_reset)(void);
+    void (*display_perf_report)(void);
+    const aster_system_info_t *system_info;
 } aster_idf_io_t;
 void aster_idf_set_io(const aster_idf_io_t *io);
 
@@ -42,4 +46,5 @@ typedef struct {
 void aster_idf_set_ui_hooks(const aster_idf_ui_hooks_t *hooks);
 bool aster_idf_app_glass_frozen(void);
 void aster_idf_set_capture(const uint8_t *(*capture)(void));
+void aster_idf_system_info(aster_system_info_t *info);
 const uint8_t *aster_idf_capture(void);

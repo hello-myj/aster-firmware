@@ -5,7 +5,7 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 4
-#define ASTER_ABI_MINOR 2 /* 4.2 (additive): bounded memory WAV effects.
+#define ASTER_ABI_MINOR 3 /* 4.3 (additive): device identity and deferred bundle installation.
                           * 4.1 (additive): continuous effect voices, pitch/gain ramps.
                           * 4.0 (breaking): six aster_net_* imports replace
                           * the per-protocol network/HTTP/MQTT/WebSocket
@@ -126,5 +126,6 @@ typedef struct {
 
 ASTER_I("aster_system_has_feature") int32_t aster_system_has_feature(uint32_t feature_bit);
 ASTER_I("aster_system_get_abi_version") uint32_t aster_system_get_abi_version(void);
+ASTER_I("aster_system_get_info") int32_t aster_system_get_info(aster_system_info_t *info, uint32_t size);
 
 #endif /* ASTER_SYSTEM_H */

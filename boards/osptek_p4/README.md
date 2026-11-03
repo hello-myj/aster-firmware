@@ -1,7 +1,8 @@
 # OSPTEK ESP32-P4 + C5 / ST7102 480×480
 
 状态：实验性接入；2026-10-31 已完成首轮 P4 v3.2 实机启动检查，未完成整板验收。
-固件分支 `feat/osptek-p4-st7102-idf`，配套 SDK 分支 `feat/osptek-p4-aot`。
+固件分支 `feat/osptek-p4-st7102-idf`，配套 SDK 使用 `main`。
+RGB666 验证另存于固件 `feat/osptek-p4-rgb666-validation` 和 SDK `feat/p4-rgb888-rendering`。
 此描述符位于 `boards/`，不把它发布为已验证的 `hardware/` 设备。
 
 采用 ESP-IDF 6.0：现有 ST7102/ST7123 例程、P4 MIPI-DSI 和 C5 ESP-Hosted
@@ -145,11 +146,10 @@ python tools/build.py apps/hello --target riscv --aot
 目标为 RV32、ILP32F、M/A/F/C，启用软件内存/栈边界检查。
 WAMR 2.4.3 只给共享内存模块插入循环终止检查，因此工具对 AOT 编译副本设置
 有上限的共享内存，并打开 thread manager。原 portable WASM 不变，不引入 guest
-线程。加载器拒绝不满足该配置的 AOT，转入解释器回退流程。
+线程。加载器拒绝不满足该配置的 AOT。P4 的解释器已关闭，安装器拒绝缺少匹配 AOT 的包，运行时也拒绝 portable WASM；AOT 加载失败直接报错，不再回退。
 
 IDF 6 的动态可执行堆与 `CONFIG_ESP_SYSTEM_MEMPROT` 互斥；这个私有配置关闭了该项。
-AOT 代码放内部可执行 SRAM，以双核 `fence.i` 同步；较大的镜像可能因 SRAM 不足
-回退解释器。AOT 是原生机器码，必须来自受信任的编译/包来源。当前默认未强制包签名；
+AOT 代码从 PSRAM 分配，逐段验证 MMU 的物理连续性及指令地址映射；写回数据缓存、使指令缓存失效并对双核执行 `fence.i` 后才进入代码。不再因较大的游戏代码挤占内部 SRAM 而回退解释器。实机已从 PSRAM 执行 GoldMiner 0.1.5（代码 100288 B）和商城（58560 B）。旧版 GoldMiner 菜单约 10.7 FPS，应用优化版帧率待测；日志在忽略的 build/osptek-p4/hardware/goldminer-015-psram-aot.log 与 store-psram-aot.log。AOT 是原生机器码，必须来自受信任的编译/包来源。当前默认未强制包签名；
 头部、权限和软件边界检查不能把任意原生 AOT 变成安全沙箱。
 
 ## SD 卡与命令
@@ -239,16 +239,77 @@ C5 链路/联网/TLS、扬声器和麦克风、实际内存余量与性能。
 
 ## Wiring and panel settings
 
+### RGB565 performance work (2026-11-01 / 2026-11-02)
+
+APPs and Launcher share the RGB565 DMA2D submission path. Large opaque
+`CLEAR` / `RECT_F` gfx commands now use PPA; unsupported layouts and small
+rectangles retain software rendering. Guest surfaces keep their original
+allocation handle for freeing and expose aligned pixels. Native byte order,
+clipping, pitch and guest readback are preserved. The frame loop budgets
+drawing inside the requested frame period instead of sleeping a full period
+after drawing. Scale-fit uses a separable nearest-neighbour mapping; native
+480x480 canvases bypass scaling.
+
+Reproducible AOT fixture: `systems/espidf/tests/apps/rgb565_bench`. It changes
+the rectangle colours on each of 128 frames, mixes PPA fills with a clipped
+software rectangle, then checks every guest pixel outside the timed draw.
+The unchanged older `batched` fixture measured 1417/128 = 11.07 ms drawing
+and 3557/127 = 28.01 ms frame intervals before the APP changes; afterwards
+515/128 = 4.02 ms and 2117/127 = 16.67 ms respectively. The new changing-colour
+fixture also measured 16.67 ms intervals, zero command errors and zero pixel
+errors. These are VM submission intervals, not optical or tear-free FPS;
+complex APPs may exceed the frame budget or explicitly request a lower rate.
+
+Launcher uses CPU1 for LVGL/VM and CPU0 for disjoint, cache-aligned image rows.
+The RGB565 bilinear interpolation retains a single rounding step. The P4
+profile selects 128 KiB L2 cache with 64-byte lines. The temporary 256 KiB
+experiment consumed an additional 128 KiB of internal SRAM; it was reverted
+at the user's request to prioritize SRAM capacity. During that experiment,
+TouchTest AOT measured 124143 internal bytes free and a 45056-byte largest
+block. TouchTest and the installed 2048 both started via AOT. These are
+historical 256 KiB-cache measurements, not the restored profile's memory figures.
+After restoring 128 KiB cache and flashing, the Launcher measured 342 frames
+/ 7980 ms (42.8 FPS), with zero PPA errors. TouchTest started through AOT,
+reported five touch points, and measured 255623 internal bytes free (about
+249.6 KiB), a 180224-byte largest block (176 KiB), and 250719-byte minimum
+free heap. Evidence: `rgb565-restored-cache128-bench.log` and
+`rgb565-restored-cache128-touchtest.log` under the local hardware log directory.
+The user confirmed normal display and multi-touch operation in the updated
+TouchTest after flashing the final RGB565 build; its requested frame rate is
+60 FPS. This visual check does not measure optical FPS.
+
+With the temporary 256 KiB cache, an 8-second continuous-scroll Launcher run measured
+404 frames / 7994 ms (50.5 FPS), 15.44 ms mean rendering, and a 24 ms P95
+frame interval. PPA reported zero errors. The original 128 KiB cache run
+after SMP/touch changes measured about 41–42 FPS. **Launcher has not reached
+60 FPS**; the APP fixture reaching 60 FPS must not be reported as Launcher
+performance or a guarantee for all applications.
+
+LCD VFP is configurable and defaults to 182 (other porches unchanged), giving
+about 60 Hz at 30 MHz. `aster ui bench 8` reports UI drawing FPS separately
+from `LCD SCAN` VSYNC frequency. The single scanout does not guarantee
+tear-free presentation. ST7123 I2C defaults to **400000 Hz (400 kHz)**;
+this is the bus clock, not a 400 Hz touch sampling claim. IRQ-high polls skip
+I2C transactions and preserve the last contact state.
+
+Local physical evidence is under ignored `build/osptek-p4/hardware/`:
+`appbench-baseline.log`, `appbench-ppa.log`, `rgb565-pixelbench.log`,
+`rgb565-cache256-bench.log`, `rgb565-cache256-appbench.log` and
+`cache256-2048.log`, plus `rgb565-final-bench.log` and
+`rgb565-final-touchtest.log`. Host runtime/pixel/overlay checks and the S3 build pass;
+host mocks alone do not validate PPA or physical panel output.
+
 Panel timing/initialization comes from the display archive example. GPIOs
 are corrected against the supplied development-board User Guide dated
 2026-09-10, page 6 (baseboard V1.5 schematic), which differs from that
-display example. No hardware has been tested.
+display example. The physically tested subset is described above.
 
 - ST7102: 480×480 RGB565; 2 DSI lanes at 620 Mbps; DPI clock 30 MHz.
-- Horizontal back/pulse/front porch: 140/2/120; vertical: 8/4/200.
+- Horizontal back/pulse/front porch: 140/2/120; vertical: 8/4/182
+  (reference example: 8/4/200).
 - DPHY power: internal LDO channel 3, 2500 mV.
 - Backlight: GPIO20, active high. LCD reset: GPIO5, active low.
-- ST7123 touch (inferred from the reference example): I2C1 at 100 kHz,
+- ST7123 five-point touch: I2C1 at 400 kHz,
   SCL GPIO8, SDA GPIO7, reset GPIO6, interrupt GPIO21.
 - SD: slot 0, CLK43/CMD44/D0=39/D1=40/D2=41/D3=42, detect GPIO45.
 - C5: SDIO slot 1, CLK18/CMD19/D0=14/D1=15/D2=16/D3=17; reset54,
@@ -274,6 +335,28 @@ black, yellow). If `/SD/app.wasm` exists, the VM takes ownership of drawing
 and touch polling. Touch failure leaves display-only apps available. A successful compilation is not evidence of
 a working physical display.
 
+
+## App Store workspace validation (ABI 4.3)
+
+The `feat/app-store-runtime` branch exposes the shared device-info and deferred
+bundle-install APIs. The board identity is `osptek-p4-st7102`, CPU target `riscv`.
+The installer accepts only the requesting app's own sandbox files, destroys its
+VM before copying the bundle, and reopens it with an installation-result receipt.
+External resources are installed into the inactive version's `assets` directory
+before activation; existing application data remains in `data`.
+
+The matching application and local server live in the sibling `aster-apps`
+repository (`AppStore`, `StoreServer`, `StoreDemo`). On physical hardware the
+Store AOT starts, Wi-Fi connects, DHCP succeeds, and the local server returns a
+compatible catalog. Physical Store download and installation of StoreDemo 1.0.1
+completed; its RISC-V AOT reports `STOREDEMO PASS external message and
+1048576-byte resource`. This verifies the separate text and 1 MiB resource files.
+Host tests cover streamed external-resource installation and rollback on I/O
+failure. Simulator tests cover the complete Store-to-server installation flow.
+
+Connect Wi-Fi in system settings before opening the Store. Its server address
+must be the computer's reachable LAN address, not `127.0.0.1`. Credentials are
+saved in device NVS after a successful connection; they are not build settings.
 
 ## Attribution
 
