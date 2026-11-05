@@ -68,7 +68,8 @@ static void worker(void *unused)
             } else aster_app_mgr_files_unlock();
         }
         ESP_LOGI("aster_apps","APP %s finished, result=%d",job.diagnostic?"diagnostic":job.id,result);
-        bool installed=aster_app_mgr_finish_install(job.id,!result && !aster_idf_stop_is_requested());
+        bool installed=aster_app_mgr_finish_install_progress(job.id,!result && !aster_idf_stop_is_requested(),aster_idf_ui_install_progress,NULL);
+        aster_idf_ui_install_end();
         aster_idf_ui_after_app();
         char next[64];
         if(installed && !result && !aster_idf_stop_is_requested()) {

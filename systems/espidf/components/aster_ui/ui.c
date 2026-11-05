@@ -211,3 +211,67 @@ void aster_idf_ui_before_app(void)
 {bench_end=bench_warm=0;app_active=true;aster_launcher_hide();aster_qpanel_force_close();aster_gesture_reset();aster_launcher_app_touch_cancel();}
 void aster_idf_ui_after_app(void)
 {app_active=false;aster_qpanel_on_app_stop();aster_launcher_request_show();}
+
+/* Installer runs on this same UI/APP worker after the guest has stopped.
+ * Pumping here keeps LVGL/touch alive without adding a task or SRAM stack. */
+static lv_obj_t *install_root,*install_stage,*install_size,*install_file,*install_bar,*install_clock,*install_detail_text;
+static bool install_details;
+static uint64_t install_since,install_last_pump,install_last_draw;
+static aster_install_phase install_previous;
+static lv_obj_t *install_label(lv_obj_t *root,int y,unsigned px)
+{
+ lv_obj_t *label=lv_label_create(root);lv_obj_set_pos(label,24,y);lv_obj_set_width(label,aster_ui_lvgl_width()-48);
+ lv_obj_set_style_text_font(label,aster_ui_font(px),0);lv_obj_set_style_text_color(label,lv_color_hex(0xe7edf5),0);return label;
+}
+static void install_toggle(lv_event_t *event)
+{
+ (void)event;install_details=!install_details;
+ if(install_details)lv_obj_remove_flag(install_file,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(install_file,LV_OBJ_FLAG_HIDDEN);
+ lv_label_set_text(install_detail_text,install_details?"收起详情":"查看详情");
+}
+void aster_idf_ui_install_progress(void *context,aster_install_phase phase,uint64_t done,uint64_t total,const char *file)
+{
+ (void)context;if(!display)return;uint64_t now=esp_timer_get_time();
+ if(!install_root){
+  app_active=false;aster_qpanel_force_close();aster_gesture_reset();aster_launcher_app_touch_cancel();
+  install_since=now;install_last_pump=install_last_draw=0;install_details=false;install_previous=ASTER_INSTALL_DONE;
+  install_root=lv_obj_create(lv_layer_top());lv_obj_set_size(install_root,aster_ui_lvgl_width(),aster_ui_lvgl_height());
+  lv_obj_set_pos(install_root,0,0);lv_obj_remove_flag(install_root,LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_style_pad_all(install_root,0,0);lv_obj_set_style_border_width(install_root,0,0);
+  lv_obj_set_style_radius(install_root,0,0);lv_obj_set_style_bg_color(install_root,lv_color_hex(0x101820),0);lv_obj_set_style_bg_opa(install_root,LV_OPA_COVER,0);
+  lv_label_set_text(install_label(install_root,48,24),"正在安装应用");
+  install_stage=install_label(install_root,116,20);install_size=install_label(install_root,160,18);
+  install_bar=lv_bar_create(install_root);lv_obj_set_pos(install_bar,24,208);lv_obj_set_size(install_bar,aster_ui_lvgl_width()-48,18);lv_bar_set_range(install_bar,0,1000);
+  install_clock=install_label(install_root,250,18);install_file=install_label(install_root,290,18);lv_obj_add_flag(install_file,LV_OBJ_FLAG_HIDDEN);
+  lv_obj_t *button=lv_button_create(install_root);lv_obj_set_pos(button,24,aster_ui_lvgl_height()-100);lv_obj_set_size(button,aster_ui_lvgl_width()-48,42);
+  lv_obj_add_event_cb(button,install_toggle,LV_EVENT_CLICKED,NULL);install_detail_text=lv_label_create(button);lv_obj_set_style_text_font(install_detail_text,aster_ui_font(18),0);lv_label_set_text(install_detail_text,"查看详情");lv_obj_center(install_detail_text);
+  lv_label_set_text(install_label(install_root,aster_ui_lvgl_height()-44,18),"安装中，请勿断电");
+  aster_ui_font_warm(18,"已复制用时秒查看详情收起安装中请勿断电准备文件资源同步提交版本完成");
+ }
+ if(now-install_last_pump<50000&&phase==install_previous)return;
+ install_last_pump=now;
+ aster_touch_evt_t touch_events[16];int n;
+ for(unsigned batch=0;batch<16&&(n=aster_plat_input_poll(touch_events,16))>0;batch++)for(int i=0;i<n;i++){
+  aster_touch_evt_t *t=&touch_events[i];bool one=!(t->contact_mask&(t->contact_mask-1));
+  aster_ui_lvgl_pointer(t->x,t->y,one&&t->action!=ASTER_TOUCH_UP);lv_indev_read(pointer);
+ }
+ if(now-install_last_draw>=200000||phase!=install_previous){
+  const char *names[]={"正在检查安装包","正在复制资源","正在同步文件","正在提交版本","安装完成"};
+  lv_label_set_text(install_stage,names[phase]);char text[128];
+  if(total)snprintf(text,sizeof(text),"已复制 %llu / %llu KiB  (%u%%)",(unsigned long long)(done/1024),(unsigned long long)(total/1024),(unsigned)(done*100/total));
+  else snprintf(text,sizeof(text),"正在准备文件…");
+  lv_label_set_text(install_size,text);
+  int value=total?(int)(done*990/total):(int)(((now-install_since)/100000)%900);if(phase==ASTER_INSTALL_COMMIT)value=990;if(phase==ASTER_INSTALL_DONE)value=1000;
+  lv_bar_set_value(install_bar,value,LV_ANIM_OFF);snprintf(text,sizeof(text),"用时 %llu 秒",(unsigned long long)((now-install_since)/1000000));lv_label_set_text(install_clock,text);
+  const char *base=strrchr(file,'/');snprintf(text,sizeof(text),"%.90s",base?base+1:file);lv_label_set_text(install_file,text);
+  install_previous=phase;install_last_draw=now;
+ }
+ if(aster_ui_fonts_poll())lv_obj_invalidate(install_root);
+ aster_ui_lvgl_request_frame();aster_ui_lvgl_pump();
+}
+void aster_idf_ui_install_end(void)
+{
+ if(!install_root)return;
+ lv_obj_delete(install_root);install_root=NULL;
+ aster_ui_lvgl_pointer(0,0,0);aster_gesture_reset();
+}

@@ -8,7 +8,11 @@
 #define ASTER_HTTP_HEADERS_MAX 2048
 #define ASTER_HTTP_HEADER_COUNT 32
 #define ASTER_HTTP_UPLOAD_MAX 2048
+#if defined(ASTER_SYSTEM_ESP_IDF)
+#define ASTER_HTTP_BODY_BUFFER 16384
+#else
 #define ASTER_HTTP_BODY_BUFFER 2048
+#endif
 #define ASTER_HTTP_REDIRECT_MAX 3
 struct aster_http_url {
     bool tls;

@@ -18,6 +18,7 @@
 #include "font_sd.h"
 #include "ui_gfx.h"
 #include "ui_lvgl.h"
+#include "install_progress.h"
 /* The sheet is not a launcher feature: it goes up over a running app too,
  * which is why these two are included even when CONFIG_ASTER_LAUNCHER_NATIVE
  * is off (they are not under that gate in firmware/ui/CMakeLists.txt). */
@@ -1234,7 +1235,14 @@ static void worker_fn(void *p1, void *p2, void *p3)
 
 		current = NULL;
 		k_sem_give(&worker_done);
-        if(aster_app_mgr_finish_install(id,!crashed)) {
+        bool installed;
+#if IS_ENABLED(CONFIG_ASTER_LVGL)
+        installed=aster_app_mgr_finish_install_progress(id,!crashed,aster_ui_install_progress,NULL);
+        aster_ui_install_end();
+#else
+        installed=aster_app_mgr_finish_install(id,!crashed);
+#endif
+        if(installed) {
             if(!crashed && aster_runtime_launch_async(id)==ASTER_OK)continue;
         }
 

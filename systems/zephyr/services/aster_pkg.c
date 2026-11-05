@@ -412,16 +412,44 @@ static int extract_mjr1(const uint8_t *blob, size_t len, const char *appdir)
 	return ASTER_OK;
 }
 
-static int copy_bundle_file(const char *src,const char *dst,uint32_t size)
+struct install_progress {aster_install_progress_fn notify;void *context;uint64_t done,total;};
+static void report_install(struct install_progress *p,aster_install_phase phase,const char *name)
+{if(p&&p->notify)p->notify(p->context,phase,p->done,p->total,name?name:"");}
+/* Keep recursive directory state out of the UI worker's bounded stack.
+ * Parent paths remain live until the child returns; PSRAM holds each frame. */
+struct bundle_walk {struct fs_dir_t dir;struct fs_dirent ent;char a[256],b[256];};
+static int bundle_measure(const char *path,unsigned depth,uint64_t *bytes,unsigned *files)
+{
+ if(depth>16)return ASTER_EINVAL;
+ struct bundle_walk *walk=aster_psram_alloc(sizeof(*walk));if(!walk)return ASTER_ENOMEM;
+ fs_dir_t_init(&walk->dir);if(fs_opendir(&walk->dir,path)){aster_psram_free(walk);return ASTER_EIO;}
+ int result=0,read;
+ while((read=fs_readdir(&walk->dir,&walk->ent))==0&&walk->ent.name[0]){
+  struct fs_dirent *ent=&walk->ent;
+  if(!strcmp(ent->name,".")||!strcmp(ent->name,"..")||strpbrk(ent->name,"/\\:")){result=ASTER_EINVAL;break;}
+  if(snprintf(walk->a,sizeof(walk->a),"%s/%s",path,ent->name)>=(int)sizeof(walk->a)){result=ASTER_EINVAL;break;}
+  if(ent->type==FS_DIR_ENTRY_DIR)result=bundle_measure(walk->a,depth+1,bytes,files);
+  else {(*files)++;*bytes+=ent->size;if(*files>4096||*bytes>UINT64_C(1073741824))result=ASTER_EMSGSIZE;}
+  if(result)break;
+ }
+ if(read<0)result=ASTER_EIO;
+ if(fs_closedir(&walk->dir))result=ASTER_EIO;
+ aster_psram_free(walk);return result;
+}
+static int copy_bundle_file(const char *src,const char *dst,uint32_t size,struct install_progress *progress)
 {
     struct fs_dirent st;
     if(fs_stat(dst,&st)!=-ENOENT)return ASTER_EEXIST;
     struct fs_file_t input,output;fs_file_t_init(&input);fs_file_t_init(&output);
     if(fs_open(&input,src,FS_O_READ))return ASTER_EIO;
     if(fs_open(&output,dst,FS_O_CREATE|FS_O_WRITE|FS_O_TRUNC)){fs_close(&input);return ASTER_EIO;}
-    uint8_t bytes[2048];int result=0;
+    /* DMA-safe internal storage, allocated only while copying one file.
+     * Keeping it off-stack leaves headroom for cooperative LVGL rendering. */
+    uint8_t *bytes=aster_dram_alloc(2048);
+    if(!bytes){fs_close(&input);fs_close(&output);return ASTER_ENOMEM;}
+    int result=0;
     while(size) {
-        unsigned n=size>sizeof(bytes)?sizeof(bytes):size;
+        unsigned n=size>2048?2048:size;
         int got=fs_read(&input,bytes,n);
         if(got<=0 || (unsigned)got>n){result=ASTER_EIO;break;}
         unsigned done=0;
@@ -432,37 +460,42 @@ static int copy_bundle_file(const char *src,const char *dst,uint32_t size)
         }
         if(result)break;
         size-=(unsigned)got;
+        if(progress)progress->done+=(unsigned)got;
+        report_install(progress,ASTER_INSTALL_COPY,src);
     }
     if(!result && fs_read(&input,bytes,1)!=0)result=ASTER_EIO;
+    report_install(progress,ASTER_INSTALL_SYNC,src);
     if(!result && fs_sync(&output))result=ASTER_EIO;
     if(fs_close(&input))result=ASTER_EIO;
     if(fs_close(&output))result=ASTER_EIO;
+    aster_dram_free(bytes);
     return result;
 }
-static int copy_bundle_tree(const char *src,const char *dst,unsigned depth,unsigned *count,uint64_t *bytes)
+static int copy_bundle_tree(const char *src,const char *dst,unsigned depth,unsigned *count,uint64_t *bytes,struct install_progress *progress)
 {
     if(depth>16)return ASTER_EINVAL;
     if(aster_storage_mkdir_p(dst))return ASTER_EIO;
-    struct fs_dir_t dir;fs_dir_t_init(&dir);
-    if(fs_opendir(&dir,src))return ASTER_EIO;
-    struct fs_dirent ent;int result=0,read;
-    while((read=fs_readdir(&dir,&ent))==0 && ent.name[0]) {
-        if(!strcmp(ent.name,".") || !strcmp(ent.name,"..") ||
-           strchr(ent.name,'/') || strchr(ent.name,'\\') || strchr(ent.name,':')) {result=ASTER_EINVAL;break;}
-        char a[256],b[256];
-        if(snprintf(a,sizeof(a),"%s/%s",src,ent.name)>=(int)sizeof(a) ||
-           snprintf(b,sizeof(b),"%s/%s",dst,ent.name)>=(int)sizeof(b)){result=ASTER_EINVAL;break;}
-        if(ent.type==FS_DIR_ENTRY_DIR)result=copy_bundle_tree(a,b,depth+1,count,bytes);
+    struct bundle_walk *walk=aster_psram_alloc(sizeof(*walk));if(!walk)return ASTER_ENOMEM;
+    fs_dir_t_init(&walk->dir);
+    if(fs_opendir(&walk->dir,src)){aster_psram_free(walk);return ASTER_EIO;}
+    int result=0,read;
+    while((read=fs_readdir(&walk->dir,&walk->ent))==0 && walk->ent.name[0]) {
+        struct fs_dirent *ent=&walk->ent;
+        if(!strcmp(ent->name,".") || !strcmp(ent->name,"..") ||
+           strchr(ent->name,'/') || strchr(ent->name,'\\') || strchr(ent->name,':')) {result=ASTER_EINVAL;break;}
+        if(snprintf(walk->a,sizeof(walk->a),"%s/%s",src,ent->name)>=(int)sizeof(walk->a) ||
+           snprintf(walk->b,sizeof(walk->b),"%s/%s",dst,ent->name)>=(int)sizeof(walk->b)){result=ASTER_EINVAL;break;}
+        if(ent->type==FS_DIR_ENTRY_DIR)result=copy_bundle_tree(walk->a,walk->b,depth+1,count,bytes,progress);
         else {
-            (*count)++;*bytes+=ent.size;
+            (*count)++;*bytes+=ent->size;
             if(*count>4096 || *bytes>UINT64_C(1073741824)){result=ASTER_EMSGSIZE;break;}
-            result=copy_bundle_file(a,b,ent.size);
+            result=copy_bundle_file(walk->a,walk->b,ent->size,progress);
         }
         if(result)break;
     }
     if(read<0)result=ASTER_EIO;
-    if(fs_closedir(&dir))result=ASTER_EIO;
-    return result;
+    if(fs_closedir(&walk->dir))result=ASTER_EIO;
+    aster_psram_free(walk);return result;
 }
 
 static bool install_id_valid(const char *id)
@@ -489,9 +522,10 @@ static void pkg_trace(const char *stage)
 static void pkg_trace(const char *stage) { (void)stage; }
 #endif
 
-static int pkg_install_locked(const char *src_path,const char *resources,const char *caller)
+static int pkg_install_locked(const char *src_path,const char *resources,const char *caller,struct install_progress *progress)
 {
 	uint8_t *img = NULL;
+	report_install(progress,ASTER_INSTALL_CHECK,src_path);
 	size_t size = 0;
 	pkg_trace("load-source");
 	int err = load_file(src_path, &img, &size);
@@ -658,7 +692,13 @@ static int pkg_install_locked(const char *src_path,const char *resources,const c
     if(resources) {
         char assets[192];unsigned count=0;uint64_t bytes=0;
         if(snprintf(assets,sizeof(assets),"%s/assets",appdir)>=(int)sizeof(assets))err=ASTER_EINVAL;
-        else err=copy_bundle_tree(resources,assets,0,&count,&bytes);
+        else {
+            unsigned measured=0;uint64_t total=0;
+            err=bundle_measure(resources,0,&total,&measured);
+            if(progress){progress->total=total;progress->done=0;}
+            report_install(progress,ASTER_INSTALL_COPY,resources);
+            if(!err)err=copy_bundle_tree(resources,assets,0,&count,&bytes,progress);
+        }
         if(err){aster_psram_free(img);return err;}
     }
 	/* Normalize the manifest.
@@ -789,6 +829,7 @@ static int pkg_install_locked(const char *src_path,const char *resources,const c
 		return ASTER_EIO;
 	}
 
+	report_install(progress,ASTER_INSTALL_COMMIT,m.id);
 	uint32_t manifest_crc;
 	err = aster_versions_manifest_crc(appdir, &manifest_crc);
 	if (err) {
@@ -815,7 +856,7 @@ static int pkg_install_locked(const char *src_path,const char *resources,const c
 int aster_pkg_install_file(const char *src_path)
 {
 	aster_app_mgr_files_lock();
-	int err = pkg_install_locked(src_path,NULL,NULL);
+	int err = pkg_install_locked(src_path,NULL,NULL,NULL);
 #ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
 	pkg_fault.active[0] = 0;
 #endif
@@ -825,7 +866,12 @@ int aster_pkg_install_file(const char *src_path)
 
 int aster_pkg_install_bundle_file(const char *src,const char *resources,const char *caller)
 {
+    return aster_pkg_install_bundle_progress(src,resources,caller,NULL,NULL);
+}
+int aster_pkg_install_bundle_progress(const char *src,const char *resources,const char *caller,aster_install_progress_fn notify,void *context)
+{
+    struct install_progress progress={.notify=notify,.context=context};
     aster_app_mgr_files_lock();
-    int result=pkg_install_locked(src,resources,caller);
+    int result=pkg_install_locked(src,resources,caller,&progress);
     aster_app_mgr_files_unlock();return result;
 }

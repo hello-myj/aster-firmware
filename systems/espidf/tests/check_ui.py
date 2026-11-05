@@ -79,7 +79,7 @@ static inline int ledc_update_duty(int m,int c) {(void)m;(void)c;return 0;}
     except ImportError:
         print("UI previews saved as PPM (Pillow not installed)")
     else:
-        for name in ("desktop","desktop-panel","app-panel"):
+        for name in ("desktop","desktop-panel","app-panel","install-progress","install-details"):
             Image.open(out/(name+".ppm")).save(out/(name+".png"))
 
 

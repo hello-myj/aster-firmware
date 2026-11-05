@@ -358,7 +358,18 @@ Connect Wi-Fi in system settings before opening the Store. Its server address
 must be the computer's reachable LAN address, not `127.0.0.1`. Credentials are
 saved in device NVS after a successful connection; they are not build settings.
 
-## Attribution
+## APP auxiliary stacks
+
+The IDF runtime enables WAMR thread management for asynchronous termination.
+Aster currently exposes one guest execution context and no guest thread API.
+After creating that context, `aster_runtime/aux_stack.h` restores the module's
+full declared auxiliary-stack region instead of WAMR's default five-way thread
+partition. This does not allocate an additional stack or disable bounds checks.
+Guest thread support must revisit this ownership policy before spawning contexts.
+OpenOMF's nested resource parser needs its full declared stack; OpenTyrian 0.1.3
+also moves its coroutine C stack into the declared auxiliary region.
+
+## Attribution and hardware sources
 
 Display initialization and touch sequencing are adapted from the supplied
 OSPTEK example, copyright 2026 OSPTEK, CC BY 4.0:
@@ -374,3 +385,15 @@ GPIO source: `esp32-p4c5-module-dev-board-main.zip`, English User Guide
 https://github.com/osptek/esp32-p4c5-core-board ,
 `images/c5-p4-connection.png`. The archived standalone V1.3 schematic and
 the V1.5 schematic embedded in the newer guide are separate revisions.
+
+## 2026-11-03 HTTP 吞吐验证
+
+当前 IDF 传输层的 TCP 收发缓冲各 16 KiB、HTTP 的 body/input/decoded 各 16 KiB，随连接/请求在 PSRAM 中申请，关闭后释放。相对原 2 KiB 配置，每个活动 HTTP/TCP 组合额外约 70 KiB PSRAM；已有 4/8 KiB 网络/HTTP 线程栈预算不变。P4 活动轮询间隔分别为 2/1 ms，Zephyr 保持原 10/5 ms 与 2 KiB 配置，公开 HTTP 单次读取仍限 2 KiB。
+
+同一 P4、Wi-Fi 和本地服务器，下载同一 2511460 B 文件的一轮样本：旧固件纯接收 5133 ms（477 KiB/s），接收并 2 KiB 写卡 21496 ms（114 KiB/s）；新版分别为 2234 ms（1097 KiB/s）、7657 ms（320 KiB/s），新版 8 KiB 批量写卡 5538 ms（442 KiB/s）。未做 SHA/商城 UI 的该诊断与完整商城安装有不同开销，不能将单轮数字视为所有资源的保证速度。原始日志在 `aster-apps/common/artifacts/http-bench`，烧录日志在 `build/shared-core-hardware/p4-http-flash.log`。
+
+## 2026-11-04 安装进度界面
+
+APP VM 完整停止后，P4 的同一个 UI/APP 工作线程执行安装；资源复制回调会协作处理 LVGL 与触摸，不增加线程栈。系统显示检查、复制、同步、提交等阶段，资源预扫描提供总字节数，复制时报告累计字节数、耗时与当前文件。详情按钮可展开/收起文件名；应用的启动仍等待安装事务结束。
+
+进度接口是固件内部回调，Zephyr 与无观察者调用保留原入口；没有新增 SDK ABI。程序和资源写入未启用的 `.v0`/`.v1`，文件同步并写入有效版本记录后才切换。预扫描和进度不改变失败恢复策略。`tests/test_install_io.py` 校验进度单调、文件复制及 129 个 I/O 故障点/129 个进程中断点；`systems/espidf/tests/check_ui.py` 实际绘制并点击详情按钮，截图在 `build/idf-runtime-check/install-*.png`。

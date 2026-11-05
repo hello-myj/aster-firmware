@@ -7,10 +7,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class HttpServiceTests(unittest.TestCase):
-    def test_http_transport(self):
+    def run_transport(self, p4=False):
         with tempfile.TemporaryDirectory() as folder:
             binary = str(pathlib.Path(folder) / 'http-service')
-            build = subprocess.run(['cc', '-std=c11', '-D_POSIX_C_SOURCE=200809L',
+            build = subprocess.run(['cc', *(['-DASTER_SYSTEM_ESP_IDF=1'] if p4 else []), '-std=c11', '-D_POSIX_C_SOURCE=200809L',
                 '-Wall', '-Wextra', '-Werror', '-g', '-fsanitize=address,undefined',
                 '-I' + str(ROOT / 'tests'),
                 '-I' + str(ROOT / 'systems/zephyr/core'),
@@ -22,3 +22,9 @@ class HttpServiceTests(unittest.TestCase):
             result = subprocess.run([binary], capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('recovery OK', result.stdout)
+
+    def test_http_transport(self):
+        self.run_transport()
+
+    def test_p4_large_buffers_and_cleanup(self):
+        self.run_transport(p4=True)

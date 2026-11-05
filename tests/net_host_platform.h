@@ -21,6 +21,18 @@ static int net_if_is_up(struct net_if *iface) {(void)iface;return 1;}
 static int net_if_is_carrier_ok(struct net_if *iface) {(void)iface;return 1;}
 static const struct in_addr *net_if_ipv4_get_global_addr(struct net_if *iface,int state)
 {(void)iface;(void)state;static struct in_addr addr;addr.s_addr=htonl(INADDR_LOOPBACK);return host_if_no_address?NULL:&addr;}
+#ifdef ASTER_SYSTEM_ESP_IDF
+/* P4 metadata adapter fixture; transport/socket code remains the real service. */
+int aster_idf_net_interface_info(struct aster_net_interface_info *out)
+{
+ if(!out)return -EINVAL;
+ *out=(struct aster_net_interface_info){0};
+ struct net_if *iface=net_if_get_default();if(!iface)return 0;
+ out->flags=1;if(net_if_is_up(iface))out->flags|=2;if(net_if_is_carrier_ok(iface))out->flags|=4;
+ const struct in_addr *addr=net_if_ipv4_get_global_addr(iface,NET_ADDR_PREFERRED);
+ if(addr){out->flags|=8;out->ipv4=addr->s_addr;}return 0;
+}
+#endif
 #define zsock_socket socket
 #define zsock_close close
 #define zsock_bind bind

@@ -12,6 +12,8 @@ class InstallIO(unittest.TestCase):
         header = (ROOT / 'common/package/aster_pkg_format.h').read_text()
         decode = (ROOT / 'common/package/aster_pkg_decode.c').read_text()
         manager = (ROOT / 'systems/zephyr/services/aster_app_mgr.c').read_text()
+        progress = (ROOT / 'systems/zephyr/services/aster_pkg.h').read_text()
+        progress = progress[progress.index('typedef enum'):progress.index('#ifdef CONFIG_ASTER_PKG_FAULT_INJECTION')]
         manifest = header[header.index('typedef struct {'):header.index('} aster_manifest_t;') + len('} aster_manifest_t;')]
         bounds = decode[decode.index('bool aster_pkg_in_bounds('):decode.index('int aster_pkg_decode(')]
         installer = pkg[pkg.index('static int json_string_field('):]
@@ -173,6 +175,8 @@ static int aster_storage_mkdir_p(const char *path) {
 static void aster_storage_app_dir(char *out,size_t cap,const char *id) {snprintf(out,cap,"%s/%s",root,id);}
 static void *aster_psram_alloc(size_t size) {if(manifest_oom)return NULL;void *p=malloc(size);if(p)allocated++;return p;}
 static void aster_psram_free(void *p) {freed++;free(p);}
+static void *aster_dram_alloc(size_t size) {void *p=malloc(size);if(p)allocated++;return p;}
+static void aster_dram_free(void *p) {freed++;free(p);}
 static uint16_t aster_le16(const void *p) {const uint8_t *b=p;return b[0]|(uint16_t)b[1]<<8;}
 static uint32_t aster_le32(const void *p) {const uint8_t *b=p;return b[0]|(uint32_t)b[1]<<8|(uint32_t)b[2]<<16|(uint32_t)b[3]<<24;}
 static int load_file(const char *path,uint8_t **out,size_t *len) {
@@ -184,7 +188,7 @@ static int load_file(const char *path,uint8_t **out,size_t *len) {
 static int aster_sig_check(const uint8_t *img,size_t n) {(void)img;(void)n;return 0;}
 static int aster_icon_parse(const void *img,size_t n,void *out) {(void)img;(void)n;(void)out;return 0;}
 static const char *aster_pkg_orientation_name(int8_t o) {(void)o;return NULL;}
-''' + manifest + r'''
+''' + manifest + progress + r'''
 static int aster_pkg_parse(const uint8_t *img,size_t n,aster_manifest_t *m,
  const uint8_t **wasm,size_t *wlen,const uint8_t **aot,size_t *alen,uint32_t *target) {
  assert(n==256);memset(m,0,sizeof(*m));snprintf(m->id,sizeof(m->id),"%s",package_id);strcpy(m->name,"Test");snprintf(m->version,sizeof(m->version),"%u.0",revision);
@@ -238,12 +242,18 @@ static unsigned selected_revision(void) {
 
     def test_external_bundle_streams_into_inactive_slot_and_failure_keeps_old_assets(self):
         run_c(self.program() + r'''
+static uint64_t observed_done,observed_total;static unsigned copy_reports,sync_reports,commit_reports;
+static void observe(void *ctx,aster_install_phase phase,uint64_t done,uint64_t total,const char *file){
+ assert(ctx==&observed_done&&file);if(total){assert(total==1048576&&done<=total&&done>=observed_done);observed_done=done;observed_total=total;}
+ if(phase==ASTER_INSTALL_COPY)copy_reports++;if(phase==ASTER_INSTALL_SYNC)sync_reports++;if(phase==ASTER_INSTALL_COMMIT)commit_reports++;
+}
 int main(void) {
  prepare_upgrade();char resources[160],file[192];
  snprintf(resources,sizeof(resources),"%s/source-resources",root);assert(!aster_storage_mkdir_p(resources));
  snprintf(file,sizeof(file),"%s/extra.bin",resources);FILE *f=fopen(file,"wb");assert(f);
  for(unsigned i=0;i<1048576;i++)assert(fputc(i%251,f)!=EOF);assert(!fclose(f));
- assert(!aster_pkg_install_bundle_file("v3.ast",resources,"aster.store"));assert(selected_revision()==3);
+ assert(!aster_pkg_install_bundle_progress("v3.ast",resources,"aster.store",observe,&observed_done));assert(selected_revision()==3);
+ assert(observed_done==1048576&&observed_total==1048576&&copy_reports>1&&sync_reports==1&&commit_reports==1);
  char code[160];assert(!aster_storage_app_code_dir(code,sizeof(code),"test.app"));
  snprintf(file,sizeof(file),"%s/assets/extra.bin",code);struct stat st;assert(!stat(file,&st)&&st.st_size==1048576);
  f=fopen(file,"rb");assert(f);for(unsigned i=0;i<1048576;i++)assert(fgetc(f)==(int)(i%251));assert(!fclose(f));
@@ -252,6 +262,26 @@ int main(void) {
  assert(selected_revision()==3);
  assert(aster_pkg_install_bundle_file("self.ast",resources,"test.app")==ASTER_EPERM);
  assert(selected_revision()==3);assert(!rmrf(root));return 0;
+}
+''')
+
+    def test_nested_resources_and_partial_blocks_release_temporary_memory(self):
+        run_c(self.program() + r'''
+int main(void) {
+ prepare_upgrade();char resources[160],nested[192],file[256];
+ snprintf(resources,sizeof(resources),"%s/source-resources",root);
+ snprintf(nested,sizeof(nested),"%s/resources/audio",resources);assert(!aster_storage_mkdir_p(nested));
+ snprintf(file,sizeof(file),"%s/music.bin",nested);FILE *f=fopen(file,"wb");assert(f);
+ const unsigned length=1048593;for(unsigned i=0;i<length;i++)assert(fputc(i%251,f)!=EOF);assert(!fclose(f));
+ assert(!aster_pkg_install_bundle_file("v3.ast",resources,"aster.store"));assert(selected_revision()==3);
+ char code[160];assert(!aster_storage_app_code_dir(code,sizeof(code),"test.app"));
+ snprintf(file,sizeof(file),"%s/assets/resources/audio/music.bin",code);f=fopen(file,"rb");assert(f);
+ for(unsigned i=0;i<length;i++)assert(fgetc(f)==(int)(i%251));assert(fgetc(f)==EOF);assert(!fclose(f));
+ assert(allocated==freed&&opens==closes&&!lock_depth);
+ revision=4;fail_path="music.bin";fail_op="write";
+ assert(aster_pkg_install_bundle_file("v4.ast",resources,"aster.store")==ASTER_EIO);fail_op=NULL;
+ assert(selected_revision()==3&&allocated==freed&&opens==closes&&!lock_depth);
+ assert(!rmrf(root));return 0;
 }
 ''')
 

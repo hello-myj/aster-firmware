@@ -580,12 +580,15 @@ int aster_app_mgr_queue_install(const char *owner,const char *package,const char
     aster_app_mgr_files_unlock();return r;
 }
 bool aster_app_mgr_finish_install(const char *owner,bool execute)
+{return aster_app_mgr_finish_install_progress(owner,execute,NULL,NULL);}
+bool aster_app_mgr_finish_install_progress(const char *owner,bool execute,aster_install_progress_fn notify,void *context)
 {
     aster_app_mgr_files_lock();
     if(!pending_install.owner[0] || strcmp(owner,pending_install.owner)){aster_app_mgr_files_unlock();return false;}
-    int r=execute?aster_pkg_install_bundle_file(pending_install.package,pending_install.resources,owner):ASTER_ESTATE;
+    int r=execute?aster_pkg_install_bundle_progress(pending_install.package,pending_install.resources,owner,notify,context):ASTER_ESTATE;
     int scanned=aster_app_mgr_scan();if(!r && scanned<0)r=ASTER_EIO;
     (void)aster_kv_set(owner,"store.install.result",&r,sizeof(r));
     memset(&pending_install,0,sizeof(pending_install));
+    if(notify&&!r)notify(context,ASTER_INSTALL_DONE,0,0,"");
     aster_app_mgr_files_unlock();return true;
 }

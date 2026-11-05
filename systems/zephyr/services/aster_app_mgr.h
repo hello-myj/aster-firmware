@@ -91,6 +91,7 @@ int aster_app_mgr_queue_install(const char *owner,const char *package,const char
 /* Worker only, after STOPPED/cleanup; returns true when this owner's request
  * was consumed, including a cancelled request. Stores a durable result. */
 bool aster_app_mgr_finish_install(const char *owner,bool execute);
+bool aster_app_mgr_finish_install_progress(const char *owner,bool execute,aster_install_progress_fn notify,void *context);
 int  aster_app_mgr_uninstall(const char *id);
 /* read manifest.json fields into rec (used by scan) */
 int  aster_app_mgr_read_manifest(const char *id, aster_manifest_t *m);

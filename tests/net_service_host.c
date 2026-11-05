@@ -55,11 +55,11 @@ static void test_tcp(void)
  int h=aster_net_open(1,ASTER_NET_TCP,"echo.test",ntohs(a.sin_port),5000);assert(h>0);
  tick();tick();tick();assert(snap(h).state==ASTER_NET_READY);
  int remote=accept(listener,NULL,NULL);assert(remote>=0);
- uint8_t data[4096];for(size_t i=0;i<sizeof(data);i++)data[i]=(uint8_t)i;
- assert(aster_net_send(1,h,data,sizeof(data),NULL,0)==2048);
+ uint8_t data[ASTER_NET_TCP_BUFFER*2];for(size_t i=0;i<sizeof(data);i++)data[i]=(uint8_t)i;
+ assert(aster_net_send(1,h,data,sizeof(data),NULL,0)==ASTER_NET_TCP_BUFFER);
  assert(aster_net_send(1,h,data,1,NULL,0)==-EAGAIN);tick();
- uint8_t received[4096];assert(recv(remote,received,sizeof(received),0)==2048);
- assert(!memcmp(received,data,2048));assert(snap(h).tx_bytes==2048);
+ uint8_t received[ASTER_NET_TCP_BUFFER*2];assert(recv(remote,received,ASTER_NET_TCP_BUFFER,MSG_WAITALL)==ASTER_NET_TCP_BUFFER);
+ assert(!memcmp(received,data,ASTER_NET_TCP_BUFFER));assert(snap(h).tx_bytes==ASTER_NET_TCP_BUFFER);
  /* Simulate native small-packet reads: one tick must drain a bounded batch. */
  host_recv_limit=536;
  assert(send(remote,data,2048,0)==2048);tick();

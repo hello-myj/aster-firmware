@@ -114,19 +114,19 @@ static void content(void)
 }
 static void streaming(void)
 {
-    int h = start(ASTER_HTTP_GET, "/big", NULL, NULL, 10000);
+    int h = start(ASTER_HTTP_GET, "/big", NULL, NULL, ASTER_HTTP_BODY_BUFFER*4);
     ready();
-    send_wire("HTTP/1.1 200 OK\r\nContent-Length: 8192\r\n\r\n");
-    char b[8192];
+    char header[100];snprintf(header,sizeof(header),"HTTP/1.1 200 OK\r\nContent-Length: %u\r\n\r\n",ASTER_HTTP_BODY_BUFFER*4);send_wire(header);
+    char b[ASTER_HTTP_BODY_BUFFER*4];
     for (unsigned i = 0; i < sizeof(b); ++i)
         b[i] = i;
     assert(send(remote, b, sizeof(b), 0) == sizeof(b));
     for (unsigned i = 0; i < 100; ++i)
         pump();
-    assert(status(h).queued == 2048 && status(h).state == ASTER_HTTP_BODY);
+    assert(status(h).queued == ASTER_HTTP_BODY_BUFFER && status(h).state == ASTER_HTTP_BODY);
     for (unsigned i = 0; i < 50; ++i)
         pump();
-    assert(status(h).queued == 2048);
+    assert(status(h).queued == ASTER_HTTP_BODY_BUFFER);
     size_t total = 0;
     char out[137];
     for (unsigned i = 0; i < 20000 && total < sizeof(b); ++i) {
@@ -183,7 +183,9 @@ static void early_response(void)
         pump();
     send_blocked = 1;
     send_wire("HTTP/1.1 100 Continue\r\n\r\n");
-    assert(status(h).state == ASTER_HTTP_SENDING);
+    /* A larger transport queue can accept the whole upload before the blocked
+     * socket drains it; final replies/cancellation must work in either state. */
+    assert(status(h).state == ASTER_HTTP_SENDING || status(h).state == ASTER_HTTP_HEADERS);
     send_wire("HTTP/1.1 413 Too Large\r\nContent-Length: 5\r\n\r\nlarge");
     assert(status(h).state == ASTER_HTTP_DONE && status(h).status == 413 &&
            !status(h).error);
@@ -196,7 +198,9 @@ static void early_response(void)
     send_blocked = 1;
     for (unsigned i = 0; i < 50; ++i)
         pump();
-    assert(status(h).state == ASTER_HTTP_SENDING);
+    /* A larger transport queue can accept the whole upload before the blocked
+     * socket drains it; final replies/cancellation must work in either state. */
+    assert(status(h).state == ASTER_HTTP_SENDING || status(h).state == ASTER_HTTP_HEADERS);
     assert(!aster_http_svc_cancel(1, h));
     pump();
     assert(status(h).state == ASTER_HTTP_CANCELLED);

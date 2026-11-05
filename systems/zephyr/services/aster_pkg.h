@@ -12,6 +12,11 @@ int aster_pkg_parse(const uint8_t *img, size_t size, aster_manifest_t *m,
 int aster_pkg_install_file(const char *src_path);
 int aster_pkg_install_bundle_file(const char *src_path,const char *resources,const char *caller);
 
+/* Private installer observer. Invoked on the installing thread, never ISR. */
+typedef enum {ASTER_INSTALL_CHECK,ASTER_INSTALL_COPY,ASTER_INSTALL_SYNC,ASTER_INSTALL_COMMIT,ASTER_INSTALL_DONE} aster_install_phase;
+typedef void (*aster_install_progress_fn)(void *context,aster_install_phase phase,uint64_t done,uint64_t total,const char *file);
+int aster_pkg_install_bundle_progress(const char *src,const char *resources,const char *caller,aster_install_progress_fn notify,void *context);
+
 #ifdef CONFIG_ASTER_PKG_FAULT_INJECTION
 int aster_pkg_fault_arm(const char *id, const char *stage, const char *operation,
                         unsigned action);

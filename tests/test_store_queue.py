@@ -6,6 +6,8 @@ class StoreQueue(unittest.TestCase):
     def test_install_runs_only_after_cleanup_and_receipt_is_updated(self):
         source = (ROOT / 'systems/zephyr/services/aster_app_mgr.c').read_text()
         source = source[source.index('static struct {char owner[64],package[256],resources[256];} pending_install;'):]
+        header=(ROOT / 'systems/zephyr/services/aster_pkg.h').read_text()
+        progress=header[header.index('typedef enum'):header.index('#ifdef CONFIG_ASTER_PKG_FAULT_INJECTION')]
         run_c(r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -16,11 +18,13 @@ class StoreQueue(unittest.TestCase):
 #define ASTER_EIO -7
 #define ASTER_ESTATE -12
 #define ASTER_EAGAIN -15
+''' + progress + r'''
+bool aster_app_mgr_finish_install_progress(const char*,bool,aster_install_progress_fn,void*);
 static int depth,installed,scans,receipt,live,fail_receipt;
 static void aster_app_mgr_files_lock(void){depth++;}
 static void aster_app_mgr_files_unlock(void){assert(depth);depth--;}
 static int aster_kv_set(const char *owner,const char *key,const void *p,size_t n){assert(depth && !strcmp(owner,"aster.store") && !strcmp(key,"store.install.result") && n==4);memcpy(&receipt,p,4);return fail_receipt;}
-static int aster_pkg_install_bundle_file(const char *p,const char *r,const char *caller){assert(depth && !live && !strcmp(p,"package") && !strcmp(r,"resources") && !strcmp(caller,"aster.store"));installed++;return 0;}
+int aster_pkg_install_bundle_progress(const char *p,const char *r,const char *caller,aster_install_progress_fn fn,void *ctx){(void)fn;(void)ctx;assert(depth && !live && !strcmp(p,"package") && !strcmp(r,"resources") && !strcmp(caller,"aster.store"));installed++;return 0;}
 static int aster_app_mgr_scan(void){assert(depth && !live);scans++;return 1;}
 ''' + source + r'''
 int main(void) {

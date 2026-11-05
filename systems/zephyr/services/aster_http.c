@@ -22,6 +22,11 @@
 #include <zephyr/kernel.h>
 #endif
 #define HTTP_STACK 8192
+#ifdef ASTER_SYSTEM_ESP_IDF
+#define HTTP_POLL_MS 1
+#else
+#define HTTP_POLL_MS 5
+#endif
 #define HTTP_IO ASTER_HTTP_BODY_BUFFER
 #define HTTP_TX_MAX (ASTER_HTTP_URL_MAX + ASTER_HTTP_HEADERS_MAX + 512)
 struct http_request {
@@ -449,7 +454,7 @@ static void http_worker(void *a, void *b, void *c)
 #if defined(CONFIG_ASTER_MDNS)
         active |= aster_mdns_svc_tick();
 #endif
-        k_sem_take(&http_wake, active ? K_MSEC(5) : K_FOREVER);
+        k_sem_take(&http_wake, active ? K_MSEC(HTTP_POLL_MS) : K_FOREVER);
     }
 }
 static int http_worker_ensure(void)

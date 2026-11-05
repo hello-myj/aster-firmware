@@ -10,6 +10,7 @@
 #include <time.h>
 #include <stdatomic.h>
 #include "aster_idf_runtime.h"
+#include "aux_stack.h"
 #include "graphics.h"
 #include "timers.h"
 #ifdef ESP_PLATFORM
@@ -348,6 +349,10 @@ static int run_wasm(const char *path,const char *id,uint32_t perms,unsigned fram
     wasm_module_inst_t instance = module ? wasm_runtime_instantiate_ex(module,&options,error,sizeof(error)) : NULL;
     wasm_exec_env_t env = instance ? wasm_runtime_create_exec_env(instance, 65536) : NULL;
     if (!env) { fprintf(stderr, "runtime: %s\n", error); goto cleanup; }
+    if (!aster_idf_bind_main_aux_stack(env)) {
+        fprintf(stderr,"runtime: invalid main auxiliary stack region\n");
+        goto cleanup;
+    }
     printf("runtime: %s ready: %s\n",aot_image?"AOT":"WASM",path);
     result=1; /* Guest entry below: failures must not restart through fallback. */
     instance_lock();active_instance=instance;instance_unlock();

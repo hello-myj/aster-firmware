@@ -18,6 +18,11 @@
 #endif
 
 #define NET_STACK 4096
+#ifdef ASTER_SYSTEM_ESP_IDF
+#define NET_POLL_MS 2
+#else
+#define NET_POLL_MS 10
+#endif
 #define IO_TIMEOUT 5000
 struct datagram {
     uint8_t data[ASTER_NET_UDP_MAX];
@@ -368,7 +373,7 @@ static bool service_tick(void)
 static void worker(void *a, void *b, void *c)
 {
     (void)a; (void)b; (void)c;
-    for (;;) { bool active = service_tick(); k_sem_take(&net_wake, active ? K_MSEC(10) : K_FOREVER); }
+    for (;;) { bool active = service_tick(); k_sem_take(&net_wake, active ? K_MSEC(NET_POLL_MS) : K_FOREVER); }
 }
 int aster_net_open(uint64_t owner, enum aster_net_kind kind,
                    const char *host, uint16_t port, uint32_t timeout_ms)

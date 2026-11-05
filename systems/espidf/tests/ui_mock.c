@@ -90,6 +90,16 @@ int main(int argc,char **argv)
     aster_qpanel_close(true);
     for(unsigned i=0;i<480*480;i++)if(pixels[i]!=0x001f)return 9;
     aster_idf_ui_after_app();
+    aster_idf_ui_before_app();
+    for(unsigned i=0;i<5;i++){aster_idf_ui_install_progress(NULL,ASTER_INSTALL_COPY,1048576,4194304,"/stage/assets/audio/music.mp3");pause_ms(70);}
+    if(save(argv[1],"install-progress"))return 13;
+    memcpy(snapshot,pixels,sizeof(pixels));x=120;y=400;contact=true;
+    aster_idf_ui_install_progress(NULL,ASTER_INSTALL_COPY,1048576,4194304,"/stage/assets/audio/music.mp3");pause_ms(90);contact=false;
+    aster_idf_ui_install_progress(NULL,ASTER_INSTALL_COPY,1048576,4194304,"/stage/assets/audio/music.mp3");pause_ms(90);
+    aster_idf_ui_install_progress(NULL,ASTER_INSTALL_COPY,1048576,4194304,"/stage/assets/audio/music.mp3");
+    if(!memcmp(snapshot,pixels,sizeof(pixels))||save(argv[1],"install-details"))return 14;
+    aster_idf_ui_install_progress(NULL,ASTER_INSTALL_COMMIT,4194304,4194304,"aster.opentyrian");
+    aster_idf_ui_install_end();aster_idf_ui_after_app();
     puts("PASS native FLUX render, pull-down gesture, APP overlay freeze/restore and panel-canvas hint fallback");
     return 0;
 }

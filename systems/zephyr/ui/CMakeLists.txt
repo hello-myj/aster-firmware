@@ -23,6 +23,7 @@ list(APPEND ASTER_LVGL_SOURCES
 
 target_sources(app PRIVATE
 	ui_lvgl.c
+	install_progress.c
 	ui_font.c
 	font_sd.c
 	ui_gfx.c
