@@ -5,6 +5,7 @@
 #include "aster_app_mgr.h"
 #include "aster_storage.h"
 #include "aster_pkg.h"
+#include "aster_setup.h"
 #include "launcher.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -132,6 +133,19 @@ int aster_idf_apps_start(void)
 }
 int aster_idf_apps_command(int argc,char **argv)
 {
+    if(argc>=2 && !strcmp(argv[1],"sd")) {
+        if(argc==4 && !strcmp(argv[2],"format") && !strcmp(argv[3],"--confirm")) {
+            if(!state_lock)return ASTER_ESTATE;
+            xSemaphoreTake(state_lock,portMAX_DELAY);
+            int rc=busy?ASTER_EBUSY:aster_setup_request_format();
+            if(!rc)busy=true; /* Reserve the UI/VM owner until the reset. */
+            xSemaphoreGive(state_lock);
+            if(!rc)puts("SD format queued: all card contents will be erased; device will reboot.");
+            return rc;
+        }
+        puts("Erase the mounted SD card: aster sd format --confirm (stop all APPs first)");
+        return ASTER_EINVAL;
+    }
     if(argc>=2 && !strcmp(argv[1],"ui"))return aster_idf_ui_command(argc,argv);
     if(argc<3 || strcmp(argv[1],"app"))return ASTER_EINVAL;
     if(argc==3 && !strcmp(argv[2],"diagnostic"))return launch(NULL,true);

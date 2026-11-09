@@ -59,8 +59,8 @@
 #define LV_USE_LZ4_INTERNAL 0
 #define LV_USE_LZ4_EXTERNAL 0
 
-/* All UI text comes from pre-baked cpfont faces on the SD card (see
- * ui_font.c / font_sd.c). LVGL still needs one compiled-in default for
+/* APP text comes from full cpfont faces on the SD card. The shared system UI
+ * family is embedded for provisioning/settings/recovery. LVGL needs a default for
  * theme init before any face exists; unscii was pruned from the vendor tree,
  * so this placeholder lives in ui_font.c. */
 #define LV_FONT_MONTSERRAT_8  0

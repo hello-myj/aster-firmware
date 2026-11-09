@@ -62,6 +62,10 @@ typedef struct {int unused;} lv_font_t;
 ''' +structs+r'''
 static slot_t s_slots[2];
 static bool s_inited=true;
+enum {ST_EMPTY,ST_SPARSE,ST_DEAD};
+static bool s_probe_first,s_repaint;
+static unsigned s_generation,reload_polls;
+static int aster_font_sd_poll(void){reload_polls++;return 0;}
 static unsigned s_full_refs,disk_reads,live_allocs,fail_next,io_opens,io_closes,fail_io;
 static struct {unsigned reads,read_bytes,evictions,misses,miss_filled,hits,load_us,max_load_us,open_us,record_us,bitmap_us,close_us,load_failures;} s_st;
 static uint32_t k_cycle_get_32(void){static uint32_t clock;return ++clock;}
@@ -142,6 +146,14 @@ int main(void) {
  assert(sparse_fetch(s_slots,0x8000,70));
  assert(s_st.load_failures==failures+1 && io_opens==io_closes);
  aster_font_sd_cache_drop();assert(!live_allocs);
+ for(unsigned i=0;i<2;i++) {
+  s_slots[i].ivs=aster_psram_alloc(24);s_slots[i].state=ST_SPARSE;
+  s_slots[i].iv_cnt=2;s_slots[i].gl_cnt=100;s_slots[i].fsize=1000000;
+ }
+ assert(sparse_fetch(s_slots,0x9000,71));s_probe_first=true;
+ aster_font_sd_reload();
+ assert(!live_allocs && !s_probe_first && s_repaint && s_generation==1 && reload_polls==1);
+ for(unsigned i=0;i<2;i++)assert(!s_slots[i].ivs && !s_slots[i].cache && s_slots[i].state==ST_EMPTY && !s_slots[i].iv_cnt && !s_slots[i].gl_cnt);
  return 0;
 }
 ''')

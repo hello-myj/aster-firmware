@@ -6,6 +6,8 @@
 # engine (ABI 2.2) instead.
 
 set(ASTER_LVGL_DIR ${ASTER_ROOT}/third_party/lvgl)
+include(${ASTER_ROOT}/common/setup/assets.cmake)
+add_dependencies(app aster_system_fonts)
 
 file(GLOB_RECURSE ASTER_LVGL_SOURCES CONFIGURE_DEPENDS ${ASTER_LVGL_DIR}/src/*.c)
 list(FILTER ASTER_LVGL_SOURCES EXCLUDE REGEX "/(examples|tests|demos)/")
@@ -22,6 +24,7 @@ list(APPEND ASTER_LVGL_SOURCES
 )
 
 target_sources(app PRIVATE
+    ${ASTER_SYSTEM_FONT}
 	ui_lvgl.c
 	install_progress.c
 	ui_font.c
@@ -47,6 +50,10 @@ endif()
 
 if(CONFIG_ASTER_WIFI)
 	target_sources(app PRIVATE wifi_settings.c)
+endif()
+if(CONFIG_ASTER_FIRST_BOOT)
+  target_sources(app PRIVATE ${ASTER_ROOT}/systems/shared/setup/setup_ui.c ${ASTER_ROOT}/third_party/qrcodegen/qrcodegen.c)
+  target_include_directories(app PRIVATE ${ASTER_ROOT}/third_party/qrcodegen)
 endif()
 
 if(CONFIG_ASTER_LAUNCHER_NATIVE)

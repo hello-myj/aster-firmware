@@ -546,6 +546,17 @@ void aster_font_sd_cache_drop(void)
  if(freed) LOG_INF("cpfont cache: released %u B",freed);
 }
 
+void aster_font_sd_reload(void)
+{
+ aster_font_sd_cache_drop();
+ for(uint32_t i=0;i<ARRAY_SIZE(s_slots);i++) {
+  slot_t *s=&s_slots[i];aster_psram_free(s->ivs);s->ivs=NULL;
+  s->state=ST_EMPTY;s->iv_cnt=s->gl_cnt=s->fsize=0;
+ }
+ s_probe_first=false;s_repaint=true;s_generation++;
+ (void)aster_font_sd_poll();
+}
+
 void aster_font_sd_session_begin(void)
 {
  if(!s_inited || s_full_refs++!=0u) return;

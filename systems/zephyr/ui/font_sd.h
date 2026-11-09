@@ -74,6 +74,9 @@ void aster_font_sd_session_end(void);
 
 /* Release all size caches when ownership changes; interval metadata stays. */
 void aster_font_sd_cache_drop(void);
+/* UI owner, after verified resource replacement and before normal UI resumes.
+ * Stable font objects are retained; intervals and glyph caches are reloaded. */
+void aster_font_sd_reload(void);
 
 /* Profiling (CONFIG_ASTER_LVGL_PROFILER builds the printer; counters always
  * maintained): table/metadata reads, warm bursts, misses, white-box draws. */

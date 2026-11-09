@@ -8,6 +8,18 @@
 #include "aster_storage.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_system.h"
+#include <errno.h>
+static sdmmc_card_t *mounted_card;
+static int format_and_reboot(void)
+{
+    if(!mounted_card)return -ENODEV;
+    ESP_LOGW("aster","SD FORMAT begin: all card contents will be erased");
+    esp_err_t result=esp_vfs_fat_sdcard_format("/SD",mounted_card);
+    if(result!=ESP_OK){ESP_LOGE("aster","SD FORMAT failed: %s",esp_err_to_name(result));return -EIO;}
+    ESP_LOGW("aster","SD FORMAT complete; rebooting into empty-card setup");
+    vTaskDelay(pdMS_TO_TICKS(300));esp_restart();return 0;
+}
 
 void osptek_storage_start(void)
 {
@@ -35,6 +47,8 @@ void osptek_storage_start(void)
         return;
     }
     sdmmc_card_print_info(stdout, card);
+    mounted_card=card;
+    aster_storage_set_format_handler(format_and_reboot);
     int initialized=aster_storage_init();
     if(initialized)ESP_LOGE("aster","Storage directories failed: %d",initialized);
 }

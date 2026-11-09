@@ -932,8 +932,31 @@ static int cmd_fs_mount(const struct shell *sh, size_t argc, char **argv)
 }
 
 /* ---- command tree ---- */
+#if defined(CONFIG_ASTER_FIRST_BOOT)
+#include "aster_setup.h"
+static int cmd_sys_setup(const struct shell *sh,size_t argc,char **argv)
+{
+    ARG_UNUSED(sh);ARG_UNUSED(argc);ARG_UNUSED(argv);
+    return aster_setup_repair();
+}
+static int cmd_sd_format(const struct shell *sh,size_t argc,char **argv)
+{
+    if(argc!=2 || strcmp(argv[1],"--confirm")) {
+        shell_print(sh,"Erase mounted SD card: aster sd format --confirm");return -EINVAL;
+    }
+    int rc=aster_setup_request_format();
+    if(!rc)shell_print(sh,"SD format queued: all card contents will be erased; device will reboot.");
+    return rc;
+}
+SHELL_STATIC_SUBCMD_SET_CREATE(sub_sd,
+    SHELL_CMD(format,NULL,"erase mounted SD card and reboot; requires --confirm",cmd_sd_format),
+    SHELL_SUBCMD_SET_END);
+#endif
 
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_sys,
+#if defined(CONFIG_ASTER_FIRST_BOOT)
+    SHELL_CMD(setup,NULL,"reopen Web provisioning; preserve apps and data",cmd_sys_setup),
+#endif
 	SHELL_CMD(info, NULL, "device profile", cmd_sys_info),
 	SHELL_CMD(features, NULL, "capability list", cmd_sys_features),
 	SHELL_CMD(abi, NULL, "ABI version", cmd_sys_abi),
@@ -1035,6 +1058,9 @@ static int cmd_display_mode(const struct shell *sh, size_t argc, char **argv)
 #endif
 
 SHELL_STATIC_SUBCMD_SET_CREATE(aster_cmds,
+#if defined(CONFIG_ASTER_FIRST_BOOT)
+    SHELL_CMD(sd,&sub_sd,"explicit SD maintenance",NULL),
+#endif
 #if defined(CONFIG_ASTER_NET)
     SHELL_CMD(net, &aster_net_cmds, "async transport diagnostics", NULL),
 #endif

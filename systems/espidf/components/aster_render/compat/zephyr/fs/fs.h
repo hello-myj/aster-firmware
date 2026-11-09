@@ -21,6 +21,8 @@ int fs_open(struct fs_file_t *f,const char *path,int flags);
 int fs_close(struct fs_file_t *f);
 int fs_seek(struct fs_file_t *f,off_t offset,int whence);
 int fs_stat(const char *path,struct fs_dirent *entry);
+struct fs_statvfs {unsigned long f_bsize,f_frsize;uint64_t f_blocks,f_bfree;};
+int fs_statvfs(const char *path,struct fs_statvfs *stat);
 
 struct fs_dir_t { DIR *dir; char path[512]; };
 static inline void fs_dir_t_init(struct fs_dir_t *d) { d->dir=NULL; }

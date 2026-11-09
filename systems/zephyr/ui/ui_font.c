@@ -6,6 +6,7 @@
  */
 #include "ui_font.h"
 #include "font_sd.h"
+#include "system_font.h"
 
 #include <zephyr/logging/log.h>
 
@@ -89,22 +90,17 @@ const lv_font_t *aster_ui_font(uint8_t px)
 	snap = cp_snap_px(px);
 	f = snap > 0 ? aster_font_sd_get((uint8_t)snap) : NULL;
 	if (!f) {
-		/* Reaching here no longer means "unbaked size" -- the clamp above
-		 * covers every size. It means the face exists in the bake but is
-		 * not drawable: no bake record at all, the .cpfont is missing
-		 * from the card, or it has not finished streaming its metrics.
-		 * So this is a real fault and worth one loud line -- with the
-		 * rasterizer gone, nothing else covers for it, and a blank page
-		 * with no log is the hardest kind of report to read. */
+		/* First boot and recovery use the same flash-resident system UI
+		 * family as settings. Full APP coverage still comes from SD. */
 		static bool warned;
 
 		if (!warned) {
 			warned = true;
-			LOG_ERR("no drawable face for %upx (nearest baked %dpx): "
-				"SD missing/not mounted, ui_*.cpfont absent, or no glyph cache memory; text will be blank",
+			LOG_WRN("no SD face for %upx (nearest baked %dpx): "
+				"using system UI font",
 				(unsigned)px, snap);
 		}
-		return &aster_ui_placeholder_font;
+        return aster_system_font(px);
 	}
 	return f;
 }

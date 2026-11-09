@@ -32,6 +32,9 @@
 #include "aster_kv.h"
 #include <aster/font_metrics.h>
 #include "aster_time.h"
+#if defined(CONFIG_ASTER_FIRST_BOOT)
+#include "setup_ui.h"
+#endif
 LOG_MODULE_REGISTER(aster_flux, LOG_LEVEL_INF);
 #include "flux_icons.inc"
 #include "flux_motion.h"
@@ -1051,6 +1054,9 @@ uint32_t aster_launcher_idle_wait_ms(void)
 void aster_launcher_pump_idle(void)
 {
  if(!aster_plat_display_count()) return;
+#if defined(CONFIG_ASTER_FIRST_BOOT)
+ if(aster_setup_ui_tick())return;
+#endif
  if(aster_ui_fonts_poll() && aster_ui_lvgl_screen()) {
   ribbon_cache_clear();
   /* Rebaking during a flick is the hitch between cards. Glyphs that

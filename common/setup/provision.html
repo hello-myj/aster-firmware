@@ -1,0 +1,71 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Aster · 设置设备</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;color:#f3f3e8;background:#131317}*{box-sizing:border-box}body{margin:0;padding:24px 20px 48px}main{max-width:440px;margin:auto}.brand{font-size:21px;color:#d8ff8c;letter-spacing:3px}small,.hint{color:#a0ae92;line-height:1.65}h1{font-size:30px;margin:28px 0 12px}p{line-height:1.7}.card{margin-top:24px;padding:24px;border:1px solid #393d34;border-radius:24px;background:#1d1e22}label{display:block;margin:18px 0 8px}input,select,button{width:100%;min-height:48px;font:inherit;border-radius:12px;border:1px solid #53584a;padding:12px;background:#131317;color:inherit}button{margin-top:16px;background:#d8ff8c;color:#211d28;font-weight:650;border:0;cursor:pointer}button.secondary{background:#30352a;color:#d8ff8c}button:disabled{opacity:.5;cursor:wait}details{margin-top:24px}summary{cursor:pointer}progress{width:100%;height:12px;accent-color:#d8ff8c}.error{color:#ffbcaa}#state{white-space:pre-wrap}a{color:#d8ff8c}
+</style><main><div class="brand">aster</div><h1>让设备准备就绪</h1><p class="hint">连接家庭 Wi-Fi 后，设备会自动下载系统字体和商城。请保持供电，并留好存储卡。</p>
+<section class="card" id="form"><label for="networks">附近的 Wi-Fi</label><select id="networks"><option value="">扫描后选择，或在下方输入</option></select><button class="secondary" id="scan">扫描网络</button>
+<label for="ssid">Wi-Fi 名称</label><input id="ssid" autocomplete="off" maxlength="32" placeholder="输入网络名称"><label for="password">Wi-Fi 密码</label><input id="password" type="password" autocomplete="new-password" maxlength="64" placeholder="开放网络可留空"><label><input id="show" type="checkbox" style="width:auto;min-height:0"> 显示密码</label>
+<details open><summary>资源服务器</summary><label for="server">下载地址</label><input id="server" type="url" placeholder="http://电脑局域网IP:9081" autocapitalize="off" spellcheck="false"><p class="hint">本地部署时填写同一路由器下电脑的地址。设备会根据硬件选择兼容资源。</p></details><button id="connect">连接并准备系统</button></section>
+<section class="card"><small>设备状态</small><p id="state" aria-live="polite">正在读取…</p><progress id="progress" value="0" max="100"></progress><p class="hint" id="bytes"></p><button class="secondary" id="retry" hidden>重新设置</button></section><p class="hint">连接此热点后若手机提示“无互联网”，请选择继续连接。提交后以设备屏幕的进度为准，可离开此页面。</p></main>
+<script>
+let token='',scanBusy=false,finished=false,formError='';
+const $=id=>document.getElementById(id);
+const phases=['检查系统','请检查存储卡','等待开始设置','等待配网','正在连接 Wi-Fi','检查系统资源','正在下载','正在校验','正在安装商城','准备完成，可以使用设备了','准备失败，请重新设置'];
+function showError(text){formError=text;$('state').className='error';$('state').textContent=text;}
+function utf8Bytes(text){let n=0;for(const c of text){let p=c.codePointAt(0);n+=p<128?1:p<2048?2:p<65536?3:4;}return n;}
+async function request(path,body){
+ const controller=typeof AbortController==='function'?new AbortController():null;
+ let timer;
+ try{
+  const work=(async()=>{
+   const r=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},
+    body:body?JSON.stringify({...body,token}):undefined,cache:'no-store',signal:controller?controller.signal:undefined});
+   if(!r.ok)throw Error('设备拒绝请求 ('+r.status+')，请检查输入后重试');
+   return await r.json();
+  })();
+  return await Promise.race([work,new Promise((resolve,reject)=>{timer=setTimeout(()=>{
+   if(controller)controller.abort();reject(Error('设备响应超时，请保持连接设备热点后重试'));
+  },12000);})]);
+ }finally{clearTimeout(timer);}
+}
+async function poll(){
+ try{
+  const s=await request('/api/status');token=s.token;
+  const error=(s.phase===3||s.phase===10)&&formError;
+  $('state').className=error||s.phase===10?'error':'';
+  $('state').textContent=error||(phases[s.phase]||'准备中')+(s.error?' · 错误 '+s.error:'');
+  $('progress').value=s.percent;
+  $('bytes').textContent=s.total?(s.bytes/1048576).toFixed(1)+' / '+(s.total/1048576).toFixed(1)+' MiB · '+s.seconds+' 秒':'';
+  $('retry').hidden=s.phase!==10;$('connect').disabled=s.phase!==3&&s.phase!==10;
+  $('scan').disabled=scanBusy||$('connect').disabled;
+  if(!$('server').value&&s.server)$('server').value=s.server;
+  if(s.phase===9){$('form').hidden=true;finished=true;}
+ }catch(e){$('state').textContent='暂时未连接设备，请查看设备屏幕，或重新连接设备热点。';}
+ if(!finished)setTimeout(poll,1500);
+}
+$('networks').onchange=()=>{$('ssid').value=$('networks').value;};
+$('show').onchange=()=>{$('password').type=$('show').checked?'text':'password';};
+$('scan').onclick=async()=>{
+ scanBusy=true;$('scan').disabled=true;
+ try{
+  await request('/api/scan',{});await new Promise(r=>setTimeout(r,3500));
+  const list=await request('/api/networks');$('networks').replaceChildren(new Option('选择网络',''));
+  for(const ap of list.networks)$('networks').add(new Option(ap.ssid+' · '+ap.rssi+' dBm',ap.ssid));
+ }catch(e){showError('扫描暂不可用，请手动输入网络名称。');}
+ finally{scanBusy=false;$('scan').disabled=false;}
+};
+$('connect').onclick=async()=>{
+ formError='';
+ const ssid=$('ssid').value,password=$('password').value,server=$('server').value.trim().replace(/\/+$/,'');
+ if(!ssid||utf8Bytes(ssid)>32){showError('Wi-Fi 名称须为 1–32 字节');return;}
+ if(password&&password.length<8){showError('密码至少需要 8 个字符');return;}
+ if(!/^https?:\/\//.test(server)){showError('请填写完整的 HTTP 或 HTTPS 资源服务器地址');return;}
+ $('connect').disabled=true;$('state').textContent='正在提交配置…';
+ try{
+  const result=await request('/api/connect',{ssid,password,server});
+  if(result.accepted!==1)throw Error('设备未接受配置，请重新提交');
+  $('password').value='';$('state').textContent='已提交，请查看设备屏幕';
+ }catch(e){showError(e.message);$('connect').disabled=false;}
+};
+$('retry').onclick=async()=>{formError='';try{await request('/api/retry',{});}catch(e){showError(e.message);}};
+poll();
+</script></html>

@@ -24,6 +24,11 @@
 
 int  aster_storage_init(void);      /* mount FAT, create dirs */
 bool aster_storage_mounted(void);
+/* Board adapter for explicit SD formatting. Success resets the device.
+ * Mount/retry and APP APIs never call this operation. */
+void aster_storage_set_format_handler(int (*handler)(void));
+bool aster_storage_can_format(void);
+int aster_storage_format_and_reboot(void);
 /* /SD:/aster/apps/<id> */
 void aster_storage_app_dir(char *buf, size_t n, const char *id);
 /* Selected immutable code/assets directory (legacy root or .v0/.v1). */

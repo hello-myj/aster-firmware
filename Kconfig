@@ -16,6 +16,20 @@ config ASTER_NET
 	  Two shared TCP/UDP slots, private network worker and CLI diagnostics.
 	  APP networking is exposed through ABI 3.8 with the net permission.
 
+config ASTER_FIRST_BOOT
+	bool "Shared first-boot Web provisioning and resource setup"
+	default y
+	depends on ASTER_HTTP && ASTER_HTTP_TLS && ASTER_WIFI && ASTER_LAUNCHER_NATIVE
+	help
+	  Require SD fonts and a compatible installed Store before normal boot.
+	  New cards use a temporary password-protected hotspot and phone Web UI.
+	  Provisioning and downloads share the same portable implementation as IDF.
+
+config NET_SOCKETS_SERVICE_STACK_SIZE
+	default 4096 if ASTER_FIRST_BOOT && NET_DHCPV4_SERVER
+	# DHCP's MTU-sized receive buffer plus reply processing exceeds the
+	# upstream 2400-byte default on ESP32 Xtensa during AP client joins.
+
 config ASTER_HTTP
 	bool "Bounded asynchronous HTTP client"
 	depends on ASTER_NET

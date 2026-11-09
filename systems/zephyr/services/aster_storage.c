@@ -13,11 +13,20 @@
 #include <zephyr/storage/disk_access.h>
 #include <ff.h>
 #include <esp_memory_utils.h>
+#include <zephyr/sys/reboot.h>
 #endif
 
 LOG_MODULE_REGISTER(aster_storage, LOG_LEVEL_INF);
 
 static bool mounted;
+static int (*format_handler)(void);
+void aster_storage_set_format_handler(int (*handler)(void)){format_handler=handler;}
+bool aster_storage_can_format(void){return format_handler!=NULL;}
+int aster_storage_format_and_reboot(void)
+{
+ if(!format_handler)return -ENOTSUP;
+ mounted=false;return format_handler();
+}
 
 
 #ifndef ASTER_SYSTEM_ESP_IDF
@@ -109,6 +118,23 @@ int aster_fs_write_safe(struct fs_file_t *f, const void *src, size_t len)
  * to point at it, otherwise f_mount() finds no registered filesystem object
  * and returns FR_NOT_ENABLED (mapped to -ENODEV). */
 static FATFS fat_fs;
+static struct fs_mount_t sd_mount={.type=FS_FATFS,.mnt_point=ASTER_MOUNT_POINT,
+ .fs_data=&fat_fs,.flags=FS_MOUNT_FLAG_NO_FORMAT};
+static int zephyr_format_and_reboot(void)
+{
+#if defined(CONFIG_FS_FATFS_MKFS) && defined(CONFIG_REBOOT)
+ int rc=fs_unmount(&sd_mount);if(rc)return rc;
+ uint32_t work[FF_MAX_SS/sizeof(uint32_t)];
+ const MKFS_PARM options={.fmt=FM_FAT32|FM_SFD,.n_fat=2,.au_size=16384};
+ LOG_WRN("SD FORMAT begin: all card contents will be erased");
+ FRESULT result=f_mkfs("SD:",&options,work,sizeof(work));
+ if(result!=FR_OK){LOG_ERR("SD FORMAT failed: %d",result);return -EIO;}
+ LOG_WRN("SD FORMAT complete; rebooting into empty-card setup");
+ k_msleep(300);sys_reboot(SYS_REBOOT_COLD);return 0;
+#else
+ return -ENOTSUP;
+#endif
+}
 #endif /* !ASTER_SYSTEM_ESP_IDF: board mount and DMA bounce live in IDF port. */
 
 /* Zephyr's fs_mkdir logs at <err> level on EEXIST. ASTER creates the same hot
@@ -202,19 +228,14 @@ int aster_storage_init(void)
 		return err;
 	}
 
-	static struct fs_mount_t mp = {
-		.type = FS_FATFS,
-		.mnt_point = ASTER_MOUNT_POINT,
-		.fs_data = &fat_fs,
-	};
-
-	err = fs_mount(&mp);
+	err = fs_mount(&sd_mount);
 	if (err) {
 		LOG_ERR("SD mount failed (%d)", err);
 		(void)disk_access_ioctl("SD", DISK_IOCTL_CTRL_DEINIT, NULL);
 		return err;
 	}
 	mounted = true;
+    aster_storage_set_format_handler(zephyr_format_and_reboot);
 
 	err = ensure_dirs();
 	if (err) {

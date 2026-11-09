@@ -143,6 +143,12 @@ static int32_t has_feature(wasm_exec_env_t env, uint32_t bit)
     return aster_idf_feature(bit);
 }
 bool aster_sysinfo_has_feature(uint32_t bit) {return has_feature(NULL,bit)!=0;}
+void aster_sysinfo_get(aster_system_info_t *info)
+{
+    aster_idf_system_info(info);
+    info->size=sizeof(*info);info->version=1;info->abi_version=ASTER_ABI_VERSION;
+    for(unsigned bit=0;bit<32;bit++)if(has_feature(NULL,bit))info->feature_flags|=UINT64_C(1)<<bit;
+}
 static int32_t system_info(wasm_exec_env_t env,uint32_t off,uint32_t size)
 {
     wasm_module_inst_t inst=wasm_runtime_get_module_inst(env);
@@ -150,9 +156,7 @@ static int32_t system_info(wasm_exec_env_t env,uint32_t off,uint32_t size)
        !wasm_runtime_validate_app_addr(inst,off,sizeof(aster_system_info_t)))return ASTER_EINVAL;
     uint32_t header[2];memcpy(header,wasm_runtime_addr_app_to_native(inst,off),sizeof(header));
     if(header[0]<sizeof(aster_system_info_t) || header[1]!=1)return ASTER_EINVAL;
-    aster_system_info_t info;aster_idf_system_info(&info);
-    info.size=sizeof(info);info.version=1;info.abi_version=ASTER_ABI_VERSION;
-    for(unsigned bit=0;bit<32;bit++)if(has_feature(env,bit))info.feature_flags|=UINT64_C(1)<<bit;
+    aster_system_info_t info;aster_sysinfo_get(&info);
     memcpy(wasm_runtime_addr_app_to_native(inst,off),&info,sizeof(info));return 0;
 }
 

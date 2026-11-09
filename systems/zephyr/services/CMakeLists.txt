@@ -1,4 +1,9 @@
 # SPDX-License-Identifier: MIT
+if(CONFIG_ASTER_FIRST_BOOT)
+  include(${ASTER_ROOT}/common/setup/service.cmake)
+  add_dependencies(app aster_setup_page)
+  target_sources(app PRIVATE ${ASTER_SETUP_SERVICE_SOURCES})
+endif()
 
 target_sources(app PRIVATE
 	aster_sysinfo.c

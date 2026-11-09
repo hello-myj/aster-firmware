@@ -7,6 +7,16 @@
 #include "esp_heap_caps.h"
 #include "aster_mem.h"
 #include "aster_storage.h"
+#ifndef ASTER_IDF_HOST_TEST
+#include "esp_vfs_fat.h"
+int fs_statvfs(const char *path,struct fs_statvfs *stat)
+{
+    if(strcmp(path,ASTER_MOUNT_POINT))return -EINVAL;
+    uint64_t total,free_bytes;
+    if(esp_vfs_fat_info("/SD",&total,&free_bytes)!=ESP_OK)return -EIO;
+    *stat=(struct fs_statvfs){.f_bsize=512,.f_frsize=512,.f_blocks=total/512,.f_bfree=free_bytes/512};return 0;
+}
+#endif
 
 static const char *real_path(const char *path,char *out,size_t size)
 {

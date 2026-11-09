@@ -6,6 +6,8 @@
 #define zsock_socket socket
 #define zsock_close close
 #define zsock_bind bind
+#define zsock_listen listen
+#define zsock_accept accept
 #define zsock_connect connect
 #define zsock_recv recv
 #define zsock_send send
@@ -22,3 +24,4 @@ ssize_t aster_idf_recvfrom(int fd,void *data,size_t size,int flags,struct sockad
 #define zsock_poll poll
 #define zsock_pollfd pollfd
 #define ZSOCK_POLLOUT POLLOUT
+#define ZSOCK_POLLIN POLLIN

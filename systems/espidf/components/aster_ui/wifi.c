@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "aster_platform.h"
+/* IDF station profiles are loaded from NVS by connectivity initialization. */
+int aster_plat_wifi_storage_ready(void) {return 0;}
 #include "wifi_service.h"
 #include <string.h>
 #include <errno.h>
