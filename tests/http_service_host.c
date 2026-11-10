@@ -246,7 +246,7 @@ static void redirect_matrix(void)
     const unsigned codes[] = {301, 302, 303, 307, 308};
     for (unsigned i = 0; i < 5; ++i) {
         int h = start(ASTER_HTTP_POST, "/start",
-                      "Authorization: secret\r\nCookie: a=b\r\n", "abc", 1000);
+                      "Authorization: secret\r\nCookie: a=b\r\nRange: bytes=4-7\r\nIf-Range: \"test\"\r\n", "abc", 1000);
         ready();
         for (int j = 0; j < 10; ++j)
             pump();
@@ -269,6 +269,8 @@ static void redirect_matrix(void)
             pump();
         assert(!strstr(received_request, "Authorization:") &&
                !strstr(received_request, "Cookie:"));
+        assert(strstr(received_request, "Range: bytes=4-7\r\n"));
+        assert(strstr(received_request, "If-Range: \"test\"\r\n"));
         if (codes[i] >= 307) {
             assert(strstr(received_request, "POST /next"));
             assert(strstr(received_request, "\r\n\r\nabc"));

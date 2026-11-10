@@ -7,6 +7,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+void aster_http_redirect_headers(char *headers)
+{
+    char *read = headers, *write = headers;
+    while (*read) {
+        char *end = strstr(read, "\r\n");
+        if (!end) { headers[0] = 0; return; }
+        size_t length = (size_t)(end + 2 - read);
+        if (!strncasecmp(read, "Range:", 6) || !strncasecmp(read, "If-Range:", 9)) {
+            memmove(write, read, length); write += length;
+        }
+        read = end + 2;
+    }
+    *write = 0;
+}
 static bool token(unsigned char c)
 {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -153,29 +167,25 @@ int aster_http_redirect(const struct aster_http_url *from, const char *location,
         n = snprintf(text, sizeof(text), "%s:%s", from->tls ? "https" : "http",
                      location);
     else {
-        char prefix[ASTER_HTTP_URL_MAX + 1];
-        strcpy(prefix, from->path);
+        size_t prefix_length = strlen(from->path);
         if (location[0] == '/')
-            prefix[0] = 0;
+            prefix_length = 0;
         else if (location[0] == '?') {
-            char *q = strchr(prefix, '?');
+            const char *q = strchr(from->path, '?');
             if (q)
-                *q = 0;
+                prefix_length = (size_t)(q - from->path);
         } else if (location[0] ==
                    '#') { /* Retain the existing query; fragment is not sent. */
         } else {
-            char *q = strchr(prefix, '?');
-            if (q)
-                *q = 0;
-            char *last = strrchr(prefix, '/');
-            if (last)
-                last[1] = 0;
-            else
-                strcpy(prefix, "/");
+            const char *q = strchr(from->path, '?');
+            size_t length = q ? (size_t)(q - from->path) : prefix_length;
+            prefix_length = 1; /* Parsed HTTP paths always begin with '/'. */
+            for (size_t i = 0; i < length; i++)
+                if (from->path[i] == '/') prefix_length = i + 1;
         }
-        n = snprintf(text, sizeof(text), "%s://%s:%u%s%s",
+        n = snprintf(text, sizeof(text), "%s://%s:%u%.*s%s",
                      from->tls ? "https" : "http", from->host, from->port,
-                     prefix, location);
+                     (int)prefix_length, from->path, location);
     }
     if (n < 0 || (size_t)n >= sizeof(text))
         return -EMSGSIZE;
@@ -389,7 +399,7 @@ int aster_http_codec_feed(struct aster_http_codec *c, const uint8_t *data,
                 c->state = HC_CHUNK_SIZE;
         } else {
             if (c->state != HC_CHUNK_SIZE &&
-                ++c->metadata_bytes > ASTER_HTTP_HEADERS_MAX) {
+                ++c->metadata_bytes > ASTER_HTTP_RESPONSE_HEADERS_MAX) {
                 c->error = -EMSGSIZE;
                 break;
             }

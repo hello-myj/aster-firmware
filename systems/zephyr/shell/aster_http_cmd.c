@@ -199,6 +199,9 @@ static int stats(const struct shell *sh, size_t argc, char **argv)
                 "ca_bytes=%u cpu_yields=%u",
                 s.active, s.closing, s.tls_active, s.psram_bytes,
                 s.stack_bytes, s.ca_bytes, s.cpu_yields);
+    shell_print(sh,"HTTP progress state=%u received=%llu/%llu queued=%u tcp_state=%u tcp_received=%llu tcp_queued=%u",
+                s.state,(unsigned long long)s.received,(unsigned long long)s.content_length,s.queued,
+                s.transport_state,(unsigned long long)s.transport_received,s.transport_queued);
 #if defined(CONFIG_ASTER_HTTP_TLS)
     size_t current, peak;
     aster_http_tls_heap(&current, &peak);

@@ -11,6 +11,7 @@
 #include "aster_http.h"
 #include "aster_crypto.h"
 #include "aster_sysinfo.h"
+#include "aster_time.h"
 #include "aster_platform.h"
 #include "aster_mem.h"
 #include "aster_bytes.h"
@@ -34,6 +35,7 @@ static struct k_thread thread;
 static k_thread_stack_t *stack;
 static bool started, begin_command, retry_command, credentials_command;
 static bool repair_command, forced_boot;
+static bool source_boot, configured_source;
 static bool format_command, format_boot;
 static aster_setup_snapshot snapshot;
 static aster_setup_credentials_t pending;
@@ -44,6 +46,7 @@ typedef struct {
     aster_setup_json json;
     char response[4096], url[512], server[192], release[65], market[192];
     char digest[65], relative[128], destination[160], part[160];
+    char static_base[192];
     uint8_t buffer[BUFFER];
     uint32_t files;
     uint64_t total, completed;
@@ -114,6 +117,16 @@ int aster_setup_request_format(void) {
     int rc = started && snapshot.state.phase == ASTER_SETUP_DONE && !snapshot.hotspot ? 0 : -EBUSY;
     if (!rc)
         format_command = true;
+    k_mutex_unlock(&lock);
+    return rc;
+}
+int aster_setup_repair_source(const char *url) {
+    if (!aster_setup_server_url(url)) return -EINVAL;
+    if (aster_app_mgr_is_live(NULL)) return -EBUSY;
+    k_mutex_lock(&lock, K_FOREVER);
+    int rc = started && snapshot.state.phase == ASTER_SETUP_DONE && !snapshot.hotspot ? 0 : -EBUSY;
+    if (!rc) rc = aster_kv_set("aster.setup", "server", url, strlen(url));
+    if (!rc) { source_boot = true; repair_command = true; }
     k_mutex_unlock(&lock);
     return rc;
 }
@@ -385,6 +398,12 @@ static int fetch(context *c, uint64_t bytes, unsigned index) {
                                           .headers_length = offset ? strlen(request) : 0,
                                           .timeout_ms = 600000,
                                           .body_limit = bytes};
+        /* A static blob URL is content-addressed and verified after download.
+         * GitHub's ETag is opaque, not our SHA256; don't send a false If-Range. */
+        if (offset && c->static_base[0]) {
+            snprintf(request, sizeof(request), "Range: bytes=%llu-\r\n", (unsigned long long)offset);
+            opts.headers_length = strlen(request);
+        }
         int h = start_request(&opts);
         if (h < 0)
             return h;
@@ -540,24 +559,60 @@ static int join(aster_setup_credentials_t *credentials) {
     } while (k_uptime_get() < end);
     return -ETIMEDOUT;
 }
+static int wait_https_time(const char *source) {
+    if (strncmp(source, "https://", 8)) return 0;
+    int64_t end = k_uptime_get() + 30000;
+    do {
+        aster_time_info_t now;
+        if (!aster_time_read(&now) && (now.flags & ASTER_TIME_FLAG_SYNCED)) return 0;
+        k_msleep(100);
+    } while (k_uptime_get() < end);
+    return -ENODATA;
+}
 static int download(context *c) {
     phase(ASTER_SETUP_PLAN);
+    int time_status = wait_https_time(c->server);
+    if (time_status) return time_status;
     aster_system_info_t info;
     aster_sysinfo_get(&info);
     aster_display_info_t display;
     memset(&display, 0, sizeof(display));
     aster_plat_display_get_info(0, &display);
-    snprintf(c->url, sizeof(c->url),
+    size_t source_length = strlen(c->server);
+    bool static_source = source_length >= 5 && !strcmp(c->server + source_length - 5, ".json");
+    c->static_base[0] = 0;
+    int rc;
+    if (static_source) {
+        strcpy(c->url, c->server);
+        if ((rc = get_json(c))) return rc;
+        const char *kind = str(c, "kind"), *base = str(c, "base_url");
+        if (num(c, "schema") != 1 || !kind || strcmp(kind, "aster-static-source") ||
+            !base || !aster_setup_server_url(base) || strlen(base) >= sizeof(c->static_base) ||
+            (!strncmp(c->server, "https://", 8) && strncmp(base, "https://", 8))) return -EPROTO;
+        strcpy(c->static_base, base);
+        snprintf(c->url, sizeof(c->url), "%s/setup-%s-%s.json", c->static_base,
+                 info.board, aster_arch_name(info.cpu_arch));
+    } else snprintf(c->url, sizeof(c->url),
              "%s/v1/setup/resolve?board=%s&target=%s&abi=%u&width=%u&height=%u&features=%llu",
              c->server, info.board, aster_arch_name(info.cpu_arch), (unsigned)info.abi_version,
              (unsigned)display.width, (unsigned)display.height,
              (unsigned long long)info.feature_flags);
-    int rc = get_json(c);
+    rc = get_json(c);
     if (rc)
         return rc;
     const char *release = str(c, "release"), *market = str(c, "market_url");
     uint64_t files = num(c, "files"), total = num(c, "total_bytes");
-    if (num(c, "schema") != 1 || !hex64(release) || files != 11 || total > 256 * 1024 * 1024 ||
+    if (static_source) {
+        const char *board = str(c, "board"), *target = str(c, "target");
+        uint64_t abi = num(c, "abi_min"), features = num(c, "features");
+        uint64_t w = num(c, "width"), h = num(c, "height");
+        if (!board || strcmp(board, info.board) || !target || strcmp(target, aster_arch_name(info.cpu_arch)) ||
+            abi > info.abi_version || (abi >> 16) != (info.abi_version >> 16) ||
+            (features & info.feature_flags) != features ||
+            !((w == display.width && h == display.height) || (w == display.height && h == display.width)))
+            return -EPERM;
+    }
+    if (num(c, "schema") != (static_source ? 2 : 1) || !hex64(release) || files != 11 || total > 256 * 1024 * 1024 ||
         !market || !aster_setup_server_url(market))
         return -EPROTO;
     strcpy(c->release, release);
@@ -574,8 +629,8 @@ static int download(context *c) {
      * not a second complete 96 MiB font tree. */
     for (unsigned i = 0; i < c->files; i++) {
         phase(ASTER_SETUP_DOWNLOAD);
-        snprintf(c->url, sizeof(c->url), "%s/v1/setup/releases/%s/files/%u", c->server, c->release,
-                 i);
+        if (static_source) snprintf(c->url, sizeof(c->url), "%s/setup-%s-%u.json", c->static_base, c->release, i);
+        else snprintf(c->url, sizeof(c->url), "%s/v1/setup/releases/%s/files/%u", c->server, c->release, i);
         if ((rc = get_json(c)))
             return rc;
         const char *path = str(c, "path"), *digest = str(c, "sha256"), *kind = str(c, "kind"),
@@ -586,8 +641,8 @@ static int download(context *c) {
             snprintf(expected, sizeof(expected), "fonts/ui_%u.cpfont", sizes[i]);
         else
             strcpy(expected, "store/package.ast");
-        snprintf(expected_url, sizeof(expected_url), "/v1/setup/releases/%s/payload/%u", c->release,
-                 i);
+        if (static_source) snprintf(expected_url, sizeof(expected_url), "blob-%.64s", digest ? digest : "");
+        else snprintf(expected_url, sizeof(expected_url), "/v1/setup/releases/%s/payload/%u", c->release, i);
         if (num(c, "schema") != 1 || num(c, "index") != i || !path || strcmp(path, expected) ||
             !digest || !hex64(digest) || !kind ||
             strcmp(kind, i < sizeof(sizes) ? "font" : "store") || !url ||
@@ -600,7 +655,8 @@ static int download(context *c) {
         else
             strcpy(c->destination, PARTS "/store.ast");
         snprintf(c->part, sizeof(c->part), PARTS "/%s.part", c->digest);
-        snprintf(c->url, sizeof(c->url), "%s%s", c->server, expected_url);
+        if (static_source) snprintf(c->url, sizeof(c->url), "%s/%s", c->static_base, expected_url);
+        else snprintf(c->url, sizeof(c->url), "%s%s", c->server, expected_url);
         progress(c->completed, c->total, i + 1, path);
         if ((rc = fetch(c, bytes, i + 1)))
             return rc;
@@ -651,6 +707,8 @@ static void worker(void *a, void *b, void *d) {
     }
     bool force = forced_boot;
     forced_boot = false;
+    bool use_saved_source = source_boot;
+    source_boot = false;
     if (!force && healthy()) {
         phase(ASTER_SETUP_DONE);
         return;
@@ -695,7 +753,7 @@ static void worker(void *a, void *b, void *d) {
             /* The platform loads/queues its saved profile before this worker.
              * last_ssid() may return EBUSY during that boot join; that does not
              * mean the profile is missing. Wait for the asynchronous join. */
-            if (!force && aster_setup_server_url(saved.server)) {
+            if (((!force && configured_source) || use_saved_source) && aster_setup_server_url(saved.server)) {
                 welcome = false;
                 strcpy(c->server, saved.server);
                 phase(ASTER_SETUP_CONNECT);
@@ -809,8 +867,10 @@ bool aster_setup_poll(aster_setup_snapshot *out) {
         size_t n = 0;
         if (aster_kv_get("aster.setup", "server", snapshot.server, sizeof(snapshot.server) - 1,
                          &n) ||
-            n >= sizeof(snapshot.server))
-            snapshot.server[0] = 0;
+            n >= sizeof(snapshot.server)) {
+            strcpy(snapshot.server, ASTER_SETUP_DEFAULT_SOURCE);
+            configured_source = false;
+        } else configured_source = aster_setup_server_url(snapshot.server);
         stack = aster_dram_alloc(K_KERNEL_STACK_LEN(STACK));
         if (!stack) {
             snapshot.state.required = true;

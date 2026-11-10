@@ -4,8 +4,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#define ASTER_HTTP_URL_MAX 1024
+#define ASTER_HTTP_URL_MAX 2048
 #define ASTER_HTTP_HEADERS_MAX 2048
+/* Large CSP/Location response fields are common on public download hosts.
+ * Request headers and APP ABI limits remain independent and unchanged. */
+#define ASTER_HTTP_RESPONSE_HEADERS_MAX 8192
 #define ASTER_HTTP_HEADER_COUNT 32
 #define ASTER_HTTP_UPLOAD_MAX 2048
 #if defined(ASTER_SYSTEM_ESP_IDF)
@@ -14,17 +17,19 @@
 #define ASTER_HTTP_BODY_BUFFER 2048
 #endif
 #define ASTER_HTTP_REDIRECT_MAX 3
+/* Retain non-secret byte-range headers when changing download origins. */
+void aster_http_redirect_headers(char *headers);
 struct aster_http_url {
     bool tls;
     uint16_t port;
-    char host[254], path[1025];
+    char host[254], path[ASTER_HTTP_URL_MAX + 1];
 };
 struct aster_http_field {
     uint16_t name, name_len, value, value_len;
 };
 struct aster_http_headers {
     struct aster_http_field fields[ASTER_HTTP_HEADER_COUNT];
-    char data[ASTER_HTTP_HEADERS_MAX];
+    char data[ASTER_HTTP_RESPONSE_HEADERS_MAX];
     uint16_t count, used;
 };
 enum aster_http_decode_state {
@@ -46,7 +51,7 @@ struct aster_http_codec {
     uint8_t interim;
     bool head, headers_ready, chunked, has_length, cr;
     uint64_t content_length, remaining, body_bytes, body_limit;
-    char line[ASTER_HTTP_HEADERS_MAX + 1];
+    char line[ASTER_HTTP_RESPONSE_HEADERS_MAX + 1];
     int error;
 };
 int aster_http_url_parse(const char *text, struct aster_http_url *out);

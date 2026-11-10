@@ -4,7 +4,7 @@
 </style><main><div class="brand">aster</div><h1>让设备准备就绪</h1><p class="hint">连接家庭 Wi-Fi 后，设备会自动下载系统字体和商城。请保持供电，并留好存储卡。</p>
 <section class="card" id="form"><label for="networks">附近的 Wi-Fi</label><select id="networks"><option value="">扫描后选择，或在下方输入</option></select><button class="secondary" id="scan">扫描网络</button>
 <label for="ssid">Wi-Fi 名称</label><input id="ssid" autocomplete="off" maxlength="32" placeholder="输入网络名称"><label for="password">Wi-Fi 密码</label><input id="password" type="password" autocomplete="new-password" maxlength="64" placeholder="开放网络可留空"><label><input id="show" type="checkbox" style="width:auto;min-height:0"> 显示密码</label>
-<details open><summary>资源服务器</summary><label for="server">下载地址</label><input id="server" type="url" placeholder="http://电脑局域网IP:9081" autocapitalize="off" spellcheck="false"><p class="hint">本地部署时填写同一路由器下电脑的地址。设备会根据硬件选择兼容资源。</p></details><button id="connect">连接并准备系统</button></section>
+<details><summary>下载源设置</summary><label for="server">下载地址</label><input id="server" type="url" placeholder="使用设备提供的公共下载源" autocapitalize="off" spellcheck="false"><p class="hint">默认从 Aster 公共源下载，无需开启电脑。也可填写同一路由器下电脑的资源服务器地址。设备会检查硬件兼容性。</p></details><button id="connect">连接并准备系统</button></section>
 <section class="card"><small>设备状态</small><p id="state" aria-live="polite">正在读取…</p><progress id="progress" value="0" max="100"></progress><p class="hint" id="bytes"></p><button class="secondary" id="retry" hidden>重新设置</button></section><p class="hint">连接此热点后若手机提示“无互联网”，请选择继续连接。提交后以设备屏幕的进度为准，可离开此页面。</p></main>
 <script>
 let token='',scanBusy=false,finished=false,formError='';

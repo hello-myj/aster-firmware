@@ -1,6 +1,7 @@
 # 共享首次开机引导
 
-当前开发在 `feat/first-boot-setup`。源码不内置商城，不内置完整 APP 字体；SD 卡必须存在。
+首次开机基础功能已合入 `main`，GitHub 静态源开发在 `feat/github-static-distribution`。
+源码不内置商城，不内置完整 APP 字体；SD 卡必须存在。
 固定系统界面使用同一组 16/20/24px LVGL 字库，初始化、设置与恢复共用。
 字形来自现有有许可的 cpfont 资源，由 `tools/build_system_fonts.py` 提取界面需要的字符，
 生成的 C 数组位于构建目录，不额外维护一套启动专用字体。
@@ -37,6 +38,37 @@ SD 上的 `aster.setup.pending` KV 标记在修改资源前写入，字体、商
 启动检查读取字体头与末记录/文件边界，不在每次启动完整扫描约 92 MiB；下载时做完整摘要校验。
 这不是通用固件 OTA，当前只初始化完整字库与商城依赖。
 
+## 公共 GitHub 源
+
+未配置资源服务器的新卡在 Web 配网中默认使用：
+
+```text
+https://github.com/hello-myj/aster-releases/releases/latest/download/aster-source.json
+```
+
+以 `.json` 结尾的入口采用静态协议，其余地址继续使用本地动态服务器协议。
+入口描述符将下载锁定到单个 Release；原生流程检查板型、CPU、ABI、屏幕、能力、
+固定字体路径及 SHA256，再按内容寻址的 blob 下载。服务器不需要接收设备凭据。
+新卡仍从欢迎页开始，不会因有默认 URL 就跳过手机配网；健康卡不访问公网。
+首次连接 HTTPS 前最多等待 30 秒校时，保留证书、主机名和时间验证。
+
+已有设备先停止 APP，可用 P4 `aster ui setup-source URL`、lckfb
+`aster sys setup-source URL` 维护：复用保存的 Wi-Fi、验证已有字体、补齐缺失文件，
+安装发布的商城并设置其静态源，不删除已有应用或存档。普通 Web 配网及本地服务器继续可用。
+
+GitHub 的跨域重定向保留 Range/If-Range，清除认证、Cookie 等其余自定义头；
+静态 blob 请求不把 SHA256 假定为托管方 ETag，仍检查 Content-Range、长度和完整摘要。
+原生响应头上限为 8 KiB、内部 URL 为 2 KiB，以容纳实测的约 5～6 KiB GitHub 跳转头；
+APP ABI 的 URL/请求头限制没有改变，TCP/HTTP 正文队列也没有扩大。
+增加的是请求存活期间的 PSRAM 上下文容量；没有为此扩大常驻 SRAM 池或线程栈。
+
+发布操作见 SDK `docs/github-distribution.md` 和 `aster-releases` 仓库 Actions。
+2026-11-10 首次 Actions 任务 `42832391485` 已完成，公开 Release
+`public-42832391485-1` 含 45 个附件；主机实测字体 Range 数据与本地源一致。
+P4 已通过公网清单校验并下载、安装商城 0.2.0；lckfb 字体下载遇到网络停顿，
+暂存断点及原字体 `/SD:/gh-font12` 保留，等待路由环境调整后完成实机验收。
+两板商城目录、TouchTest 公网下载安装的最终验收尚未完成。
+
 Zephyr 可通过 `CONFIG_ASTER_FIRST_BOOT=n` 禁用以供无网络的特殊构建；正常 lckfb
 配置默认开启。P4 UI 和 runtime 直接编入同一组公共源码。共享服务不会调用 LVGL；
 配网线程也不写安装目录；UI 只读取带锁快照，安装在资源线程执行。
@@ -55,6 +87,7 @@ cc -std=c11 -Wall -Wextra -Werror -I common/setup tests/setup_json_host.c common
 build/host/setup-json
 python -m unittest discover -s tests -p test_setup_http.py
 python -m unittest discover -s tests -p test_setup_stream.py
+python -m unittest discover -s tests -p test_setup_time.py
 python -m unittest discover -s tests -p test_font_cache.py
 node tests/setup_page_host.mjs
 cmake -S tests/setup_preview -B build/setup-preview -G Ninja

@@ -36,6 +36,8 @@ struct aster_http_snapshot {
 struct aster_http_stats {
     uint32_t active, closing, tls_active, psram_bytes, stack_bytes, ca_bytes,
         cpu_yields;
+    uint32_t state, queued, transport_state, transport_queued;
+    uint64_t received, content_length, transport_received;
 };
 int aster_http_svc_start(uint64_t owner, const struct aster_http_options *options);
 int aster_http_svc_status(uint64_t owner, uint32_t handle,

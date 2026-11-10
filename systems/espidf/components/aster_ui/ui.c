@@ -84,6 +84,7 @@ int aster_idf_ui_command(int argc,char **argv)
         return 0;
     }
     if(argc==3 && !strcmp(argv[2],"setup"))return aster_setup_repair();
+    if(argc==4 && !strcmp(argv[2],"setup-source"))return aster_setup_repair_source(argv[3]);
     int request;
     if(argc==3 && !strcmp(argv[2],"perf"))request=1;
     else if((argc==3 || argc==4) && !strcmp(argv[2],"bench")) {

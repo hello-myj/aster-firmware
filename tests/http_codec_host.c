@@ -133,6 +133,28 @@ int main(void)
     assert(aster_http_field_get(&c.headers, "Transfer-Encoding", 0, small, 1,
                                 &len) == -EMSGSIZE);
     assert(len == 7 && small[0] == 0);
+    /* Public hosting redirects carry a large CSP and a signed Location URL.
+     * Accept bounded response metadata without enlarging request ABI limits. */
+    char location[1600] = "https://release-assets.githubusercontent.com/file?token=";
+    size_t prefix = strlen(location);
+    memset(location + prefix, 'x', 1300);
+    location[prefix + 1300] = 0;
+    assert(!aster_http_url_parse(location, &b));
+    char public_headers[8000] = "HTTP/1.1 302 Found\r\nContent-Security-Policy: ";
+    size_t start = strlen(public_headers);
+    memset(public_headers + start, 'x', 5000);
+    snprintf(public_headers + start + 5000, sizeof(public_headers) - start - 5000,
+             "\r\nLocation: %s\r\nContent-Length: 0\r\n\r\n", location);
+    aster_http_codec_init(&c, false, 10000);
+    assert(!aster_http_codec_feed(&c, (void *)public_headers, strlen(public_headers),
+                                  &used, out, 1, &wrote));
+    assert(c.state == HC_DONE && c.status == 302 && used == strlen(public_headers));
+    char returned[2049];
+    assert(!aster_http_field_get(&c.headers, "Location", 0, returned, sizeof(returned), &len));
+    assert(len == strlen(location) && !memcmp(returned, location, len));
+    char request_headers[2100];
+    memset(request_headers, 'x', sizeof(request_headers));
+    assert(aster_http_validate_headers(request_headers, sizeof(request_headers)) < 0);
     puts("HTTP codec fragmentation, framing, trailers, URL and header "
          "boundaries "
          "OK");

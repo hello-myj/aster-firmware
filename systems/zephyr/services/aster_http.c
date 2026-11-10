@@ -161,7 +161,7 @@ static int redirect_prepare(struct http_request *r)
 #endif
     }
     if (!aster_http_same_origin(&r->url, &r->next_url))
-        r->custom[0] = 0;
+        aster_http_redirect_headers(r->custom);
     if ((code == 303 && r->opts.method != ASTER_HTTP_HEAD) ||
         ((code == 301 || code == 302) && r->opts.method == ASTER_HTTP_POST)) {
         r->opts.method = ASTER_HTTP_GET;
@@ -699,6 +699,16 @@ int aster_http_svc_get_stats(struct aster_http_stats *out)
             out->tls_active += requests[i]->tls_reserved;
             out->closing += requests[i]->closing;
             out->psram_bytes += sizeof(struct http_request);
+            out->state = requests[i]->pub.state;
+            out->queued += requests[i]->pub.queued;
+            out->received += requests[i]->pub.received;
+            out->content_length += requests[i]->pub.content_length;
+            struct aster_net_snapshot net;
+            if (!aster_net_snapshot(requests[i]->transport_owner, requests[i]->transport, &net)) {
+                out->transport_state = net.state;
+                out->transport_queued += net.rx_queued;
+                out->transport_received += net.rx_bytes;
+            }
 #if defined(CONFIG_ASTER_HTTP_TLS)
             out->psram_bytes += requests[i]->tls_bytes;
 #endif
