@@ -8,6 +8,8 @@
 字形来自现有有许可的 cpfont 资源，由 `tools/build_system_fonts.py` 提取界面需要的字符，
 生成的 C 数组位于构建目录，不额外维护一套启动专用字体。
 
+设备可离线初始化。先在电脑下载与板型对应的 SD 卡 ZIP，将解压出的 `aster/` 复制到 FAT32 卡根目录。卡中含十份字体和已安装的对应架构商城。[离线准备及目录示例](offline-sd.zh-CN.md)
+
 ## 分层
 
 - `common/setup/aster_setup_core.*`：无 OS 头文件的状态与输入规则。

@@ -1,46 +1,111 @@
 {
   "schema": 1,
-  "tag": "firmware-v4.3.0",
-  "abi": "4.3.0",
-  "source_revision": "b78f15760eaffa1b0e3d9b5172d92d31a5b7e160",
+  "abi": "4.5.0",
+  "tag": "firmware-v4.5.0",
+  "source_revision": "e04bde145724bcafedc502a9035c0f8b593ec378",
   "assets": [
     {
-      "file": "aster-firmware-4.3.0-osptek-p4-st7102.bin",
-      "sha256": "c2a4e5b711e08b39f70a14be4a512c65ac4fa1a05d61b1aa483ebcd2407c9fb1",
-      "bytes": 2170320,
-      "url": "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/c2a4e5b711e08b39f70a14be4a512c65ac4fa1a05d61b1aa483ebcd2407c9fb1/aster-firmware-4.3.0-osptek-p4-st7102.bin"
+      "file": "aster-firmware-4.5.0-fakepod-s31.bin",
+      "sha256": "42e79d671c4177717743a198c3887ca89aa7a3cfb0fce9effd149168752952ee",
+      "bytes": 3353152,
+      "url": "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/42e79d671c4177717743a198c3887ca89aa7a3cfb0fce9effd149168752952ee/aster-firmware-4.5.0-fakepod-s31.bin"
     },
     {
-      "file": "aster-firmware-4.3.0-lckfb-s3.bin",
-      "sha256": "b7d0486d07a1a34882272970ce72496a0eba0aaedc0139a90d78a274d89fedef",
-      "bytes": 1724580,
-      "url": "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/b7d0486d07a1a34882272970ce72496a0eba0aaedc0139a90d78a274d89fedef/aster-firmware-4.3.0-lckfb-s3.bin"
+      "file": "aster-firmware-4.5.0-lckfb-s3.bin",
+      "sha256": "20565cdb4c6ccd623e7202e5396d2f1e7d11ca27268f1537fc3a88e69fa7bf05",
+      "bytes": 1811140,
+      "url": "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/20565cdb4c6ccd623e7202e5396d2f1e7d11ca27268f1537fc3a88e69fa7bf05/aster-firmware-4.5.0-lckfb-s3.bin"
+    },
+    {
+      "file": "aster-firmware-4.5.0-osptek-p4-st7102.bin",
+      "sha256": "e231b58fac5ad38e8d29f191b0ec5172186e66d4437f769bc56a14a9ff735ea7",
+      "bytes": 2225216,
+      "url": "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/e231b58fac5ad38e8d29f191b0ec5172186e66d4437f769bc56a14a9ff735ea7/aster-firmware-4.5.0-osptek-p4-st7102.bin"
+    },
+    {
+      "file": "aster-sd-4.5.0-riscv.zip",
+      "sha256": "b470b3602c194386fb4d0abf1bc5af29905f479ad0902ef80475737189233b71",
+      "bytes": 43007363,
+      "url": "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/b470b3602c194386fb4d0abf1bc5af29905f479ad0902ef80475737189233b71/aster-sd-4.5.0-riscv.zip"
+    },
+    {
+      "file": "aster-sd-4.5.0-xtensa.zip",
+      "sha256": "9cd421b6f8cc23fcf46b560a0644b43d5da990b4d5ab077d43276e44bfbe4b84",
+      "bytes": 43004993,
+      "url": "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/9cd421b6f8cc23fcf46b560a0644b43d5da990b4d5ab077d43276e44bfbe4b84/aster-sd-4.5.0-xtensa.zip"
+    },
+    {
+      "file": "SD-OFFLINE.md",
+      "sha256": "a2fdbcb2bb7fcee7b5811d7d9a81d4552e93a5b826ad0839f80ec2cfae91db19",
+      "bytes": 2579,
+      "url": "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/a2fdbcb2bb7fcee7b5811d7d9a81d4552e93a5b826ad0839f80ec2cfae91db19/SD-OFFLINE.md"
     }
   ],
   "boards": {
-    "osptek-p4-st7102": {
-      "file": "aster-firmware-4.3.0-osptek-p4-st7102.bin",
-      "sha256": "c2a4e5b711e08b39f70a14be4a512c65ac4fa1a05d61b1aa483ebcd2407c9fb1",
-      "bytes": 2170320,
-      "url": "https://github.com/hello-myj/aster-firmware/releases/download/firmware-v4.3.0/aster-firmware-4.3.0-osptek-p4-st7102.bin",
+    "fakepod-s31": {
+      "file": "aster-firmware-4.5.0-fakepod-s31.bin",
+      "sha256": "42e79d671c4177717743a198c3887ca89aa7a3cfb0fce9effd149168752952ee",
+      "bytes": 3353152,
+      "url": "https://github.com/hello-myj/aster-firmware/releases/download/firmware-v4.5.0/aster-firmware-4.5.0-fakepod-s31.bin",
       "mirrors": [
-        "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/c2a4e5b711e08b39f70a14be4a512c65ac4fa1a05d61b1aa483ebcd2407c9fb1/aster-firmware-4.3.0-osptek-p4-st7102.bin"
+        "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/42e79d671c4177717743a198c3887ca89aa7a3cfb0fce9effd149168752952ee/aster-firmware-4.5.0-fakepod-s31.bin"
       ],
-      "chip": "esp32p4",
+      "chip": "esp32s31",
       "flash_address": "0x0",
       "no_stub": true
     },
     "lckfb-s3": {
-      "file": "aster-firmware-4.3.0-lckfb-s3.bin",
-      "sha256": "b7d0486d07a1a34882272970ce72496a0eba0aaedc0139a90d78a274d89fedef",
-      "bytes": 1724580,
-      "url": "https://github.com/hello-myj/aster-firmware/releases/download/firmware-v4.3.0/aster-firmware-4.3.0-lckfb-s3.bin",
+      "file": "aster-firmware-4.5.0-lckfb-s3.bin",
+      "sha256": "20565cdb4c6ccd623e7202e5396d2f1e7d11ca27268f1537fc3a88e69fa7bf05",
+      "bytes": 1811140,
+      "url": "https://github.com/hello-myj/aster-firmware/releases/download/firmware-v4.5.0/aster-firmware-4.5.0-lckfb-s3.bin",
       "mirrors": [
-        "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/b7d0486d07a1a34882272970ce72496a0eba0aaedc0139a90d78a274d89fedef/aster-firmware-4.3.0-lckfb-s3.bin"
+        "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/20565cdb4c6ccd623e7202e5396d2f1e7d11ca27268f1537fc3a88e69fa7bf05/aster-firmware-4.5.0-lckfb-s3.bin"
       ],
       "chip": "esp32s3",
       "flash_address": "0x0",
       "no_stub": false
+    },
+    "osptek-p4-st7102": {
+      "file": "aster-firmware-4.5.0-osptek-p4-st7102.bin",
+      "sha256": "e231b58fac5ad38e8d29f191b0ec5172186e66d4437f769bc56a14a9ff735ea7",
+      "bytes": 2225216,
+      "url": "https://github.com/hello-myj/aster-firmware/releases/download/firmware-v4.5.0/aster-firmware-4.5.0-osptek-p4-st7102.bin",
+      "mirrors": [
+        "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/e231b58fac5ad38e8d29f191b0ec5172186e66d4437f769bc56a14a9ff735ea7/aster-firmware-4.5.0-osptek-p4-st7102.bin"
+      ],
+      "chip": "esp32p4",
+      "flash_address": "0x0",
+      "no_stub": true
+    }
+  },
+  "offline_sd": {
+    "riscv": {
+      "file": "aster-sd-4.5.0-riscv.zip",
+      "sha256": "b470b3602c194386fb4d0abf1bc5af29905f479ad0902ef80475737189233b71",
+      "bytes": 43007363,
+      "url": "https://github.com/hello-myj/aster-firmware/releases/download/firmware-v4.5.0/aster-sd-4.5.0-riscv.zip",
+      "mirrors": [
+        "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/b470b3602c194386fb4d0abf1bc5af29905f479ad0902ef80475737189233b71/aster-sd-4.5.0-riscv.zip"
+      ],
+      "boards": [
+        "osptek-p4-st7102",
+        "fakepod-s31"
+      ],
+      "store_version": "0.3.3"
+    },
+    "xtensa": {
+      "file": "aster-sd-4.5.0-xtensa.zip",
+      "sha256": "9cd421b6f8cc23fcf46b560a0644b43d5da990b4d5ab077d43276e44bfbe4b84",
+      "bytes": 43004993,
+      "url": "https://github.com/hello-myj/aster-firmware/releases/download/firmware-v4.5.0/aster-sd-4.5.0-xtensa.zip",
+      "mirrors": [
+        "https://aster-releases.obs.cn-south-1.myhuaweicloud.com/artifacts/9cd421b6f8cc23fcf46b560a0644b43d5da990b4d5ab077d43276e44bfbe4b84/aster-sd-4.5.0-xtensa.zip"
+      ],
+      "boards": [
+        "lckfb-s3"
+      ],
+      "store_version": "0.3.3"
     }
   }
 }

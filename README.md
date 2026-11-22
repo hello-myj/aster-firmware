@@ -1,5 +1,8 @@
 # Aster Firmware
 
+4.5.0 提供鱼鹰光电 P4C5（v3.x）、立创 ESP32-S3 实战派和 FAKE POD NANO PRO 的可烧录镜像。空卡可联网初始化，也可在电脑复制离线包。[固件与附件](https://github.com/hello-myj/aster-firmware/releases/tag/firmware-v4.5.0) · [离线 SD 卡说明](docs/offline-sd.zh-CN.md)
+
+
 Aster 提供 Launcher、首次联网设置、应用安装和 WAMR AOT 运行时。当前 ABI 为 4.5.0。设备固件按开发板构建，应用按 CPU 架构构建。
 
 ## 选择开发板
