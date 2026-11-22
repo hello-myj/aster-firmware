@@ -1,5 +1,7 @@
 # APP 回调期限
 
+本页的超时配置和复位行为对应 [Zephyr 看门狗](../systems/zephyr/runtime/aster_watchdog.c)。鱼鹰 P4C5 和 FAKE POD 使用 ESP-IDF，分析这两块板的复位时应结合对应固件的启动原因、异常回溯和当时的应用日志。
+
 设备上的普通 Xtensa AOT 不能在纯计算循环里被异步打断。回调超过期限时，ESP32-S3 整片复位，记下阶段和应用，回到桌面，不自动重开该应用。
 
 ## 默认期限

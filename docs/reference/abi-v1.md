@@ -1,6 +1,6 @@
-# ASTER ABI Specification
+# Historical Aster ABI specification through 3.4
 
-Historical ABI 3.4 specification. The [current public headers](../../contract/include/aster) and [architecture guide](../architecture.md) describe the supported ABI.
+Use this file to interpret old imports and the 3.x changelog. Current device packages require ABI major 4 and a matching AOT target. The active package format and its launch restrictions are described in [ASTP](package-format.md). The [current public headers](../../contract/include/aster) and [architecture guide](../architecture.md) describe the supported ABI.
 
 3.4 adds preloaded PCM effect mixing and
 extends the reference board's volume range to +6 dB at 100. 3.3 renames the

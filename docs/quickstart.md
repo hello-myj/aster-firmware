@@ -13,7 +13,7 @@ node aster-sim/src/cli.js my-game/dist/xtensa/test.quickstart.ast --headless --f
 
 改完 `my-game/src/main.c` 后重新 build 和 verify。模拟器执行包里的 WASM，忽略 Xtensa AOT。
 
-设备已刷入匹配固件并装好系统字体后：
+设备刷入对应开发板的固件后，插入 SD 卡完成[首次开机](first-boot-setup.md)。在 SDK 中通过串口安装刚才验证的包：
 
 ```bash
 python aster-sdk/tools/aster.py deploy my-game/dist/xtensa/test.quickstart.ast --target xtensa --port <串口> --run

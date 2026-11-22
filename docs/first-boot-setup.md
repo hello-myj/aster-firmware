@@ -1,5 +1,7 @@
 # 共享首次开机引导
 
+空卡开机时，鱼鹰 P4C5、立创实战派和 FAKE POD NANO PRO 的公网配置均提供十份 CPFont 和商城 0.3.3。已完成初始化的设备保留已装商城。固件版本、应用版本和线上资源快照分别维护。[首次开机配置](distribution-config.md) · [线上发布记录](https://github.com/hello-myj/aster-releases/blob/main/docs/obs-distribution.md)
+
 鱼鹰光电 P4C5、立创实战派和 FAKE POD NANO PRO 共用此引导。
 源码不内置商城，不内置完整 APP 字体；SD 卡必须存在。
 固定系统界面使用同一组 16/20/24px LVGL 字库，初始化、设置与恢复共用。
@@ -52,7 +54,7 @@ https://aster-releases.obs.cn-south-1.myhuaweicloud.com/aster-source.json
 新卡仍从欢迎页开始，不会因有默认 URL 就跳过手机配网；健康卡不访问公网。
 首次连接 HTTPS 前最多等待 30 秒校时，保留证书、主机名和时间验证。
 
-已有设备先停止 APP，可用 P4 `aster ui setup-source URL`、lckfb
+已有设备先停止 APP，可用鱼鹰 P4C5 或 FAKE POD `aster ui setup-source URL`、lckfb
 `aster sys setup-source URL` 维护：复用保存的 Wi-Fi、验证已有字体、补齐缺失文件，
 安装发布的商城并设置其静态源，不删除已有应用或存档。普通 Web 配网及本地服务器继续可用。
 
@@ -65,9 +67,9 @@ APP ABI 的 URL/请求头限制没有改变，TCP/HTTP 正文队列也没有扩�
 下面是 2026-11-10 的 GitHub 镜像验证记录。当前 OBS 发布操作见 [发布仓库](https://github.com/hello-myj/aster-releases)。GitHub 镜像操作见 SDK `docs/github-distribution.md` 和 `aster-releases` 仓库 Actions。
 2026-11-10 首次 Actions 任务 `42832391485` 已完成，公开 Release
 `public-42832391485-1` 含 45 个附件；主机实测字体 Range 数据与本地源一致。
-P4 已通过公网清单校验并下载、安装商城 0.2.0；lckfb 字体下载遇到网络停顿，
+早期 GitHub 源实测中，P4 已通过公网清单校验并下载、安装商城 0.2.0；lckfb 字体下载遇到网络停顿，
 暂存断点及原字体 `/SD:/gh-font12` 保留，等待路由环境调整后完成实机验收。
-两板商城目录、TouchTest 公网下载安装的最终验收尚未完成。
+截至该次 GitHub 测试，两板商城目录和 TouchTest 的公网安装尚未验收。后续各板 OBS 验证与应用版本见本页顶部的发布记录。
 
 Zephyr 可通过 `CONFIG_ASTER_FIRST_BOOT=n` 禁用以供无网络的特殊构建；正常 lckfb
 配置默认开启。P4 UI 和 runtime 直接编入同一组公共源码。共享服务不会调用 LVGL；

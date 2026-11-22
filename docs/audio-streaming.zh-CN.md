@@ -1,6 +1,6 @@
 # MP3 分段流输入与在线音乐（ABI 3.10）
 
-2026-10-16 工作区增量，本地提交，未推送或发布。N1/N2既有接口保持兼容；这项工作新增音频输入能力，不代表MQTT等后续网络计划已实施。
+本页保留分段 MP3 接口在 ABI 3.10 引入时的资源测量。使用当前 SDK 的应用应查询 `audio-stream`；从 HTTP 下载还需要 `http` 能力和 `net` 权限。此流接口由应用提供压缩数据，FAKE POD 从 SD 播放则由系统媒体服务管理会话。[HTTP 调试](network-http-cli.zh-CN.md) · [本地播放](fakepod-s31-hifi-design.zh-CN.md)
 
 ## 实现边界
 

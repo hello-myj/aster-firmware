@@ -44,7 +44,7 @@ S3 硬件使用 `--target xtensa`，P4/S31 使用 `--target riscv`。硬件型�
 - `systems/zephyr/`：完整设备服务、桌面与 WAMR 适配，明确隔离 Zephyr 依赖。
 - `systems/espidf/`：ESP-IDF/FreeRTOS 运行时、外设和系统服务适配；部分待提取服务仍复用 Zephyr 目录下的源码。
 
-Zephyr 的项目 menuconfig 独立运行，配置先于设备树与 Kconfig 处理阶段读取。用户不必再传 board、target 或朝向 overlay；这些板卡共用 `tools/firmware.py` 的 build/flash 入口。P4 当前使用下述独立 IDF 入口。
+Zephyr 的项目 menuconfig 独立运行，配置先于设备树与 Kconfig 处理阶段读取。用户不必再传 board、target 或朝向 overlay；这些板卡共用 `tools/firmware.py` 的 build/flash 入口。鱼鹰 P4C5 和 FAKE POD 分别使用自己的 ESP-IDF 工程及工具链。[鱼鹰构建](../boards/osptek_p4/README.md) · [FAKE POD 构建](../boards/fakepod_s31/README.md)
 
 ## 运行期显示切换
 
@@ -96,7 +96,7 @@ SD 资源提供源字体全覆盖的 12/14/16/18/20/24/28/32/40/48px 字库；�
 
 IDF 的每个板级工程通过自身 Kconfig 声明身份与屏幕参数。共享 UI 不再根据“是不是某颗芯片”推断开发板或分辨率。
 背光 GPIO/PWM 实现由该板注入 IO 回调，音频板级驱动和外部 C5 的 SDMMC 共享补丁按实际板型选择。
-SDK 在 `hardware/` 保留固件导出的开发板描述，在 `targets/` 保存 AOT 编译架构；同芯片的新板必须新建自己的硬件描述及板级适配，不覆盖原板。
+固件在 `hardware/` 和 `boards/` 注册新板。SDK 默认按 `targets/` 的架构编译。新增同架构且 AOT 配置兼容的板时，应用可沿用现有构建，无需先把板名登记到 SDK。专用应用可以用 `supported_boards` 限定运行时板型。
 
 
 ### 可选电源适配

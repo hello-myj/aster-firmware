@@ -1,5 +1,7 @@
 # FLUX Rev.04 reference
 
+The launcher reads the icon from an installed AST. The Store derives its catalog thumbnail from the same ASTI asset. For system text faces and the SD cache, see [font selection and caching](../../../../../docs/architecture.md#原生字号与字形缓存生命周期).
+
 Native port of the user-supplied `aster-flux-v4-20261002-191041.zip`.
 Coordinates, colors, ribbon transforms and gesture thresholds follow its
 `FIRMWARE-PORTING.md`, `flux.css` and `flux.js`.

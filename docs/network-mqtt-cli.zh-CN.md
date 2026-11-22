@@ -1,5 +1,7 @@
 # MQTT/MQTTS
 
+以下 `aster net` 命令与槽位限制对应 Zephyr 固件的诊断 shell。开发 MQTT、MQTTS 应用时，清单申请 `net` 权限并检查 `mqtt` 能力。 使用加密连接时还要查询 `tls`。应用持有自己的连接句柄；排查问题时请在创建句柄的同一端读取状态和关闭连接。[公共网络契约](../contract/include/aster/net.h)
+
 实现 MQTT 3.1.1，支持 QoS 0/1、retain、用户名、密码、遗嘱和 TLS。会话为 clean session。与 TCP/UDP/HTTP 共用两个连接槽；MQTTS 与 HTTPS/WSS 共用一个 TLS 名额。
 
 每个客户端最多 4 个主题过滤器、2 条接收消息、2 个排队操作。主题 128 字节，payload 1024 字节。

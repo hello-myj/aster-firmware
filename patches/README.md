@@ -1,5 +1,7 @@
 # West-tree patches
 
+This patch set applies to the Zephyr workspace for the LCKFB and Waveshare boards. Use the revision pinned in [west.yml](../west.yml). For the ESP-IDF projects, start with the [OSPTEK](../boards/osptek_p4/README.md) or [FAKE POD](../boards/fakepod_s31/README.md) build guide.
+
 The base patch, Waveshare QSPI correction, shared-I2C recovery, USB console
 batching and opt-in PSRAM TX DMA patch, applied to `zephyr/`
 (the west tree). It must be (re-)applied after any `west update` or

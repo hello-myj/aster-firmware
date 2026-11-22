@@ -61,7 +61,9 @@ config/                   配置
 hardware/                 板卡描述
 boards/                   设备树和板级配置
 contract/include/aster/   公开 ABI
-systems/zephyr/           设备服务和桌面
+common/                   跨系统的接口、媒体、网络及安装包解析
+systems/zephyr/           Zephyr 服务、运行时和共享桌面实现
+systems/espidf/           ESP-IDF 服务、运行时与板级组件
 ```
 
 系统字体：

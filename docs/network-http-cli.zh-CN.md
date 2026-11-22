@@ -1,5 +1,7 @@
 # HTTP/HTTPS
 
+以下 `aster net` 命令与槽位限制对应 Zephyr 固件的诊断 shell。开发 HTTP、HTTPS 应用时，清单申请 `net` 权限并检查 `http` 能力。 使用加密连接时还要查询 `tls`。应用持有自己的连接句柄；排查问题时请在创建句柄的同一端读取状态和关闭连接。[公共网络契约](../contract/include/aster/net.h)
+
 HTTP 与 TCP/UDP 共用两个连接槽。HTTPS 与 MQTTS、WSS 共用一个 TLS 名额。完成、失败或取消后的句柄仍占名额，调用 close 后释放。
 
 ```text

@@ -43,19 +43,10 @@ offsets point at the first byte of each blob).
 | 54 | 2 | icon height (**always 0 today**, see below) |
 | 56 | 8 | **reserved, must be 0** (was ui offset/length, UIB1 removed in ABI 3.0) |
 
-> **The four icon fields at 48..55 carry no information.** `pack_mja.py` never writes
-> offset 48 (it packs only `icon_off`/`icon_len` at 40/44 and w/h at 52/54, and the
-> w/h arguments are never passed, so they stay 0); the firmware never reads offset 48,
-> and `aster_pkg.c` reads 52/54 into `aster_manifest_t.icon_w/icon_h` — which **no consumer
-> uses**. The real icon format lives inside the ASTI blob at its own offset 10; the
-> real dimensions live there too (offsets 6/8).
->
-> Do not start relying on 52/54: a packer that fills them would be writing a field
-> the reader ignores, and the reader trusting them would be trusting a field the
-> packer leaves at 0. Either wire both ends or leave the whole 48..55 span reserved.
-> Validating an icon means calling `aster_icon_parse()` on the blob.
 | 64 | 4 | assets offset (only if hdr_size=72; 0 = absent) |
 | 68 | 4 | assets length |
+
+Read icon dimensions and format from the ASTI blob with `aster_icon_parse()`. The SDK packer leaves header bytes 48–55 zero.
 
 Format version stays **1**. Old 64-byte headers remain valid. The parser accepts `hdr_size == 64 || hdr_size == 72`.
 
@@ -73,17 +64,9 @@ then path strings (NUL-terminated) and file bytes, 4-byte padded
 
 Paths are relative (`icons/clock.bin`), no `..`, no leading `/`. Install extracts into the inactive code slot of `/SD:/aster/apps/<id>/`; APPs access the selected resources through `/assets/<path>`. Upgrade keeps the current code slot intact until commit and preserves the stable `data/` and `cache/` directories. The original `package.ast` is still stored in full (same double-copy as wasm).
 
-App icons use the **ASTI** pixel format (see [gfx-engine.md](gfx-engine.md)). No fonts are
-packed: since ABI 2.1 every glyph streams from one TTF on the SD card
-(`S:/aster/fonts/ui.ttf`) through LVGL tiny_ttf, so the `.ast` never carries a font. The
-firmware does not decode PNG.
+The launcher reads ASTI icons. The system text renderer loads the selected `ui_<px>.cpfont` from SD. An app can also bring its own font data as an asset, as Aster Music does for lyric lettering. PNG decoding is available through the image decoder. [System font faces](../../resources/fonts/faces.json) · [Image decoder](../../modules/imgdec)
 
-AOT target ids: 1 = xtensa-esp32s3, 2 = riscv, 3 = thumb-v7, 4 = cortex-m,
-5 = x86-64. The loader picks the AOT section only when the target matches
-the device AND the wasm hash recorded in the manifest is unchanged
-(`wasm_sha256` first 4 bytes are embedded in the AOT filename check);
-otherwise it falls back to `app.wasm` (interpreter). AOT is a cache, never
-the only payload (design doc sec.38).
+The format defines AOT IDs 1 (Xtensa ESP32-S3), 2 (RISC-V), 3 (Thumb v7), 4 (Cortex-M) and 5 (x86-64). Current Aster board builds use 1 or 2. The device requires a compatible AOT section. The desktop simulator executes the WASM section and can open a package built with `--no-aot`. [Firmware package decoder](../../common/package/aster_pkg_decode.c) · [Installer](../../systems/zephyr/services/aster_pkg.c)
 
 ## Manifest JSON (schema v1)
 
@@ -94,26 +77,39 @@ IDs. Missing or empty descriptions leave the introduction blank. Quote and
 backslash characters are escaped when writing the normalized JSON. This metadata
 addition does not change the WASM ABI or package format version.
 
-Real, as-packed manifest for the in-tree `sdk/apps/gfxshow` (keys appear in this
-order because `build.py` inserts the conditional ones only when set):
+Selected fields from the published RISC-V Store 0.3.3 package:
 
 ```json
 {
-  "id": "aster.gfxshow",
-  "name": "Gfx Show",
-  "version": "0.1.0",
-  "abi": { "min": "3.0", "target": "3.0.0" },
-  "memory": { "initial": 393216, "stack": 8192 },
-  "requires": ["display", "touch"],
-  "permissions": ["fs", "sd"],
-  "category": "game"
+  "id": "aster.store",
+  "name": "Aster 商城",
+  "version": "0.3.3",
+  "product": "aster",
+  "target_id": "riscv",
+  "abi": {
+    "min": "4.3",
+    "target": "4.3.0"
+  },
+  "requires": [
+    "display",
+    "touch",
+    "filesystem",
+    "http"
+  ],
+  "permissions": [
+    "net",
+    "fs",
+    "kv",
+    "appmgr"
+  ]
 }
 ```
 
-**Key contract** (`build.py::manifest_for` writes; `aster_pkg.c` reads):
+**Manifest fields.** The SDK builds and packs the JSON. The device [package decoder](../../common/package/aster_pkg_decode.c) reads fields needed for installation and launch.
 
 | key | written | read by fw | notes |
 |---|---|---|---|
+| `product` / `target_id` | always | required | `aster` and the selected CPU target, checked during package decoding |
 | `id` | always | **hard-required** | reverse-DNS, immutable; install dir derives from it |
 | `name` | always | **hard-required** | missing → `ASTER_ECORRUPT` |
 | `version` | always | yes | free-form string, shown in `aster app list` |
@@ -132,22 +128,17 @@ so no typo can silently become a request. A value that is neither of the two
 spellings is **dropped with a warning on the device** (`aster_pkg_norm_orientation`
 returns `ASTER_ORIENT_ANY`), and a dropped key is indistinguishable from one that
 was never there — the app follows the panel instead of failing. That is why
-`verify_mja.py` asserts the spelling at package time, where the typo is still
+`verify_ast.py` asserts the spelling at package time, where the typo is still
 visible, rather than letting the install be quietly forgiving.
 
 The vocabulary is deliberately shared with the display ABI rather than copied:
 the two spellings normalize to `ASTER_ORIENT_PORTRAIT` / `ASTER_ORIENT_LANDSCAPE`
-(`abi/include/aster/display.h`), and both the SDK and the verifier take their
+(`contract/include/aster/display.h`), and both the SDK and the verifier take their
 whitelist from one place (`aster_board.ORIENTATIONS`).
 
-There is **no `format` key** — the container version lives in the header
-(offset 4), and the old `"format": 1` / `"wasm_sha256"` / `"aot_sha256"` /
-`"icon"` examples were never emitted by `build.py`. AOT/vendor hash checking is
-done by filename, not by a manifest field (see the AOT paragraph above).
+The container version is at header offset 4. The SDK packer adds `wasm_sha256` and, for native packages, `aot_sha256` and `aot_target`. The SDK verifier compares the hashes with the corresponding bytes. The device separately checks its package policy, CPU target and ABI. [SDK packer](https://github.com/hello-myj/aster-sdk/blob/main/tools/pack_ast.py) · [SDK verifier](https://github.com/hello-myj/aster-sdk/blob/main/tools/verify_ast.py)
 
-`memory.stack` = wasm operand stack bytes, `memory.heap` = wasm gc heap
-(for interpreter), `memory.max` = linear memory cap enforced by the Runtime.
-`storage.app` 只是 `requires` 里 `filesystem` 的别名，不是权限令牌。
+The `memory` object carries the application's initial and maximum linear memory, stack and heap budgets in bytes. The runtime also applies local device limits.
 
 ## Install layout (device)
 
@@ -163,8 +154,8 @@ and `/cache` paths, without embedding physical version-slot paths.
 
 `aster app install <path.ast>` verifies: magic, header consistency
 (offsets + lengths inside file), manifest JSON required keys, ABI compat
-(`min <= device abi <= major`), wasm magic
-`\0asm`, and the **signature** (see below). `pack_mja.py` and the firmware
+(equal ABI major and device minor at least the declared minimum minor), wasm magic
+`\0asm`, and the **signature** (see below). `pack_ast.py` and the firmware
 parser share this layout.
 
 ## Signature (optional, ECDSA-P256 / SHA-256)
@@ -176,21 +167,6 @@ includes the header (with the flag already set), manifest, wasm, aot, icon and a
 Placing the block at the tail means nothing inside the hashed span points at
 its own location, so there is no self-referential field to exclude.
 
-- **Trust anchor**: `CONFIG_ASTER_VENDOR_PUBKEY` — a 65-byte uncompressed P-256
-  point (hex string, `04‖X‖Y`). The default in-tree key is the *development*
-  pair in `sdk/keys/vendor_dev.pem` (private key committed on purpose, like
-  MCUBOOT's test keys, so a clean checkout produces verifiable packages);
-  production images must override it.
-- **Pack**: `pack_mja.py --sign sdk/keys/vendor_dev.pem` (or the `ASTER_SIGN_KEY`
-  env var consumed by `build.py`). `verify_mja.py` re-checks the signature.
-- **Device policy** (`CONFIG_ASTER_SIGNATURE_POLICY`, three states):
-  | policy | unsigned pkg | valid signature | bad/alien/tampered |
-  |---|---|---|---|
-  | `off` (448 KB fw) | install | not checked | not checked |
-  | `allow-unsigned` (default, 516 KB fw) | install | install | reject `-17 ESIGN` |
-  | `require` | reject `-18 EUNSIGNED` | install | reject `-17 ESIGN` |
-  `off` links out all of PSA (zero cost); the other two add ~68 KB. The gate
-  runs in `aster_pkg_install_file` before any byte is written to the app dir;
-  boot-time scanning of already-installed apps does not re-verify (once on
-  disk, the install gate already passed). A `ASTER_ENOTSUP`-free PSA entropy
-  source (TRNG) is required — selected automatically via Kconfig.
+The firmware verification key is configured through `CONFIG_ASTER_VENDOR_PUBKEY`. The SDK packer accepts `--sign PATH_TO_PRIVATE_PEM`; a normal SDK build reads the optional `ASTER_SIGN_KEY` environment variable. The public verification key belongs in the firmware configuration. The corresponding private key stays with the publisher.
+
+With signature verification disabled, the signature is not checked. A build that allows unsigned packages still verifies any signature supplied. A build that requires signatures rejects an unsigned package with `ASTER_EUNSIGNED`; a failed signature check returns `ASTER_ESIGN`. Choose the policy for the specific board build. [Signature definitions](../../systems/zephyr/services/aster_sig.h)

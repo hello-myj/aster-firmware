@@ -4,7 +4,7 @@
 24 字节命令压入小环形缓冲，一帧一次 native 调用提交；固件光栅器直接画进
 surface 缓冲，并把脏区并集走既有异步刷屏流水线上屏。
 设计目标：EasyX 式的编程手感 + 零拷贝渲染 + 文字/精灵复用固件已有的
-cpfont/tiny_ttf 与 imgdec 基础设施。
+SD CPFont 与 imgdec 基础设施。
 
 缓冲有两种后端，由 `aster_surface_create` 的 `ASTER_SURFACE_F_PANEL_CANVAS`
 选择，`aster_surface_buffer_t.flags` 回报实际拿到的是哪种（固件可以拒绝）：
@@ -16,30 +16,13 @@ cpfont/tiny_ttf 与 imgdec 基础设施。
   命令能画。省掉那次扫描，代价是**每帧必须整屏重画**——前后缓冲轮换，没画到的
   地方留着上上帧的像素。
 
-> **面板画布在横屏构建里拿不到**（见 `verification.md` 63 号条目）：横屏下 app
-> 坐标空间（240×320）不是逻辑屏（320×240），平台要把整幅画面缩放塞进玻璃，
-> 而面板画布的前提正是"app 缓冲就是屏缓冲"。日志打
-> `panel-canvas requested -> denied`，`buf.flags` 里没有那一位，app **必须**
-> 按它读回来的标志分支（这本来就是契约）。代价实测 **+5.2 ms/帧**，全部落在
-> flush 侧，`raster` 不变。竖屏构建不受影响。
+是否获得面板画布取决于当前板、方向和逻辑缓冲几何。APP 应检查返回的 `flags` 并处理普通 surface。在早期 240×320 样机上，横屏请求与面板几何不匹配会退回普通缓冲，那次测试测得 flush 增加约 5.2 ms。
 
 无论哪种，命令都只对 `ASTER_PIXEL_RGB565` 生效。
 
 **ABI 3.0 起没有第二套 UI**：`aster/ui.h` 控件运行时、`ui.bin`、`ASTER_EVENT_UI`
 全部删除，app 界面一律在这条路径上自己画（见[已移除的控件运行时](abi-v1.md#removed-widget-runtime)）。
-阅读器 / 播放器界面后续同样基于本引擎重做。
-
-规范头（单一事实源）：`abi/include/aster/gfx.h`；
-app 侧编码器：`sdk/lib/aster/aster_gfx_engine.h`（命令环，header-only）+
-`sdk/lib/aster/aster_gfx.h`（内联廉价图元，v1 路径）；
-固件光栅器：`firmware/ui/ui_gfx.c` + `firmware/ui/pp_gfx.c`（pretty-poly 抗锯齿）；
-native 入口：`firmware/runtime/aster_native.c`。
-演示：`sdk/apps/gfxshow`；已移植到命令环：`sdk/apps/snake`、`sdk/apps/game.2048`、
-`sdk/apps/reader`、`sdk/apps/player`（后两个是**事件驱动**的，靠
-`aster_gfx_fonts_pending()` 才补得上异步落地的字形，见 §3）。
-仍在 v1 内联路径上的：`sdk/apps/gallery`（它每帧整屏 present，v1 足够）。
-文本测量/截断用 `sdk/lib/aster/aster_text.h`（`aster_text_w` / `aster_text_elide`，
-与 `aster_gfx_text_w` 同一套 cpfont 度量，含 CJK 双宽）。
+当前契约在 [gfx.h](../../contract/include/aster/gfx.h)。固件命令由 [ui_gfx.c](../../systems/zephyr/ui/ui_gfx.c) 处理，抗锯齿图元见 [pp_gfx.c](../../systems/zephyr/ui/pp_gfx.c)，WAMR 导入见 [aster_native.c](../../systems/zephyr/runtime/aster_native.c)。APP 端编码器、排版助手和示例由独立的 [SDK 仓库](https://github.com/hello-myj/aster-sdk) 维护。以下 ABI 2.x/3.x 的测量与故障记录保留原测试条件。
 
 ## 0. 抗锯齿几何（pretty-poly）
 
@@ -72,7 +55,7 @@ arena 耗尽时的 fallback（`ppg_path` 返回非 0 时走），不会再产生
 
 ## 1. 为什么是"命令环"而不是纯 app 侧画点
 
-- **文字**需要固件里的 cpfont 常驻度量表 / tiny_ttf 字形缓存，app 拿不到；
+- **文字**需要固件里的 CPFont 索引和按需字形缓存，app 拿不到；
 - **精灵**需要 imgdec（BMP/PNG/JPEG 流式解码）与 PSRAM 精灵缓存；
 - **AA/混合**在固件 C 里用 32-bit 字填充，比 wasm 内逐像素快 1.5–3×。
 
@@ -108,8 +91,7 @@ surface 生命周期仍归 `aster_surface_*`：本模块只加"画"，不加第�
 > 用旧 SDK 编过的包可能还在发它，复用号位会把"静默无操作"变成"画出别的东西"。
 > 固件侧的耗时直方图第 8 格现在叫 `reserved`——那一格非零就说明有包在发保留 op。
 
-文字约定：`y` 是**基线**（cpfont 度量约定）；`px` 在 ±4 px 内吸附到已烘焙
-的 cpfont 字号（12..48），否则落 tiny_ttf 池；烘焙子集缺字按字形逐个回退。
+文字的 `y` 是基线。当前系统从十个原生尺寸中选择最接近的 CPFont 字号，位图和度量按需从 SD 读取。[字号清单](../../resources/fonts/faces.json) · [缓存生命周期](../architecture.md#原生字号与字形缓存生命周期)
 `has_bg` 位放在 w5>>16，避免 bg=0xFFFF（合法白色）与"无背景"哨兵冲突。
 精灵：颜色键 0x0000 透明；alpha 乘覆盖率（255 不透明）；scale 最近邻采样。
 
@@ -446,7 +428,7 @@ python3 firmware/ui/hostpreview/gfx_device_check.py shot.png
   「每帧多发了两次整屏」。现在后者带 `direct send (no gather)` 字样。
 
 
-## 可协商完整帧协议 v1（本地开发中）
+## 可协商完整帧协议 v1
 
 旧 `aster_gfx_exec` 导入及 draw opcode 保持不变；不复用保留 op 8。控制包使用 n=UINT32_MAX、cmds=NULL、arena 指向 24 字节且 4 字节对齐的 `aster_gfx_frame_control_t`、present_x=0x47465231、present_y=1、w=h=0。QUERY 返回支持标志；旧 Host 的 EINVAL 映射为不支持。BEGIN 返回 frame_id，END/CANCEL 必须回显。绘制批次以 present_x=frame_id、present_y=magic、w=h=0 标识，撤销后的旧批次不走旧的即时发布路径。
 

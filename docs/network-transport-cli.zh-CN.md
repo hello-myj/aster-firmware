@@ -1,5 +1,7 @@
 # TCP/UDP
 
+以下 `aster net` 命令与槽位限制对应 Zephyr 固件的诊断 shell。开发 TCP、UDP 应用时，清单申请 `net` 权限并检查 `network` 能力。应用持有自己的连接句柄；排查问题时请在创建句柄的同一端读取状态和关闭连接。[公共网络契约](../contract/include/aster/net.h)
+
 设备 shell 的 `aster net` 用来诊断连接。应用使用 ABI 4.0 的 `aster_net_*` 导入，不使用这些 shell 错误码。
 
 先在系统设置里连上网络，再查地址：

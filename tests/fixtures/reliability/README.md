@@ -1,5 +1,7 @@
 # P0 APP 故障夹具
 
+此目录保留 ABI 3.7 测试工程，当前清单仍写 3.7。复现下文记录时需配套的旧工具和固件；4.x 设备会拒绝这些原始包。在当前设备上做同类测试，应先移植工程并重新生成对应 CPU 的 AOT 包。
+
 仅用于开发测试，ID 限于 `test.p0.*`。需要 ABI 3.7 的独立 Aster SDK；正常固件构建不读取 SDK 源码，也不自动编译或安装这些 APP。
 
 用已安装 SDK 执行：`aster build /absolute/path/to/tests/fixtures/reliability/clean --target xtensa --aot`。使用设备真实串口部署；真实设备需要 AOT，模拟器只能执行同包中的 WASM。

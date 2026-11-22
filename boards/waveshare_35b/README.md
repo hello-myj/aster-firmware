@@ -1,6 +1,6 @@
 # 微雪 ESP32-S3-Touch-LCD-3.5B
 
-Zephyr board：`waveshare_esp32s3_touch_lcd_35b/esp32s3/procpu`。硬件型号 `waveshare-35b`，SDK 目标 `xtensa`，当前 ABI 为 4.0.0。
+Zephyr board：`waveshare_esp32s3_touch_lcd_35b/esp32s3/procpu`。硬件型号 `waveshare-35b`，SDK 目标 `xtensa`，当前 ABI 以[固件契约](../../contract/include/aster/system.h)为准。
 
 显示初始化来自[官方示例](https://files.waveshare.net/wiki/ESP32-S3-Touch-LCD-3.5B/ESP32-S3-Touch-LCD-3.5B-Demo.zip) 的 `ESP-IDF/01_factory/components/esp_bsp`。共享 Zephyr 还需要 [patches/README.md](../../patches/README.md) 里的补丁。默认关闭 QMI8658，不声明加速度计和陀螺仪。
 
@@ -51,4 +51,4 @@ aster deploy dist/xtensa/<应用>.ast --target xtensa --port <串口> --run
 
 竖屏为 320×480。横屏应用由软件旋转为 480×320，退出后恢复竖屏。桌面与立创板使用同一套流光界面，按本板分辨率排版。
 
-系统字体放到 FAT SD 卡，步骤见仓库 README。
+此实验板使用 FAT SD 卡上的 CPFont。需要离线准备时，在固件仓库运行 `python tools/resources.py`，将输出目录 `dist/sdcard/` 的内容复制到卡根目录。当前公网首次开机配置覆盖的板型见[首次开机指南](../../docs/first-boot-setup.md)。

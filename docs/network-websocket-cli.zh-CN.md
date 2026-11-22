@@ -1,5 +1,7 @@
 # WebSocket/WSS
 
+以下 `aster net` 命令与槽位限制对应 Zephyr 固件的诊断 shell。开发 WebSocket、WSS 应用时，清单申请 `net` 权限并检查 `websocket` 能力。 使用加密连接时还要查询 `tls`。应用持有自己的连接句柄；排查问题时请在创建句柄的同一端读取状态和关闭连接。[公共网络契约](../contract/include/aster/net.h)
+
 全设备一个 WebSocket 客户端，与 HTTP、MQTT、TCP/UDP 共用两个连接槽。WSS 与 HTTPS、MQTTS 共用一个 TLS 名额。诊断配置是 `config/diagnostics/network-websocket.conf`。
 
 单条消息最多 4096 字节。URL 为 `ws://` 或 `wss://`，最长 1022 字节，不带用户信息、fragment、子协议或自定义头。不自动重连。

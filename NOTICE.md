@@ -16,3 +16,5 @@ Firmware includes WAMR (Apache-2.0 with LLVM exception), LVGL (MIT), minimp3 (CC
 image codecs, pretty-poly and font resources with their own notices. The SDK includes
 wasi-sdk/LLVM, WAMR compiler, Binaryen and icon assets with their respective licenses.
 Only the components present in this repository are distributed by it.
+
+See the [firmware component inventory](docs/reference/LICENSES.md), the [local media decoder provenance](third_party/dr_libs/README.aster.md) and the [first-boot QR encoder provenance](third_party/qrcodegen/README.aster.md) for the components selected by a board build.

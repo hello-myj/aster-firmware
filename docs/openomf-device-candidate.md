@@ -1,5 +1,7 @@
 # OpenOMF 实机验证候选（2026-10-24）
 
+本文记录微雪 S3 的历史性能测试。公开商城中 OpenOMF 面向鱼鹰光电 P4C5，使用 480×480 布局与 RISC-V AOT。微雪测试包的启动记录不能用来判断商城支持板型。[当前移植与操作](https://github.com/hello-myj/aster-apps/tree/main/OpenOMF)
+
 状态：按用户明确要求跳过备份，已刷入USB控制台配置并通过写入校验；板型、ABI、SD和320×480原生主页截图已确认正常。OpenOMF 0.2.11 已以4MiB线性预算完成双Nova/ARENA4及后续场景对战，180秒结束RUNNING/err0；实测约2.85–5.37FPS，流畅度仍未达标。
 
 ## 可核对产物

@@ -1,5 +1,7 @@
 # 连续音效实现与验收记录
 
+这里的四槽循环、交叉淡化、音高和增益用于游戏音效。后续 ABI 4.2 增加内存 WAV 加载；开发者应按实际调用设置最低 ABI。FAKE POD 的后台整曲播放使用独立媒体会话。[连续音效 SDK 手册](https://github.com/hello-myj/aster-sdk/blob/main/docs/continuous-audio.md)
+
 2026-10-21，工作分支 `feature/continuous-audio`；基线为多指版本合并后的 main。作为 `sdk-v4.1.0-rc.1` 配套候选版本整理。依据工作区的《固件连续音效优化实施方案》实施。
 
 ## 已核对的实现映射

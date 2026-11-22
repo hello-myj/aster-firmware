@@ -1,5 +1,7 @@
 # OSPTEK ESP32-P4 + C5 / ST7102 480×480
 
+商城与应用清单使用本板的运行时标识 `osptek-p4-st7102`。当前默认通道首次安装商城 0.3.3。同为 RISC-V 的 FAKE POD 需要自己的首次开机配置。[下载源配置](../../docs/distribution-config.md)
+
 鱼鹰光电 P4C5 的设备标识为 `osptek-p4-st7102`，应用目标为 `riscv`。主线采用 RGB565。桌面、五点触摸、SD、外接 C5 联网、商城安装及 AOT 游戏已有实机验证。固件的 `feat/osptek-p4-rgb666-validation` 和 SDK 的 `feat/p4-rgb888-rendering` 保存颜色实验。
 
 采用 ESP-IDF 6.0：现有 ST7102/ST7123 例程、P4 MIPI-DSI 和 C5 ESP-Hosted

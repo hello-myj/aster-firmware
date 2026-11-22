@@ -1,6 +1,6 @@
 # 下载源与 TLS 证书配置
 
-P4/ESP-IDF 和 lckfb/Zephyr 共用同一套配置生成逻辑，不需要为换源修改 C 源码。
+鱼鹰光电 P4C5、FAKE POD NANO PRO（ESP-IDF）及立创实战派（Zephyr）从同一份[分发配置](../config/distribution.json)生成默认源和信任根。默认地址指向华为云 OBS 的 `aster-source.json`。设备先读此入口，再按板型和架构读取同一快照内的文件。
 
 ## 固件默认值
 
@@ -37,7 +37,7 @@ GitHub 和 OBS 下载。替换时应保留仍在使用的服务所需的信任�
 - 固件：设备保存的资源源地址优先于构建默认值。
 - 商城：设备保存的 `store.url` 优先于应用构建默认值。
 - 首次配网页面可填写资源服务器地址；商城设置可保存新地址，无需重新编译。
-- 维护命令 `aster ui setup-source URL`（P4）或 `aster sys setup-source URL`（lckfb）
+- 维护命令 `aster ui setup-source URL`（鱼鹰 P4C5、FAKE POD）或 `aster sys setup-source URL`（lckfb）
   可更新已保存的资源源并验证/安装依赖，不格式化 SD 卡。
 
 变更内置默认值或内置证书仍需要重新构建和烧录；这不是在线证书更新机制。

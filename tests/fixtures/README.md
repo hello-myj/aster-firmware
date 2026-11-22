@@ -1,5 +1,7 @@
 # Lifecycle contract fixture
 
+Run this fixture with the firmware POSIX host. To exercise the same lifecycle on a supported board, install an AST containing the board’s AOT architecture. [Quick start](../../docs/quickstart.md)
+
 hello.wasm is the precompiled ABI 4.5 lifecycle fixture from hello.c in this directory.
 It checks the ABI, logs from the first frame, then exits.
 It is checked into the firmware repository so firmware CI needs neither an SDK
