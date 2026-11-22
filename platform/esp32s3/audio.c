@@ -65,6 +65,12 @@ BUILD_ASSERT(DT_HAS_CHOSEN(aster_audio_i2s), "select aster,audio-i2s in the boar
 #endif
 
 static const struct device *i2s_dev;
+#ifdef ASTER_I2S_MEDIA_PCM
+#include <stdatomic.h>
+static atomic_bool media_owned;
+#else
+#define media_owned false
+#endif
 static bool codecs_ready;
 static bool pa_on;
 static enum i2s_dir active_dir;
@@ -394,6 +400,60 @@ static bool sess_busy(void)
 	k_mutex_unlock(&sess_mu);
 	return busy;
 }
+
+#ifdef ASTER_I2S_MEDIA_PCM
+int aster_i2s_media_acquire(uint32_t rate)
+{
+	k_mutex_lock(&sess_mu, K_FOREVER);
+	if (media_owned || input_stream.handle ||
+	    (sess.state != ASTER_AUDIO_IDLE && !sess.effect_only)) {
+		k_mutex_unlock(&sess_mu);
+		return -EBUSY;
+	}
+	media_owned = true;
+	bool stop_cue = sess.state != ASTER_AUDIO_IDLE;
+	if (stop_cue)
+		sess.stop = true;
+	k_mutex_unlock(&sess_mu);
+	if (stop_cue) {
+		k_sem_give(&play_wake);
+		int64_t until = k_uptime_get() + 500;
+		while (sess_busy()) {
+			if (k_uptime_get() >= until) {
+				media_owned = false;
+				return -EBUSY;
+			}
+			k_msleep(5);
+		}
+	}
+
+	k_mutex_lock(&audio_lock, K_FOREVER);
+	int err = codecs_init();
+	if (!err)
+		err = aster_audio_codec.enable(g_vol);
+	if (!err)
+		err = i2s_setup_rate(I2S_DIR_TX, rate);
+	if (!err)
+		err = i2s_trigger(i2s_dev, I2S_DIR_TX, I2S_TRIGGER_START);
+	if (!err) {
+		pa_set(true);
+	} else {
+		i2s_shutdown();
+		media_owned = false;
+	}
+	k_mutex_unlock(&audio_lock);
+	return err;
+}
+
+void aster_i2s_media_release(void)
+{
+	k_mutex_lock(&audio_lock, K_FOREVER);
+	pa_set(false);
+	i2s_shutdown();
+	media_owned = false;
+	k_mutex_unlock(&audio_lock);
+}
+#endif
 
 static void sess_clear_locked(void)
 {
@@ -1590,7 +1650,7 @@ int aster_plat_audio_play(const uint8_t *pcm, size_t size)
 		return -EBUSY;
 	}
 	k_mutex_lock(&audio_lock, K_FOREVER);
-	int err = codecs_init();
+	int err = media_owned ? -EBUSY : codecs_init();
 	if (err) {
 		k_mutex_unlock(&audio_lock);
 		return err;
@@ -1611,7 +1671,7 @@ int aster_plat_audio_record(uint8_t *pcm, size_t size)
 		return -EBUSY;
 	}
 	k_mutex_lock(&audio_lock, K_FOREVER);
-	int err = codecs_init();
+	int err = media_owned ? -EBUSY : codecs_init();
 	if (err) {
 		k_mutex_unlock(&audio_lock);
 		return err;
@@ -1637,7 +1697,7 @@ int aster_plat_audio_beep(uint32_t duration_ms, uint32_t hz)
 	}
 
 	k_mutex_lock(&audio_lock, K_FOREVER);
-	int err = codecs_init();
+	int err = media_owned ? -EBUSY : codecs_init();
 	if (err) {
 		k_mutex_unlock(&audio_lock);
 		return err;
@@ -1873,7 +1933,7 @@ int aster_plat_audio_ui_play(const int16_t *pcm, size_t frames, unsigned gain, u
 		return -EAGAIN;
 	if (k_mutex_lock(&sess_mu, K_NO_WAIT))
 		return -EAGAIN;
-	if (sess.effect_closing || sess.stop || sess.state == ASTER_AUDIO_PAUSED ||
+	if (media_owned || sess.effect_closing || sess.stop || sess.state == ASTER_AUDIO_PAUSED ||
 	    k_mutex_lock(&effect_mu, K_NO_WAIT)) {
 		k_mutex_unlock(&sess_mu);
 		return -EAGAIN;
@@ -1990,6 +2050,10 @@ int aster_plat_audio_effect_play_ex(uint32_t handle, const aster_audio_effect_pl
 
 retry:
 	k_mutex_lock(&sess_mu, K_FOREVER);
+	if (media_owned) {
+		k_mutex_unlock(&sess_mu);
+		return -EBUSY;
+	}
 	if (sess.effect_closing) {
 		k_mutex_unlock(&sess_mu);
 		if (k_uptime_get() >= deadline) {
@@ -2224,7 +2288,7 @@ static bool path_looks_mp3(const char *path)
 int aster_plat_audio_start_path(const char *path)
 {
 	k_mutex_lock(&sess_mu, K_FOREVER);
-	bool stream_owned = input_stream.handle != 0;
+	bool stream_owned = media_owned || input_stream.handle != 0;
 	k_mutex_unlock(&sess_mu);
 	if (stream_owned)
 		return -EBUSY;
@@ -2252,6 +2316,12 @@ int aster_plat_audio_start_path(const char *path)
 	}
 
 	k_mutex_lock(&sess_mu, K_FOREVER);
+	if (media_owned) {
+		file_abort();
+		k_mutex_unlock(&sess_mu);
+		aster_psram_free(win);
+		return -EBUSY;
+	}
 	sess.buf = win;
 	sess.size = payload;
 	sess.off = 0;
@@ -2359,7 +2429,7 @@ int aster_plat_audio_stream_open(uint32_t codec)
 		return -ENOTSUP;
 	if (k_mutex_lock(&sess_mu, K_NO_WAIT))
 		return -EAGAIN;
-	if (input_stream.handle || sess.state != ASTER_AUDIO_IDLE) {
+	if (media_owned || input_stream.handle || sess.state != ASTER_AUDIO_IDLE) {
 		k_mutex_unlock(&sess_mu);
 		return -EBUSY;
 	}

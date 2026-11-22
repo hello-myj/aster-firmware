@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-#include "usb_storage.h"
+#include "aster_idf_usb_sdmmc.h"
 #include "aster_power_ui.h"
 #include "aster_os.h"
 #include "driver/sdmmc_host.h"
@@ -22,7 +22,7 @@ static sdmmc_card_t card;
 static uint8_t *dma;
 static StaticSemaphore_t lock_buffer;
 static SemaphoreHandle_t io_lock;
-static atomic_bool io_enabled, host_seen, ejected;
+static atomic_bool io_enabled, host_seen, host_detached, ejected;
 
 static bool medium_ready(uint8_t lun)
 {
@@ -137,19 +137,21 @@ int32_t __wrap_tud_msc_scsi_cb(uint8_t lun, const uint8_t command[16], void *buf
 static void usb_event(tinyusb_event_t *event, void *context)
 {
     (void)context;
-    if (event->id == TINYUSB_EVENT_ATTACHED)
+    if (event->id == TINYUSB_EVENT_ATTACHED) {
+        atomic_store(&host_detached, false);
         atomic_store(&host_seen, true);
+    } else if (event->id == TINYUSB_EVENT_DETACHED) {
+        atomic_store(&host_detached, true);
+    }
 }
 
-static bool unplugged(void)
+static bool unplugged(const aster_idf_usb_sdmmc_ops_t *ops)
 {
-    aster_power_battery_t battery;
-    return aster_power_battery(&battery) == 0 && !(battery.flags & ASTER_POWER_EXTERNAL_PRESENT);
+    return ops->unplugged ? ops->unplugged() : atomic_load(&host_detached);
 }
 
-int fakepod_usb_storage(void *context)
+int aster_idf_usb_sdmmc_run(const aster_idf_usb_sdmmc_ops_t *ops)
 {
-    (void)context;
     if (!io_lock)
         io_lock = xSemaphoreCreateMutexStatic(&lock_buffer);
     dma = heap_caps_malloc(DMA_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
@@ -158,7 +160,7 @@ int fakepod_usb_storage(void *context)
 
     bool raw_open = false, driver_open = false;
     tinyusb_msc_storage_handle_t storage = NULL;
-    esp_err_t result = fakepod_storage_open_raw(&card);
+    esp_err_t result = ops->open(&card);
     if (result != ESP_OK)
         goto finish;
     raw_open = true;
@@ -181,6 +183,7 @@ int fakepod_usb_storage(void *context)
         goto finish;
 
     atomic_store(&host_seen, false);
+    atomic_store(&host_detached, false);
     atomic_store(&ejected, false);
     atomic_store(&io_enabled, true);
     const tinyusb_config_t usb = TINYUSB_DEFAULT_CONFIG(usb_event);
@@ -191,11 +194,11 @@ int fakepod_usb_storage(void *context)
 
     while (!atomic_load(&ejected)) {
         bool connected = atomic_load(&host_seen);
-        if (aster_power_ui_usb_tick(connected) && !atomic_load(&host_seen))
+        if (aster_power_ui_usb_tick(connected, ops->connection_hint) && !atomic_load(&host_seen))
             break;
-        if (connected && unplugged()) {
+        if (connected && unplugged(ops)) {
             aster_os_sleep_ms(100);
-            if (unplugged())
+            if (unplugged(ops))
                 break;
         }
         aster_os_sleep_ms(30);
@@ -220,8 +223,11 @@ finish:
         tinyusb_msc_delete_storage(storage);
     if (driver_open)
         tinyusb_msc_uninstall_driver();
-    if (raw_open)
-        sdmmc_host_deinit();
+    if (raw_open) {
+        esp_err_t close_result = ops->close();
+        if (result == ESP_OK)
+            result = close_result;
+    }
     heap_caps_free(dma);
     dma = NULL;
     ESP_LOGI(TAG, "USB session finished: %s", esp_err_to_name(result));

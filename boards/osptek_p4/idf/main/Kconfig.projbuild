@@ -19,6 +19,14 @@ config ASTER_BOARD_CODEC_ES8311
     default y
 
 menu "Aster OSPTEK P4 baseboard V1.5 wiring"
+config ASTER_OSPTEK_USB_STORAGE
+    bool "Enable USB SD card reader on the native Type-C connector"
+    default y
+    select TINYUSB_MSC_ENABLED
+    help
+        Hand the SD card exclusively to a USB host from system settings.
+        The CH343 download connector remains available as a serial console.
+
 config ASTER_P4_BACKLIGHT_GPIO
     int "BACKLIGHT_GPIO"
     range 0 54

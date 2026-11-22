@@ -42,7 +42,7 @@ static void cancel_usb(lv_event_t *event)
         usb_canceled = true;
 }
 
-bool aster_power_ui_usb_tick(bool connected)
+bool aster_power_ui_usb_tick(bool connected, const char *connection_hint)
 {
     if (!root || !detail)
         return false;
@@ -58,7 +58,7 @@ bool aster_power_ui_usb_tick(bool connected)
         lv_obj_add_event_cb(usb_cancel_button, cancel_usb, LV_EVENT_CLICKED, NULL);
         aster_ui_lvgl_pointer(0, 0, 0);
         lv_indev_reset(aster_ui_lvgl_indev(), NULL);
-        lv_label_set_text(detail, "请连接电脑。若只识别到串口，请翻转设备端插头。");
+        lv_label_set_text(detail, connection_hint);
     }
     if (connected && !usb_connected) {
         usb_connected = true;

@@ -12,6 +12,7 @@
       "display",
       "touch",
       "audio-out",
+      "media-player",
       "filesystem",
       "storage.app",
       "wifi",

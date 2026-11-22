@@ -39,9 +39,13 @@ typedef struct {
     bool diagnostic;
 } job_t;
 
-static void worker(void *unused)
+static void worker(void *registry_ready)
 {
-    (void)unused;
+    /* FAT directory traversal and manifest parsing share the VM worker stack.
+     * Complete the scan before the launcher or console can look up an APP. */
+    if (aster_storage_mounted())
+        aster_app_mgr_init();
+    xSemaphoreGive((SemaphoreHandle_t)registry_ready);
     job_t job;
     int ui = aster_idf_ui_init(aster_idf_apps_launch);
     if (ui)
@@ -188,8 +192,6 @@ int aster_idf_apps_start(void)
         state_lock = NULL;
         return ASTER_ENOMEM;
     }
-    if (aster_storage_mounted())
-        aster_app_mgr_init();
     TaskHandle_t monitor = NULL;
     if (xTaskCreate(watchdog, "aster_vm_guard", 3072, NULL, 5, &monitor) != pdPASS) {
         vQueueDelete(queue);
@@ -198,10 +200,12 @@ int aster_idf_apps_start(void)
         state_lock = NULL;
         return ASTER_ENOMEM;
     }
+    StaticSemaphore_t startup_event;
+    SemaphoreHandle_t ready = xSemaphoreCreateBinaryStatic(&startup_event);
 #if CONFIG_ASTER_P4_DUAL_CORE_RENDER
-    if (xTaskCreatePinnedToCore(worker, "aster_vm", 24576, NULL, 4, NULL, 1) != pdPASS) {
+    if (xTaskCreatePinnedToCore(worker, "aster_vm", 24576, ready, 4, NULL, 1) != pdPASS) {
 #else
-    if (xTaskCreate(worker, "aster_vm", 24576, NULL, 4, NULL) != pdPASS) {
+    if (xTaskCreate(worker, "aster_vm", 24576, ready, 4, NULL) != pdPASS) {
 #endif
         vTaskDelete(monitor);
         vQueueDelete(queue);
@@ -210,6 +214,8 @@ int aster_idf_apps_start(void)
         state_lock = NULL;
         return ASTER_ENOMEM;
     }
+    xSemaphoreTake(ready, portMAX_DELAY);
+    vSemaphoreDelete(ready);
 #if CONFIG_ASTER_P4_AUTORUN_DIAGNOSTIC
     FILE *file = fopen("/SD/app.aot", "rb");
 #ifndef ASTER_REQUIRE_AOT

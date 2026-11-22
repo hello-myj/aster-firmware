@@ -9,6 +9,7 @@
  */
 
 #include "aster_idf_audio.h"
+#include "aster_audio_output.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -26,6 +27,7 @@
 #include "aster_idf_wifi.h"
 #include "aster_idf_apps.h"
 #include "aster_power.h"
+#include "storage.h"
 #include "transfer.h"
 #include <string.h>
 #include "esp_log.h"
@@ -473,10 +475,12 @@ static int read_touch_frame(aster_idf_touch_point_t points[ASTER_IDF_MAX_TOUCH])
 }
 
 /* Experimental board bring-up plus the core Aster lifecycle subset. */
-void osptek_storage_start(void);
 
 void app_main(void)
 {
+#if CONFIG_ASTER_OSPTEK_USB_STORAGE
+    osptek_usb_storage_register();
+#endif
     aster_idf_power_register();
     aster_power_seal();
     aster_device_seal();
@@ -540,6 +544,14 @@ void app_main(void)
     int audio = aster_idf_audio_start();
     if (audio)
         ESP_LOGW(TAG, "Audio unavailable: %d", audio);
+#ifdef ASTER_IDF_MEDIA_PLAYER
+    if (!audio) {
+        int media = aster_idf_player_register();
+        if (media)
+            ESP_LOGW(TAG, "Media player unavailable: %d", media);
+    }
+#endif
+    aster_audio_output_seal();
     int apps = aster_idf_apps_start();
     if (apps)
         ESP_LOGE(TAG, "Application worker unavailable: %d", apps);

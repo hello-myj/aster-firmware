@@ -110,7 +110,9 @@ ESP-IDF 额外提供 `aster power sleep 5`，仅以定时器在 5 秒后唤醒�
 
 FAKE POD NANO PRO 的构建选项 `CONFIG_ASTER_FAKEPOD_USB_STORAGE` 默认关闭。可用 menuconfig 开启 “Enable USB SD card reader”，或在新构建配置中将 `sdkconfig.defaults.usb-storage` 叠加到板卡的 `sdkconfig.defaults`。
 
-启用后，桌面下拉设置出现“USB 读卡器”，ESP-IDF 也可用 `aster power usb`。进入后连接电脑。若电脑只识别到下载串口，翻转设备端 Type-C 插头。SD 卡以 USB 大容量存储设备出现，可把 MP3、WAV 或 FLAC 文件放入根目录的 `music` 文件夹。
+鱼鹰光电 P4C5（ST7102）的 `CONFIG_ASTER_OSPTEK_USB_STORAGE` 默认开启，可以在 menuconfig 关闭。用数据线将电脑接到原生 USB Type-C，CH343 下载口可同时保留。FAKE POD 使用同一个 Type-C，若只识别到串口，翻转设备端插头即可。
+
+启用后，桌面下拉设置出现“USB 读卡器”，ESP-IDF 也可用 `aster power usb`。SD 卡以 USB 大容量存储设备出现，可把 MP3、WAV 或 FLAC 文件放入根目录的 `music` 文件夹。
 
 连接前，系统退出当前应用、停止音频、等待读写任务结束并卸载 SD。USB 会话内由电脑独占 SD，设备显示操作提示。电脑安全弹出后会话自动结束，可拔线。若操作系统只停用设备、没有发送弹出命令，安全弹出后拔线也会结束会话。回到桌面后可重新打开曲库。
 

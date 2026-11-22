@@ -12,6 +12,8 @@
 #include <errno.h>
 #if CONFIG_ASTER_FAKEPOD_USB_STORAGE
 #include "usb_storage.h"
+#include "aster_idf_usb_sdmmc.h"
+#include "aster_power.h"
 #endif
 static sdmmc_card_t *mounted_card;
 void fakepod_storage_start(void);
@@ -64,7 +66,7 @@ static sdmmc_slot_config_t board_sd_slot(void)
 }
 
 #if CONFIG_ASTER_FAKEPOD_USB_STORAGE
-esp_err_t fakepod_storage_open_raw(sdmmc_card_t *card)
+static esp_err_t open_raw(sdmmc_card_t *card)
 {
     if (mounted_card || aster_storage_mounted())
         return ESP_ERR_INVALID_STATE;
@@ -80,6 +82,22 @@ esp_err_t fakepod_storage_open_raw(sdmmc_card_t *card)
     if (result != ESP_OK)
         sdmmc_host_deinit();
     return result;
+}
+
+static bool usb_unplugged(void)
+{
+    aster_power_battery_t battery;
+    return aster_power_battery(&battery) == 0 && !(battery.flags & ASTER_POWER_EXTERNAL_PRESENT);
+}
+
+int fakepod_usb_storage(void *context)
+{
+    (void)context;
+    static const aster_idf_usb_sdmmc_ops_t ops = {
+        .connection_hint = "请连接电脑。若只识别到串口，请翻转设备端插头。",
+        .open = open_raw, .close = sdmmc_host_deinit, .unplugged = usb_unplugged,
+    };
+    return aster_idf_usb_sdmmc_run(&ops);
 }
 #endif
 

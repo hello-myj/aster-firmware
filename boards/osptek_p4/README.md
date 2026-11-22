@@ -8,6 +8,12 @@
 驱动均可直接复用。Zephyr 保留原 S3 目标；共享的应用、文件、图形和音频逻辑
 通过独立的 IDF 组件接入，未把原 S3 平台切换到 IDF。
 
+## 通过 USB 复制 SD 卡文件
+
+用数据线把电脑接到开发板的原生 USB Type-C，CH343 下载串口可以同时连接。桌面下拉设置选择「USB 读卡器」，也可以从串口执行 `aster power usb`。电脑识别到可移动磁盘后，把歌曲复制到卡根目录的 `music/`。完成后在电脑上安全弹出磁盘，设备会重新挂载 SD 卡，随后可打开曲库。
+
+本板默认开启 `CONFIG_ASTER_OSPTEK_USB_STORAGE`，可以在 menuconfig 中关闭。读卡器只使用 SD 所在的 SDMMC 槽 0，外接 C5 使用槽 1。
+
 ## WSL 构建
 
 需要 ESP-IDF 6.0、ESP32-P4 工具链和对应 Python 环境。
@@ -80,7 +86,7 @@ RISC-V AOT 已在 P4 v3.2 执行：600 帧显示诊断达到帧数上限后返�
 - SD 文件、目录、应用沙箱、权限、KV；ASTP 安装、扫描、卸载与双版本代码目录。
 - C5 SDIO Wi-Fi、扫描/连接/保存配置/重连/忘记、受密码保护的本地 AP；SNTP 时钟。
 - 原有 TCP/UDP、HTTP/HTTPS、MQTT/MQTTS、WebSocket/WSS 服务和六个网络 ABI 导入。
-- ES8311/I2S 播放和录音；复用原 WAV/PCM/MP3、歌词、音效混音及压缩流逻辑。
+- ES8311/I2S 支持播放、录音和音效。板级媒体服务可从 SD 卡播放 MP3、WAV 和 FLAC，支持 32、44.1、48 kHz 输入。立体声混合后送入单声道 DAC，I2S 以 16 位输出。音乐 APP 中双击歌词正文可进出全屏动态歌词。
 
 C5 主机固定使用 ESP-Hosted 2.12.9，与板包提供的协处理器版本相同。
 SD 卡占 slot 0、C5 占 slot 1，共享控制器初始化并按槽释放。

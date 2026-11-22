@@ -25,6 +25,12 @@ int gpio_pin_set_dt(const struct gpio_dt_spec *pin, int value);
 const struct device *aster_idf_audio_i2s(void);
 bool device_is_ready(const struct device *device);
 
+#ifdef ASTER_I2S_MEDIA_PCM
+/* Reserve the shared codec and TX channel for the serialized media worker. */
+int aster_i2s_media_acquire(uint32_t rate);
+void aster_i2s_media_release(void);
+#endif
+
 /* Private Zephyr-shaped adapter for the existing board-independent player. */
 enum i2s_dir { ASTER_I2S_TX = 1, ASTER_I2S_RX = 2, ASTER_I2S_BOTH = 3 };
 

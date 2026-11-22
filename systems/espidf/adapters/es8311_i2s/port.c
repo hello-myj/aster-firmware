@@ -7,6 +7,10 @@
 #include "es8311_i2s_wiring.h"
 #include "aster_idf_audio.h"
 #include "aster_platform.h"
+#ifdef ASTER_I2S_MEDIA_PCM
+#include "aster_audio_output.h"
+static int register_media_output(void);
+#endif
 #include <string.h>
 #include <stdatomic.h>
 const struct device aster_idf_gpio_device = {.role = 3};
@@ -33,6 +37,10 @@ int aster_idf_audio_start(void)
     uint8_t dac, adc;
     int r = aster_plat_audio_probe(&dac, &adc);
     available = r == 0;
+#ifdef ASTER_I2S_MEDIA_PCM
+    if (!r)
+        r = register_media_output();
+#endif
     return r;
 }
 
@@ -235,3 +243,64 @@ int i2s_read(const struct device *d, void **block, size_t *size)
     }
     return 0;
 }
+
+#ifdef ASTER_I2S_MEDIA_PCM
+static int media_caps(void *ctx, aster_audio_output_caps_t *out)
+{
+    (void)ctx;
+    out->formats = ASTER_AUDIO_PCM_BIT(ASTER_AUDIO_PCM_S32LE);
+    out->rates = ASTER_AUDIO_RATE_32000 | ASTER_AUDIO_RATE_44100 | ASTER_AUDIO_RATE_48000;
+    out->channels = ASTER_AUDIO_CHANNEL_BIT(2);
+    out->flags = ASTER_AUDIO_OUTPUT_EXCLUSIVE;
+    out->max_write_frames = 512;
+    return 0;
+}
+
+static int media_open(void *ctx, const aster_audio_format_t *format)
+{
+    (void)ctx;
+    return aster_i2s_media_acquire(format->rate);
+}
+
+static int media_write(void *ctx, const void *pcm, uint32_t frames)
+{
+    (void)ctx;
+    /* The ES8311 has one DAC. Preserve both program channels in its mono mix. */
+    const int32_t *stereo = pcm;
+    int16_t samples[128 * 2];
+    size_t count = frames < 128 ? frames : 128;
+    for (size_t i = 0; i < count; ++i) {
+        int32_t left = stereo[2 * i] >> 16;
+        int32_t right = stereo[2 * i + 1] >> 16;
+        samples[2 * i] = samples[2 * i + 1] = (int16_t)((left + right) / 2);
+    }
+    size_t written = 0;
+    esp_err_t r = i2s_channel_write(tx, samples, count * 4, &written, 200);
+    if (written % 4)
+        return -EIO;
+    return written ? (int)(written / 4) : error(r);
+}
+
+static int media_drain(void *ctx)
+{
+    (void)ctx;
+    return i2s_trigger(&i2s_device, ASTER_I2S_TX, I2S_TRIGGER_DRAIN);
+}
+
+static int media_close(void *ctx)
+{
+    (void)ctx;
+    aster_i2s_media_release();
+    return 0;
+}
+
+static int register_media_output(void)
+{
+    static const aster_audio_output_ops_t ops = {
+        .size = sizeof(ops), .version = ASTER_AUDIO_OUTPUT_API_VERSION, .name = "es8311-i2s",
+        .caps = media_caps, .open = media_open, .write = media_write,
+        .drain = media_drain, .close = media_close,
+    };
+    return aster_audio_output_bind(ASTER_AUDIO_OUTPUT_WIRED, &ops, NULL);
+}
+#endif

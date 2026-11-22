@@ -10,8 +10,13 @@
 #include "freertos/task.h"
 #include "esp_system.h"
 #include <errno.h>
+#if CONFIG_ASTER_OSPTEK_USB_STORAGE
+#include "aster_idf_usb_sdmmc.h"
+#include "aster_idf_apps.h"
+#endif
+#include "storage.h"
+
 static sdmmc_card_t *mounted_card;
-void osptek_storage_start(void);
 
 static int power_suspend(void)
 {
@@ -45,7 +50,7 @@ static int format_and_reboot(void)
     return 0;
 }
 
-void osptek_storage_start(void)
+static sdmmc_host_t board_sd_host(void)
 {
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     host.slot = ASTER_STORAGE_SLOT;
@@ -53,6 +58,11 @@ void osptek_storage_start(void)
     host.flags |= SDMMC_HOST_FLAG_DEINIT_ARG;
     host.deinit_p = aster_storage_sdmmc_deinit;
     host.max_freq_khz = SDMMC_FREQ_DEFAULT;
+    return host;
+}
+
+static sdmmc_slot_config_t board_sd_slot(void)
+{
     sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
     slot.width = 4;
     slot.clk = 43;
@@ -63,6 +73,71 @@ void osptek_storage_start(void)
     slot.d3 = 42;
     slot.cd = GPIO_NUM_NC; /* Detect GPIO45 is documented, initialization probes the card. */
     slot.wp = GPIO_NUM_NC;
+    return slot;
+}
+
+#if CONFIG_ASTER_OSPTEK_USB_STORAGE
+static esp_err_t close_raw(void)
+{
+    /* Slot 1 belongs to the C5 even when the local filesystem is offline. */
+    return aster_storage_sdmmc_deinit(ASTER_STORAGE_SLOT);
+}
+
+static esp_err_t open_raw(sdmmc_card_t *card)
+{
+    if (mounted_card || aster_storage_mounted())
+        return ESP_ERR_INVALID_STATE;
+    sdmmc_host_t host = board_sd_host();
+    sdmmc_slot_config_t slot = board_sd_slot();
+    esp_err_t result = host.init();
+    if (result != ESP_OK)
+        return result;
+    result = sdmmc_host_init_slot(host.slot, &slot);
+    if (result == ESP_OK)
+        result = sdmmc_card_init(&host, card);
+    if (result != ESP_OK)
+        close_raw();
+    return result;
+}
+
+static int usb_storage(void *context)
+{
+    (void)context;
+    static const aster_idf_usb_sdmmc_ops_t ops = {
+        .connection_hint = "请用数据线连接电脑和板上的原生 USB Type-C 接口。",
+        .open = open_raw,
+        .close = close_raw,
+    };
+    return aster_idf_usb_sdmmc_run(&ops);
+}
+
+static int power_caps(void *context, aster_power_caps_t *caps)
+{
+    int result = aster_idf_power_base.caps(context, caps);
+    if (!result)
+        caps->modes |= ASTER_POWER_USB_STORAGE;
+    return result;
+}
+
+void osptek_usb_storage_register(void)
+{
+    static aster_power_ops_t ops;
+    const aster_power_ops_t overrides = {
+        .size = sizeof(overrides), .version = ASTER_POWER_API_VERSION,
+        .name = "osptek-p4-sd", .caps = power_caps, .usb_storage = usb_storage,
+    };
+    int result = aster_power_derive(&ops, &aster_idf_power_base, &overrides);
+    if (!result)
+        result = aster_power_bind(&ops, NULL);
+    if (result)
+        ESP_LOGE("aster", "USB storage registration failed: %d", result);
+}
+#endif
+
+void osptek_storage_start(void)
+{
+    sdmmc_host_t host = board_sd_host();
+    sdmmc_slot_config_t slot = board_sd_slot();
     esp_vfs_fat_sdmmc_mount_config_t mount = {
         .format_if_mount_failed = false,
         .max_files = 32,

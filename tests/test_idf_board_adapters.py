@@ -44,7 +44,8 @@ get_property(defs GLOBAL PROPERTY aster_audio_defs)
 get_property(wifi GLOBAL PROPERTY aster_connectivity_args)
 if(NOT "${board}/wiring.c" IN_LIST audio OR NOT "player.c" IN_LIST audio
    OR NOT "${root}/systems/espidf/adapters/es8311_i2s/port.c" IN_LIST audio
-   OR NOT "ASTER_IDF_MEDIA_PLAYER=1" IN_LIST defs OR "bt" IN_LIST audio)
+   OR NOT "ASTER_IDF_MEDIA_PLAYER=1" IN_LIST defs
+   OR NOT "ASTER_I2S_MEDIA_PCM=1" IN_LIST defs OR "bt" IN_LIST audio)
     message(FATAL_ERROR "unexpected audio registration: ${audio} / ${defs}")
 endif()
 if(NOT "esp_wifi" IN_LIST wifi OR "esp_hosted" IN_LIST wifi)

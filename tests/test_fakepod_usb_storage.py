@@ -6,7 +6,7 @@ from test_waveshare import ROOT, run_c
 
 class FakePodUSBStorage(unittest.TestCase):
     def test_partial_io_bounds_and_storage_ownership(self):
-        source = (ROOT / 'boards/fakepod_s31/idf/main/usb_storage.c').read_text()
+        source = (ROOT / 'systems/espidf/adapters/usb_sdmmc/usb_sdmmc.c').read_text()
         transfer = source[source.index('static bool medium_ready'):
                           source.index('bool tud_msc_start_stop_cb')]
         run_c(r'''
