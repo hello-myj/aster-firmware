@@ -1036,10 +1036,15 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_sd,
 SHELL_STATIC_SUBCMD_SET_CREATE(
         sub_sys,
 #if defined(CONFIG_ASTER_FIRST_BOOT)
-        SHELL_CMD(setup, NULL, "reopen Web provisioning; preserve apps and data", cmd_sys_setup),
-        SHELL_CMD_ARG(setup - source, NULL, "verify/install from URL using saved Wi-Fi",
+        SHELL_CMD_ARG(setup, NULL, "reopen Web provisioning; preserve apps and data", cmd_sys_setup,
+                      1, 0),
+        /* Zephyr stringifies the first argument, including whitespace around hyphens. */
+        /* clang-format off */
+        SHELL_CMD_ARG(setup-source, NULL, "verify/install from URL using saved Wi-Fi",
                       cmd_sys_setup_source, 2, 0),
-        SHELL_CMD(setup - status, NULL, "resource setup progress/error", cmd_sys_setup_status),
+        SHELL_CMD_ARG(setup-status, NULL, "resource setup progress/error", cmd_sys_setup_status,
+                      1, 0),
+        /* clang-format on */
 #endif
         SHELL_CMD(info, NULL, "device profile", cmd_sys_info),
         SHELL_CMD(features, NULL, "capability list", cmd_sys_features),

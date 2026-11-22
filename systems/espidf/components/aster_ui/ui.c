@@ -11,7 +11,6 @@
 #include "launcher.h"
 #include "qpanel.h"
 #include "wifi_settings.h"
-#include "aster_setup.h"
 #include "aster_deploy.h"
 #include "aster_deploy_ui.h"
 #include "gesture.h"
@@ -112,18 +111,6 @@ static void perf_event(lv_event_t *event)
 
 int aster_idf_ui_command(int argc, char **argv)
 {
-    if (argc == 3 && !strcmp(argv[2], "setup-status")) {
-        aster_setup_snapshot s;
-        aster_setup_get(&s);
-        printf("SETUP phase=%u error=%d hotspot=%u ssid=%s bytes=%llu/%llu\n",
-               (unsigned)s.state.phase, s.state.error, s.hotspot, s.ssid,
-               (unsigned long long)s.state.bytes, (unsigned long long)s.state.total);
-        return 0;
-    }
-    if (argc == 3 && !strcmp(argv[2], "setup"))
-        return aster_setup_repair();
-    if (argc == 4 && !strcmp(argv[2], "setup-source"))
-        return aster_setup_repair_source(argv[3]);
     int request;
     if (argc == 4 && !strcmp(argv[2], "volume")) {
         char *end = NULL;

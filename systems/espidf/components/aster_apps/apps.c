@@ -286,8 +286,22 @@ int aster_idf_apps_command(int argc, char **argv)
         puts("Erase the mounted SD card: aster sd format --confirm (stop all APPs first)");
         return ASTER_EINVAL;
     }
-    if (argc >= 2 && !strcmp(argv[1], "ui"))
-        return aster_idf_ui_command(argc, argv);
+    if (argc >= 3 && (!strcmp(argv[1], "sys") || !strcmp(argv[1], "ui"))) {
+        if (argc == 3 && !strcmp(argv[2], "setup-status")) {
+            aster_setup_snapshot s;
+            aster_setup_get(&s);
+            printf("SETUP phase=%u error=%d hotspot=%u ssid=%s bytes=%llu/%llu\n",
+                   (unsigned)s.state.phase, s.state.error, s.hotspot, s.ssid,
+                   (unsigned long long)s.state.bytes, (unsigned long long)s.state.total);
+            return 0;
+        }
+        if (argc == 3 && !strcmp(argv[2], "setup"))
+            return aster_setup_repair();
+        if (argc == 4 && !strcmp(argv[2], "setup-source"))
+            return aster_setup_repair_source(argv[3]);
+        if (!strcmp(argv[1], "ui"))
+            return aster_idf_ui_command(argc, argv);
+    }
     if (argc < 3 || strcmp(argv[1], "app"))
         return ASTER_EINVAL;
     if (argc == 3 && !strcmp(argv[2], "diagnostic"))

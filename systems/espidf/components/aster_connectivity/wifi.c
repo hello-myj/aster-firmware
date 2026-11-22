@@ -35,8 +35,8 @@ static void event(void *arg, esp_event_base_t base, int32_t id, void *data)
 static int command(int argc, char **argv)
 {
     if (argc >= 2 &&
-        (!strcmp(argv[1], "app") || !strcmp(argv[1], "ui") || !strcmp(argv[1], "sd") ||
-         !strcmp(argv[1], "port") || !strcmp(argv[1], "power")) &&
+        (!strcmp(argv[1], "app") || !strcmp(argv[1], "ui") || !strcmp(argv[1], "sys") ||
+         !strcmp(argv[1], "sd") || !strcmp(argv[1], "port") || !strcmp(argv[1], "power")) &&
         app_command) {
         int result = app_command(argc, argv);
         printf("APP command result=%d\n", result);
@@ -44,7 +44,8 @@ static int command(int argc, char **argv)
     }
     if (argc < 3 || strcmp(argv[1], "wifi")) {
         puts(
-            "aster wifi scan|status|disconnect|connect SSID [PASSWORD]; aster app list|run|stop|install|uninstall; aster power status|restart|off|sleep [SECONDS]");
+            "aster wifi scan|status|disconnect|connect SSID [PASSWORD]; aster app list|run|stop|install|uninstall; "
+            "aster sys setup|setup-status|setup-source URL; aster power status|restart|off|sleep [SECONDS]");
         return 1;
     }
     int result = ASTER_EINVAL;

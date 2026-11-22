@@ -56,8 +56,8 @@ https://aster-releases.obs.cn-south-1.myhuaweicloud.com/aster-source.json
 新卡仍从欢迎页开始，不会因有默认 URL 就跳过手机配网；健康卡不访问公网。
 首次连接 HTTPS 前最多等待 30 秒校时，保留证书、主机名和时间验证。
 
-已有设备先停止 APP，可用鱼鹰 P4C5 或 FAKE POD `aster ui setup-source URL`、lckfb
-`aster sys setup-source URL` 维护：复用保存的 Wi-Fi、验证已有字体、补齐缺失文件，
+串口输入 `aster sys setup-status` 可查看初始化阶段、错误码、配网热点状态和已下载字节数。
+已有设备先停止 APP，再执行 `aster sys setup-source URL`，可复用保存的 Wi-Fi、验证已有字体、补齐缺失文件，
 安装发布的商城并设置其静态源，不删除已有应用或存档。普通 Web 配网及本地服务器继续可用。
 
 GitHub 的跨域重定向保留 Range/If-Range，清除认证、Cookie 等其余自定义头；

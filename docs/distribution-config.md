@@ -37,8 +37,8 @@ GitHub 和 OBS 下载。替换时应保留仍在使用的服务所需的信任�
 - 固件：设备保存的资源源地址优先于构建默认值。
 - 商城：设备保存的 `store.url` 优先于应用构建默认值。
 - 首次配网页面可填写资源服务器地址；商城设置可保存新地址，无需重新编译。
-- 维护命令 `aster ui setup-source URL`（鱼鹰 P4C5、FAKE POD）或 `aster sys setup-source URL`（lckfb）
-  可更新已保存的资源源并验证/安装依赖，不格式化 SD 卡。
+- 在立创实战派、鱼鹰 P4C5 和 FAKE POD 上，用 `aster sys setup-source URL` 更换资源源并校验、补齐依赖。
+  用 `aster sys setup-status` 查询进度和错误码。鱼鹰 P4C5 和 FAKE POD 也兼容原有的 `aster ui` 写法。
 
 变更内置默认值或内置证书仍需要重新构建和烧录；这不是在线证书更新机制。
 现有 HTTP CLI 的 `aster net http ca PATH` 可做本次开机的自定义 CA 诊断，
