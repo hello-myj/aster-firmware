@@ -3,7 +3,7 @@
     "schema": 1,
     "id": "fakepod-s31",
     "product": "aster",
-    "abi": "4.5.0",
+    "abi": "4.6.0",
     "system": "esp-idf",
     "cpu": "riscv",
     "aot_target": "riscv32",
@@ -11,6 +11,7 @@
     "capabilities": [
       "display",
       "touch",
+      "audio-in",
       "audio-out",
       "filesystem",
       "storage.app",

@@ -76,6 +76,10 @@ const aster_device_ops_t aster_device_backend = {
 #endif
 #if defined(CONFIG_ASTER_AUDIO) && CONFIG_ASTER_AUDIO
  .audio_record=aster_plat_audio_record,
+    .audio_capture_open = aster_plat_audio_capture_open,
+    .audio_capture_read = aster_plat_audio_capture_read,
+    .audio_capture_finish = aster_plat_audio_capture_finish,
+    .audio_capture_close = aster_plat_audio_capture_close,
 #endif
 #if defined(CONFIG_ASTER_AUDIO) && CONFIG_ASTER_AUDIO
  .audio_beep=aster_plat_audio_beep,

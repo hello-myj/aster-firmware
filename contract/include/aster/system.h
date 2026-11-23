@@ -5,7 +5,8 @@
 #include "types.h"
 
 #define ASTER_ABI_MAJOR 4
-#define ASTER_ABI_MINOR 5 /* 4.5: optional Bluetooth audio-output discovery.
+#define ASTER_ABI_MINOR 6 /* 4.6: optional continuous microphone capture.
+                          * 4.5: optional Bluetooth audio-output discovery.
                           * 4.4: optional background player control and metadata.
                           * 4.3 (additive): device identity and deferred bundle installation.
                           * 4.1 (additive): continuous effect voices, pitch/gain ramps.

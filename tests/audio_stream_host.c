@@ -11,7 +11,7 @@
 #define K_MSEC(n) (n)
 
 typedef struct {
-    uint32_t audio_stream_handle;
+    uint32_t audio_stream_handle, audio_capture_handle;
 } aster_app_ctx_t;
 
 typedef struct {
@@ -90,6 +90,25 @@ static void k_sleep(int n)
     locked = 0;
 }
 
+#define ASTER_DEVICE_METHOD_audio_capture_open 1
+static bool capture_present = true;
+static int mic_closed;
+static bool aster_device_has(int method) { return capture_present && method == 1; }
+static int audio_in_gate(void) { return gate; }
+static int aster_device_audio_capture_open(aster_audio_info_t *info)
+{
+    *info = (aster_audio_info_t){.size=sizeof(*info), .version=1, .sample_rate=16000, .channels=2, .bits=16};
+    return 19;
+}
+static int aster_device_audio_capture_read(uint32_t h, uint8_t *pcm, size_t n)
+{
+    assert(h == 19 && n == 4);
+    memset(pcm, 1, n);
+    return (int)n;
+}
+static int aster_device_audio_capture_finish(uint32_t h) { assert(h == 19); return 0; }
+static int aster_device_audio_capture_close(uint32_t h) { assert(h == 19); mic_closed++; return 0; }
+
 #include "../systems/zephyr/runtime/aster_audio_stream_bridge.inc"
 
 int main(void)
@@ -136,5 +155,20 @@ int main(void)
     aster_native_release_audio_stream(&a.ctx);
     assert(!a.ctx.audio_stream_handle && closed == 1);
     assert(n_audio_stream_finish(&a, 17) == ASTER_EBADF);
+    capture_present = false;
+    assert(n_audio_capture_open(&a, 32, 24) == ASTER_ENOTSUP);
+    capture_present = true;
+    assert(n_audio_capture_open(&a, 4090, 24) == ASTER_EINVAL);
+    assert(n_audio_capture_open(&a, 32, 24) == 19);
+    assert(n_audio_capture_open(&a, 32, 24) == ASTER_EBUSY);
+    assert(n_audio_capture_read(&b, 19, 32, 4) == ASTER_EBADF);
+    assert(n_audio_capture_read(&a, 19, UINT32_MAX, 4) == ASTER_EINVAL);
+    assert(n_audio_capture_read(&a, 19, 4092, 4) == 4 && a.memory[4095] == 1);
+    assert(n_audio_capture_finish(&a, 19) == 0);
+    assert(n_audio_capture_close(&a, 19) == 0);
+    assert(n_audio_capture_close(&a, 19) == ASTER_EBADF);
+    assert(n_audio_capture_open(&a, 32, 24) == 19);
+    aster_native_release_audio_stream(&a.ctx);
+    assert(mic_closed == 2 && a.ctx.audio_capture_handle == 0);
     return 0;
 }

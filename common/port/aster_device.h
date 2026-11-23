@@ -5,7 +5,7 @@
 
 /* Firmware-internal interface, independent of the guest APP ABI. Append new
  * operations and bump this version when their layout or semantics change. */
-#define ASTER_DEVICE_API_VERSION 1u
+#define ASTER_DEVICE_API_VERSION 2u
 typedef struct {
     uint32_t size,version;
     const char *name;

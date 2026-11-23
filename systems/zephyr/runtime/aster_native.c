@@ -1,3 +1,4 @@
+#include "aster_device.h"
 #include <zephyr/sys/util.h>
 /* SPDX-License-Identifier: MIT
  * ASTER ABI native bridge: WASM import "env" symbol table -> ASTER services.
@@ -1617,8 +1618,7 @@ static int32_t map_audio_err(int err)
 #endif
 
 /* 2.0 removed n_audio_play with its import: playback goes through the
- * background session (start_file). aster_audio_record stays -- capture has no
- * streaming replacement.
+ * background session (start_file). aster_audio_record remains the blocking one-shot convenience call.
  *
  * 3.2 restores n_audio_get_info, which 2.0 dropped on the grounds that the
  * format was fixed by constants. It is fixed, but per *board*, and an app is
@@ -3039,6 +3039,10 @@ static NativeSymbol syms[] = {
         {"aster_audio_effect_stop", (void *)n_audio_effect_stop, "(ii)i", NULL},
         {"aster_audio_effect_unload", (void *)n_audio_effect_unload, "(i)i", NULL},
         {"aster_audio_pause", (void *)n_audio_pause, "()i", NULL},
+        {"aster_audio_capture_open", (void *)n_audio_capture_open, "(ii)i", NULL},
+        {"aster_audio_capture_read", (void *)n_audio_capture_read, "(iii)i", NULL},
+        {"aster_audio_capture_finish", (void *)n_audio_capture_finish, "(i)i", NULL},
+        {"aster_audio_capture_close", (void *)n_audio_capture_close, "(i)i", NULL},
         {"aster_audio_record", (void *)n_audio_record, "(ii)i", NULL},
         {"aster_audio_resume", (void *)n_audio_resume, "()i", NULL},
         {"aster_audio_seek", (void *)n_audio_seek, "(i)i", NULL},

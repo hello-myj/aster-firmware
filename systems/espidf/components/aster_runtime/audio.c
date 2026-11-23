@@ -2,6 +2,7 @@
  * Audio ABI adapted from systems/zephyr/runtime/aster_native.c. Platform calls
  * reuse the original player; owner, memory and sandbox helpers use the IDF VM.
  */
+#include "aster_device.h"
 #include <zephyr/kernel.h>
 #include <aster/aster.h>
 #include <wasm_export.h>
@@ -14,6 +15,7 @@
 extern bool aster_sysinfo_has_feature(uint32_t bit);
 
 typedef struct {
+	uint32_t audio_capture_handle;
 	uint32_t audio_stream_handle;
 } aster_app_ctx_t;
 
@@ -107,8 +109,7 @@ static int32_t map_audio_err(int err)
 #endif
 
 /* 2.0 removed n_audio_play with its import: playback goes through the
- * background session (start_file). aster_audio_record stays -- capture has no
- * streaming replacement.
+ * background session (start_file). aster_audio_record remains the blocking one-shot convenience call.
  *
  * 3.2 restores n_audio_get_info, which 2.0 dropped on the grounds that the
  * format was fixed by constants. It is fixed, but per *board*, and an app is
@@ -532,6 +533,10 @@ static NativeSymbol symbols[] = {
         {"aster_audio_effect_stop", (void *)n_audio_effect_stop, "(ii)i", NULL},
         {"aster_audio_effect_unload", (void *)n_audio_effect_unload, "(i)i", NULL},
         {"aster_audio_pause", (void *)n_audio_pause, "()i", NULL},
+        {"aster_audio_capture_open", (void *)n_audio_capture_open, "(ii)i", NULL},
+        {"aster_audio_capture_read", (void *)n_audio_capture_read, "(iii)i", NULL},
+        {"aster_audio_capture_finish", (void *)n_audio_capture_finish, "(i)i", NULL},
+        {"aster_audio_capture_close", (void *)n_audio_capture_close, "(i)i", NULL},
         {"aster_audio_record", (void *)n_audio_record, "(ii)i", NULL},
         {"aster_audio_resume", (void *)n_audio_resume, "()i", NULL},
         {"aster_audio_seek", (void *)n_audio_seek, "(i)i", NULL},

@@ -279,6 +279,10 @@ int  aster_plat_cam_capture_rgb565(const char *path);
 int  aster_plat_cam_grab_rgb565(uint8_t *dst, size_t dst_len);
 
 int  aster_plat_audio_play(const uint8_t *pcm, size_t size);
+int aster_plat_audio_capture_open(aster_audio_info_t *info);
+int aster_plat_audio_capture_read(uint32_t handle, uint8_t *pcm, size_t size);
+int aster_plat_audio_capture_finish(uint32_t handle);
+int aster_plat_audio_capture_close(uint32_t handle);
 int  aster_plat_audio_record(uint8_t *pcm, size_t size);
 int  aster_plat_audio_beep(uint32_t duration_ms, uint32_t hz);
 int  aster_plat_audio_set_volume(int percent); /* 0..100 */

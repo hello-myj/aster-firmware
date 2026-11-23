@@ -142,8 +142,67 @@ static int32_t n_audio_stream_close(wasm_exec_env_t env, uint32_t h)
 #endif
 }
 
+static int32_t n_audio_capture_open(wasm_exec_env_t env, uint32_t off, uint32_t size)
+{
+    int rc = audio_in_gate();
+    if (rc)
+        return rc;
+    if (!aster_device_has(ASTER_DEVICE_METHOD_audio_capture_open))
+        return ASTER_ENOTSUP;
+    aster_app_ctx_t *ctx = ctx_of(env);
+    if (!ctx || size < sizeof(aster_audio_info_t))
+        return ASTER_EINVAL;
+    uint8_t *out = stream_buffer(env, off, sizeof(aster_audio_info_t));
+    if (!out)
+        return ASTER_EINVAL;
+    if (ctx->audio_capture_handle)
+        return ASTER_EBUSY;
+    aster_audio_info_t info;
+    rc = aster_device_audio_capture_open(&info);
+    if (rc > 0) {
+        ctx->audio_capture_handle = (uint32_t)rc;
+        memcpy(out, &info, sizeof(info));
+    }
+    return stream_err(rc);
+}
+
+static bool owns_capture(wasm_exec_env_t env, uint32_t handle)
+{
+    aster_app_ctx_t *ctx = ctx_of(env);
+    return ctx && handle && ctx->audio_capture_handle == handle;
+}
+
+static int32_t n_audio_capture_read(wasm_exec_env_t env, uint32_t handle, uint32_t off, uint32_t n)
+{
+    if (!owns_capture(env, handle))
+        return ASTER_EBADF;
+    uint8_t *dst = stream_buffer(env, off, n);
+    if (!dst || n > INT32_MAX)
+        return ASTER_EINVAL;
+    return stream_err(aster_device_audio_capture_read(handle, dst, n));
+}
+
+static int32_t n_audio_capture_finish(wasm_exec_env_t env, uint32_t handle)
+{
+    return owns_capture(env, handle) ? stream_err(aster_device_audio_capture_finish(handle)) : ASTER_EBADF;
+}
+
+static int32_t n_audio_capture_close(wasm_exec_env_t env, uint32_t handle)
+{
+    if (!owns_capture(env, handle))
+        return ASTER_EBADF;
+    int rc = aster_device_audio_capture_close(handle);
+    if (!rc)
+        ctx_of(env)->audio_capture_handle = 0;
+    return stream_err(rc);
+}
+
 void aster_native_release_audio_stream(aster_app_ctx_t *ctx)
 {
+    if (ctx && ctx->audio_capture_handle) {
+        aster_device_audio_capture_close(ctx->audio_capture_handle);
+        ctx->audio_capture_handle = 0;
+    }
     if (!ctx || !ctx->audio_stream_handle)
         return;
 #if IS_ENABLED(CONFIG_ASTER_AUDIO)

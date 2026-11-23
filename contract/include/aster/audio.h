@@ -78,6 +78,17 @@ ASTER_I("aster_audio_get_volume") int32_t aster_audio_get_volume(void);
  * ASTER_EBUSY, or ASTER_EIO. */
 ASTER_I("aster_audio_record") int32_t aster_audio_record(uint8_t *pcm, uint32_t size);
 
+/* ABI 4.6. Optional continuous input. Open returns an APP-owned positive
+ * handle and the actual interleaved PCM format. Read copies whole frames and
+ * returns bytes, EAGAIN while waiting, or 0 after finish and drain. The stream
+ * stops on overflow (ENOSPC after the contiguous prefix has been consumed).
+ * Its time base is frames read / sample_rate. Finish requests a graceful stop;
+ * close also works without finish and discards unread frames. */
+ASTER_I("aster_audio_capture_open") int32_t aster_audio_capture_open(aster_audio_info_t *info, uint32_t size);
+ASTER_I("aster_audio_capture_read") int32_t aster_audio_capture_read(uint32_t handle, uint8_t *pcm, uint32_t size);
+ASTER_I("aster_audio_capture_finish") int32_t aster_audio_capture_finish(uint32_t handle);
+ASTER_I("aster_audio_capture_close") int32_t aster_audio_capture_close(uint32_t handle);
+
 /* Stream a sandboxed path in the background (WAV/PCM/MP3). Replaces any
  * current session. Typical library root is "/music/…" → /SD:/music.
  * Needs AUDIO_OUTPUT plus the `fs` permission. Returns ASTER_OK, ASTER_ENODEV,

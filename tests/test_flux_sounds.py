@@ -35,7 +35,7 @@ class Sounds(unittest.TestCase):
 #define ASTER_AUDIO_PAUSED 2
 #define K_NO_WAIT 0
 #define K_FOREVER -1
-static bool media_owned;
+static bool media_owned, capture_owned;
 static int sess_mu,effect_mu,wakes,locked,g_vol=70,wake_error,clears;
 static int k_mutex_lock(int *mu,int wait) {(void)mu;assert(wait==0 || wait==-1);return locked;}
 static void k_mutex_unlock(int *mu) {(void)mu;}
@@ -49,7 +49,8 @@ static void sess_clear_locked(void) {clears++;sess.state=ASTER_AUDIO_IDLE;sess.e
 int main(void) {
  static const int16_t a[]={100,200}, b[]={300,400};
  media_owned=true;assert(aster_plat_audio_ui_play(a,2,1000,0)==-EAGAIN && !wakes);
- media_owned=false;assert(!aster_plat_audio_ui_play(a,2,1000,0));
+ media_owned=false;capture_owned=true;assert(aster_plat_audio_ui_play(a,2,1000,0)==-EAGAIN && !wakes);
+ capture_owned=false;assert(!aster_plat_audio_ui_play(a,2,1000,0));
  assert(wakes==1 && sess.effect_only && sess.state==ASTER_AUDIO_PLAYING);
  assert(!aster_plat_audio_ui_play(b,2,700,1));
  assert(aster_plat_audio_ui_play(a,2,1000,0)==-EAGAIN && ui_voice.pcm==b);
