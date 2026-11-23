@@ -78,6 +78,12 @@ static char root[64],last_log[1024],error_log[1024];
 static const char *fail_path,*fail_op;
 static unsigned operation_count,fail_at,crash_at,revision=1;
 static const char *package_id="test.app";
+typedef struct {char version[24];} aster_app_rec_t;
+static const char *registered_store_version;
+static bool aster_app_mgr_find_snapshot(const char *id,aster_app_rec_t *out) {
+ if (strcmp(id,"aster.store") || !registered_store_version) return false;
+ snprintf(out->version,sizeof(out->version),"%s",registered_store_version);return true;
+}
 static unsigned lock_depth;static bool busy,manifest_oom;static int pinned_slot=-2;
 static bool aster_app_mgr_code_slot(const char *id,int *slot) {(void)id;if(pinned_slot < -1)return false;*slot=pinned_slot;return true;}
 static void aster_app_mgr_files_lock(void) {lock_depth++;}
@@ -249,6 +255,29 @@ static unsigned selected_revision(void) {
  snprintf(path,sizeof(path),"%s/icon.bin",code);expect_file(path,bytes,sizeof(bytes));
  snprintf(path,sizeof(path),"%s/assets/test.bin",code);expect_file(path,bytes,sizeof(bytes));
  check_user_data();return selected;
+}
+''')
+
+    def test_store_update_requires_owner_dedicated_path_and_newer_version(self):
+        run_c(self.program() + r'''
+int main(void) {
+ fresh_root();package_id="aster.store";
+ assert(!aster_pkg_install_file("seed.ast"));
+ registered_store_version="1.0.0";
+ const char *path="stage/store-update.ast";
+ assert(aster_pkg_install_bundle_file(path,NULL,"aster.store")==ASTER_EPERM);
+ revision=2;
+ assert(aster_pkg_install_bundle_file(path,NULL,"other")==ASTER_EPERM);
+ assert(aster_pkg_install_bundle_file("stage/package.ast",NULL,"aster.store")==ASTER_EPERM);
+ assert(!aster_pkg_install_bundle_file(path,NULL,"aster.store"));
+ registered_store_version="2.0";revision=1;
+ assert(aster_pkg_install_bundle_file(path,NULL,"aster.store")==ASTER_EPERM);
+ package_id="test.app";
+ assert(aster_pkg_install_bundle_file(path,NULL,"aster.store")==ASTER_EPERM);
+ assert(aster_pkg_install_bundle_file("stage/package.ast",NULL,"test.app")==ASTER_EPERM);
+ assert(store_release_number("0.3.10")>store_release_number("0.3.9"));
+ assert(store_release_number("0.3.x")<0 && store_release_number("0.3.4.")<0);
+ assert(!rmrf(root));return 0;
 }
 ''')
 

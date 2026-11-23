@@ -684,6 +684,45 @@ static void pkg_trace(const char *stage)
 }
 #endif
 
+/* A Store update uses a separate staging name from ordinary catalog installs. */
+static int store_release_number(const char *version)
+{
+	int release = 0;
+	for (int part = 0; part < 3; part++) {
+		unsigned value = 0;
+		if (*version < '0' || *version > '9')
+			return -1;
+		do {
+			value = value * 10 + (unsigned)(*version++ - '0');
+			if (value > 255)
+				return -1;
+		} while (*version >= '0' && *version <= '9');
+		release = (release << 8) | (int)value;
+		if (!*version && part >= 1)
+			return part == 1 ? release << 8 : release;
+		if (*version++ != '.')
+			return -1;
+	}
+	return -1;
+}
+
+static bool install_owner_allowed(const char *caller, const char *path, const aster_manifest_t *m)
+{
+	if (!caller)
+		return true;
+	const char *leaf = strrchr(path, '/');
+	bool update = leaf && !strcmp(leaf + 1, "store-update.ast");
+	if (!update && strcmp(m->id, "aster.store"))
+		return strcmp(caller, m->id) != 0;
+	if (!update || strcmp(caller, "aster.store") || strcmp(m->id, caller))
+		return false;
+	aster_app_rec_t current;
+	if (!aster_app_mgr_find_snapshot(caller, &current))
+		return false;
+	int installed = store_release_number(current.version);
+	return installed >= 0 && store_release_number(m->version) > installed;
+}
+
 static int pkg_install_locked(const char *src_path, const char *resources, const char *caller,
                               struct install_progress *progress)
 {
@@ -718,7 +757,7 @@ static int pkg_install_locked(const char *src_path, const char *resources, const
 		aster_psram_free(img);
 		return ASTER_ECORRUPT;
 	}
-	if (caller && !strcmp(caller, m.id)) {
+	if (!install_owner_allowed(caller, src_path, &m)) {
 		aster_psram_free(img);
 		return ASTER_EPERM;
 	}

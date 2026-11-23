@@ -82,7 +82,11 @@ struct install_progress {int unused;};
 #define ASTER_INSTALL_CHECK 0
 static void report_install(struct install_progress *p,int phase,const char *path){(void)p;(void)phase;(void)path;}
 static uint8_t image[8];static size_t aot_len;static uint32_t target_id;static int frees;
-typedef struct {char id[64];} aster_manifest_t;
+typedef struct {char id[64],version[24];} aster_manifest_t;
+typedef struct {char version[24];} aster_app_rec_t;
+static bool aster_app_mgr_find_snapshot(const char *id,aster_app_rec_t *out) {
+ (void)id;(void)out;return false;
+}
 static int load_file(const char *path,uint8_t **out,size_t *size) {(void)path;*out=image;*size=8;return 0;}
 static void aster_psram_free(void *p) {assert(p==image);frees++;}
 static int aster_pkg_parse(uint8_t *img,size_t n,aster_manifest_t *m,const uint8_t **wasm,size_t *wl,
