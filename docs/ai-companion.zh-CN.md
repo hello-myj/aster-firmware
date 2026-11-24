@@ -14,7 +14,7 @@
 
 4. 首次配置 Key 后默认使用「联网对话」，点击右上角按钮可切换回「离线唤醒」。开关和模式在设备上保存。清除 Key 可运行 `python tools/ai_key.py --port COM11 --clear`。
 
-FAKE POD 的 AI 构建会加载 `sdkconfig.defaults.ai`。其中启用硬件 AES-GCM，并预留 48 KiB 内部内存。设备在结束讯飞识别连接后再启动火山合成和 DeepSeek 对话，以降低 DMA 内存峰值。复用已生成的 `sdkconfig` 时，该文件中的设置优先。请在 `menuconfig` 中核对 WebSocket 缓冲为 4096 字节、SNTP 服务数为 2、硬件 AES 和 GCM 已启用。串口命令 `aster ui ai-status` 同时报告运行时间和 ESP-IDF 复位原因。
+FAKE POD 的 AI 构建会加载 `sdkconfig.defaults.ai`。其中启用硬件 AES-GCM，并预留 48 KiB 内部内存。收到最终转写后，设备结束讯飞连接，再启动火山合成和 DeepSeek 对话。火山连接优先协商 ChaCha20-Poly1305，以降低播放长语音时对 AES DMA 内存的依赖。复用已生成的 `sdkconfig` 时，该文件中的设置优先。请在 `menuconfig` 中核对 WebSocket 缓冲为 4096 字节、SNTP 服务数为 2、硬件 AES 和 GCM 及 ChaCha20-Poly1305 已启用。串口命令 `aster ui ai-status` 同时报告运行时间和 ESP-IDF 复位原因。
 
 密钥通过 USB 单独写入设备 NVS。固件、SD 卡和串口日志均不携带 Key。设备闪存中的凭据保护取决于产品的 NVS 与闪存加密配置。
 

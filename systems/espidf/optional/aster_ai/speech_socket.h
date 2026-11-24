@@ -8,6 +8,9 @@
 
 struct speech_socket {
     esp_websocket_client_handle_t handle;
+    esp_transport_handle_t tls_transport, ws_transport;
+    const int *ciphersuites;
+    bool retire_on_final;
     const char *provider;
     atomic_bool connected, finished;
     atomic_int error;

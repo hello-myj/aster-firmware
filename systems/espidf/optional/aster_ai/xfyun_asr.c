@@ -160,6 +160,9 @@ int xfyun_asr_start(struct xfyun_asr **out, const struct ai_speech_keys *keys)
             atomic_init(&a->sender_result, 0);
             memcpy(a->app_id, keys->app_id, sizeof(a->app_id));
             a->socket.provider = "xfyun";
+#if CONFIG_IDF_TARGET_ESP32S31
+            a->socket.retire_on_final = true;
+#endif
             rc = speech_socket_open(&a->socket, uri, NULL, 1, 16384, message, NULL, a);
             if (!rc)
                 *out = a;

@@ -6,6 +6,8 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "mbedtls/ssl_ciphersuites.h"
+#include "sdkconfig.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -157,6 +159,18 @@ int volc_tts_open(struct volc_tts **out, deepseek_turn_t *api, const struct ai_s
     v->api = api;
     v->speaker = keys->speaker;
     v->socket.provider = "volc";
+#if CONFIG_IDF_TARGET_ESP32S31 && CONFIG_MBEDTLS_CHACHAPOLY_C
+    /* The audio stream can consume DMA heap even after the ASR socket has
+     * closed. Prefer ChaCha20-Poly1305 and retain AES-GCM for negotiation. */
+    static const int ciphersuites[] = {
+        MBEDTLS_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+        MBEDTLS_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+        MBEDTLS_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+        0,
+    };
+    v->socket.ciphersuites = ciphersuites;
+#endif
     snprintf(v->id, sizeof(v->id), "%08lx%08lx%08lx%08lx", (unsigned long)esp_random(),
              (unsigned long)esp_random(), (unsigned long)esp_random(), (unsigned long)esp_random());
     char headers[200];

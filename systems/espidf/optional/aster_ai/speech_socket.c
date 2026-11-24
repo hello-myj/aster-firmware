@@ -4,12 +4,39 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "esp_transport_ssl.h"
+#include "esp_transport_ws.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+
+static int open_transport(struct speech_socket *s, const char *uri, const char *headers)
+{
+    const char *scheme = "wss://";
+    if (strncmp(uri, scheme, strlen(scheme)))
+        return -EINVAL;
+    const char *path = strchr(uri + strlen(scheme), '/');
+    if (!path)
+        return -EINVAL;
+    s->tls_transport = esp_transport_ssl_init();
+    if (!s->tls_transport)
+        return -ENOMEM;
+    esp_transport_ssl_crt_bundle_attach(s->tls_transport, esp_crt_bundle_attach);
+    if (s->ciphersuites)
+        esp_transport_ssl_set_ciphersuites_list(s->tls_transport, s->ciphersuites);
+    s->ws_transport = esp_transport_ws_init(s->tls_transport);
+    if (!s->ws_transport)
+        return -ENOMEM;
+    esp_transport_set_default_port(s->ws_transport, 443);
+    const esp_transport_ws_config_t config = {
+        .ws_path = path, .headers = headers, .propagate_control_frames = true,
+    };
+    return esp_transport_ws_set_config(s->ws_transport, &config) == ESP_OK ? 0 : -EIO;
+}
 
 static void event(void *context, esp_event_base_t base, int32_t id, void *data)
 {
@@ -64,6 +91,14 @@ static void event(void *context, esp_event_base_t base, int32_t id, void *data)
             atomic_store(&s->error, rc);
         s->used = 0;
         s->opcode = 0;
+        if (s->retire_on_final && s->ws_transport && atomic_load(&s->finished)) {
+            /* Run on the socket's receive task so the descriptor cannot be
+             * closed and recycled before shutdown. The owner still joins
+             * the task and destroys TLS before starting the reply clients. */
+            int fd = esp_transport_get_socket(s->ws_transport);
+            if (fd >= 0)
+                (void)shutdown(fd, SHUT_RDWR);
+        }
     }
 }
 
@@ -82,6 +117,13 @@ int speech_socket_open(struct speech_socket *s, const char *uri, const char *hea
     s->frame = heap_caps_malloc(capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s->frame)
         return -ENOMEM;
+    if (s->retire_on_final || s->ciphersuites) {
+        int rc = open_transport(s, uri, headers);
+        if (rc) {
+            speech_socket_close(s);
+            return rc;
+        }
+    }
     /* Incoming messages are reassembled in PSRAM above. The S31 only
      * needs enough internal transport space for an outgoing audio frame. */
 #if CONFIG_IDF_TARGET_ESP32S31
@@ -91,6 +133,7 @@ int speech_socket_open(struct speech_socket *s, const char *uri, const char *hea
 #endif
     const esp_websocket_client_config_t config = {
         .uri = uri, .headers = headers, .crt_bundle_attach = esp_crt_bundle_attach,
+        .ext_transport = s->ws_transport,
         .disable_auto_reconnect = true, .buffer_size = chunk_bytes, .task_stack = 8192,
         .network_timeout_ms = 4500,
     };
@@ -139,6 +182,14 @@ void speech_socket_close(struct speech_socket *s)
         esp_websocket_client_stop(s->handle);
         esp_websocket_client_destroy(s->handle);
         s->handle = NULL;
+    }
+    if (s->ws_transport) {
+        esp_transport_destroy(s->ws_transport);
+        s->ws_transport = NULL;
+    }
+    if (s->tls_transport) {
+        esp_transport_destroy(s->tls_transport);
+        s->tls_transport = NULL;
     }
     free(s->frame);
     s->frame = NULL;
