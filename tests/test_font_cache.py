@@ -1,11 +1,35 @@
 """Exercise the actual sparse SD cache with a mixed-size launcher working set."""
 
+import json
 import re
+import struct
 import unittest
 from test_waveshare import ROOT, run_c
 
 
 class SparseCache(unittest.TestCase):
+    def test_bootstrap_fonts_have_real_typographic_punctuation(self):
+        fonts = ROOT / 'resources/fonts'
+        manifest = json.loads((fonts / 'faces.json').read_text())
+        for face in manifest['faces']:
+            raw = (fonts / face['file']).read_bytes()
+            interval_count, glyph_count = struct.unpack_from('<II', raw, 36)
+            intervals = struct.unpack_from('<I', raw, 56)[0]
+            records = intervals + 12 * interval_count
+            bitmaps = records + 16 * glyph_count
+            spans = [struct.unpack_from('<III', raw, intervals + 12 * i)
+                     for i in range(interval_count)]
+            for cp in (0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026):
+                with self.subTest(face=face['file'], codepoint=f'U+{cp:04X}'):
+                    index = next((start + cp - lo for lo, hi, start in spans if lo <= cp <= hi), -1)
+                    self.assertGreaterEqual(index, 0)
+                    width, height, advance, _, _, length, offset = struct.unpack_from(
+                        '<BBHhhH2xI', raw, records + 16 * index
+                    )
+                    self.assertGreater(advance, 0)
+                    self.assertEqual(length, (width * height + 1) // 2)
+                    self.assertTrue(any(raw[bitmaps + offset : bitmaps + offset + length]))
+
     def test_missing_curly_quotes_use_existing_punctuation(self):
         s = (ROOT / "systems/zephyr/ui/font_sd.c").read_text(encoding="utf-8")
         lookup = s[s.index("static int32_t iv_find("):s.index("static bool read_at(")]
