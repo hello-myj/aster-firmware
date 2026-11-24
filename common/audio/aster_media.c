@@ -281,6 +281,16 @@ int aster_media_play(const char *path, uint32_t endpoint)
     return r;
 }
 
+uint32_t aster_media_default_output(void)
+{
+    if (!lock.handle)
+        return ASTER_AUDIO_OUTPUT_WIRED;
+    take();
+    uint32_t endpoint = default_output;
+    give();
+    return endpoint;
+}
+
 void aster_media_set_default_output(uint32_t endpoint)
 {
     if (!lock.handle || !endpoint || endpoint >= ASTER_AUDIO_OUTPUT_COUNT)

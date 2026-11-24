@@ -9,6 +9,11 @@
 #include "ui_font.h"
 #include "font_sd.h"
 #include "launcher.h"
+#ifdef ASTER_AI_ENABLED
+#include "ai_voice.h"
+#include "ai_dialog.h"
+#include "ai_credentials.h"
+#endif
 #include "qpanel.h"
 #include "wifi_settings.h"
 #include "aster_deploy.h"
@@ -112,6 +117,31 @@ static void perf_event(lv_event_t *event)
 int aster_idf_ui_command(int argc, char **argv)
 {
     int request;
+#ifdef ASTER_AI_ENABLED
+    if (argc == 3 && !strcmp(argv[2], "ai-status")) {
+        const char *const names[] = {"idle", "loading", "listening", "heard", "busy", "failed"};
+        bool key = ai_key_present();
+        printf("AI provider=deepseek local_wake=%s key=%s mode=%s dialog=%s\n", names[ai_voice_status()],
+               key ? "configured" : "missing", key && aster_launcher_ai_online() ? "cloud" : "offline",
+               ai_dialog_name(ai_dialog_phase()));
+        return 0;
+    }
+    if (argc == 3 && !strcmp(argv[2], "ai"))
+        request = 3;
+    else if (argc == 3 && !strcmp(argv[2], "ai-talk"))
+        request = 4;
+    else if (argc == 3 && !strcmp(argv[2], "ai-bench"))
+        request = 7;
+    else if (argc == 4 && !strcmp(argv[2], "ai-bench") && !strcmp(argv[3], "whole"))
+        request = 8;
+    else if (argc == 4 && !strcmp(argv[2], "ai-bench") && !strcmp(argv[3], "warm"))
+        request = 9;
+    else if (argc == 4 && !strcmp(argv[2], "ai-mode") && !strcmp(argv[3], "cloud"))
+        request = 5;
+    else if (argc == 4 && !strcmp(argv[2], "ai-mode") && !strcmp(argv[3], "offline"))
+        request = 6;
+    else
+#endif
     if (argc == 4 && !strcmp(argv[2], "volume")) {
         char *end = NULL;
         long value = strtol(argv[3], &end, 10);
@@ -138,6 +168,26 @@ static void perf_tick(void)
 {
     uint64_t now = esp_timer_get_time();
     int request = atomic_exchange(&perf_request, 0);
+#ifdef ASTER_AI_ENABLED
+    if (request == 5 || request == 6) {
+        if (!app_active)
+            aster_launcher_configure_ai(request == 5);
+        return;
+    }
+    if (request == 4 || (request >= 7 && request <= 9)) {
+        if (!app_active)
+            aster_launcher_ask_ai(request == 4 ? AI_MICROPHONE : request == 7 ? AI_BENCH_CLAUSE :
+                                  request == 8 ? AI_BENCH_WHOLE : AI_BENCH_WARM);
+        return;
+    }
+    if (request == 3) {
+        if (!app_active)
+            aster_launcher_open_ai();
+        else
+            puts("AI: stop foreground APP first");
+        return;
+    }
+#endif
     if (request == 1)
         perf_print();
     else if (request == 2) {

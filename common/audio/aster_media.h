@@ -27,6 +27,7 @@ int aster_media_init(void);
  * over at a PCM block boundary. Explicitly addressed sessions stay pinned. */
 int aster_media_play(const char *path,uint32_t endpoint);
 void aster_media_set_default_output(uint32_t endpoint);
+uint32_t aster_media_default_output(void);
 int aster_media_pause(void);
 int aster_media_resume(void);
 int aster_media_seek(uint32_t milliseconds);

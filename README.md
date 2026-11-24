@@ -14,6 +14,8 @@ Aster 提供 Launcher、首次联网设置、应用安装和 WAMR AOT 运行时�
 
 ## 构建与烧录
 
+鱼鹰光电 P4C5 和 FAKE POD 的 IDF 工程可通过 `-DASTER_AI=ON` 编入“小鲸助手”。说“你好小智”可离线唤醒角色。配置自己的 DeepSeek API Key 并连接 Wi-Fi 后，可语音提问、查看转写并听取回答。[配置与体验步骤](docs/ai-companion.zh-CN.md)
+
 Zephyr 使用 Python 3.12、west 和 Zephyr SDK。新工作区先按 `west.yml` 初始化依赖并应用驱动补丁。以下命令在固件仓库根目录运行。[工作区补丁](patches/README.md)
 
 ```bash

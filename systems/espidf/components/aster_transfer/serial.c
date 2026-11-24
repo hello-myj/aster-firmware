@@ -1,4 +1,7 @@
 #include "aster_power.h"
+#ifdef ASTER_AI_ENABLED
+#include "ai_credentials.h"
+#endif
 /* SPDX-License-Identifier: MIT */
 #include "transfer.h"
 #include "aster_storage.h"
@@ -110,6 +113,51 @@ static int put(int argc, char **argv)
     return 0;
 }
 
+#ifdef ASTER_AI_ENABLED
+static int read_key_payload(void *key, size_t length)
+{
+    reply(NULL, "AIKEY READY");
+    for (size_t received = 0; received < length;) {
+        int n = receive(NULL, (uint8_t *)key + received, length - received);
+        if (n <= 0)
+            return -ETIMEDOUT;
+        received += n;
+    }
+    return 0;
+}
+
+static int provision_key(int argc, char **argv)
+{
+    if (argc == 2 && !strcmp(argv[1], "speech-clear")) {
+        reply(NULL, "AIKEY READY");
+        reply(NULL, ai_speech_keys_clear() ? "AIKEY ERROR" : "AIKEY OK");
+        return 0;
+    }
+    if (argc == 2 && !strcmp(argv[1], "speech")) {
+        struct ai_speech_keys keys;
+        int rc = read_key_payload(&keys, sizeof(keys));
+        if (!rc)
+            rc = ai_speech_keys_write(&keys);
+        ai_secret_clear(&keys, sizeof(keys));
+        reply(NULL, rc ? "AIKEY ERROR" : "AIKEY OK");
+        return 0;
+    }
+    char key[AI_KEY_CAP] = {0}, *end = NULL;
+    long length = argc == 2 ? strtol(argv[1], &end, 10) : -1;
+    if (length < 0 || length >= sizeof(key) || !end || *end || !argv[1][0] ||
+        (length && length < 12)) {
+        reply(NULL, "AIKEY ERROR");
+        return 0;
+    }
+    int rc = read_key_payload(key, length);
+    if (!rc)
+        rc = ai_key_write(key, length);
+    ai_secret_clear(key, sizeof(key));
+    reply(NULL, rc ? "AIKEY ERROR" : "AIKEY OK");
+    return 0;
+}
+#endif
+
 int aster_idf_transfer_register(void)
 {
     const esp_console_cmd_t probe = {
@@ -117,5 +165,13 @@ int aster_idf_transfer_register(void)
     const esp_console_cmd_t upload = {
         .command = "ASTERPUT", .help = "Receive an ASTP package using ASTERFS 3", .func = put};
     esp_err_t result = esp_console_cmd_register(&probe);
-    return result == ESP_OK ? esp_console_cmd_register(&upload) : result;
+    if (result == ESP_OK)
+        result = esp_console_cmd_register(&upload);
+#ifdef ASTER_AI_ENABLED
+    const esp_console_cmd_t provision = {
+        .command = "ASTERAIKEY", .help = "Provision voice service credential over USB", .func = provision_key};
+    if (result == ESP_OK)
+        result = esp_console_cmd_register(&provision);
+#endif
+    return result;
 }

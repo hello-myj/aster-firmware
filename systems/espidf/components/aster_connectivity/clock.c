@@ -53,7 +53,13 @@ void aster_idf_clock_init(void)
         struct timeval initial = {.tv_sec = 1704067200};
         settimeofday(&initial, NULL);
     }
+#if CONFIG_LWIP_SNTP_MAX_SERVERS >= 2
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("ntp.tencent.com");
+    config.servers[1] = "pool.ntp.org";
+    config.num_of_servers = 2;
+#else
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+#endif
     config.start = false;
     config.sync_cb = synchronized;
     esp_err_t r = esp_netif_sntp_init(&config);

@@ -34,6 +34,8 @@ static profile_t hotspot;
 static bool hotspot_enabled;
 #define GOT_IP BIT0
 #define AP_UP BIT1
+#define STA_DOWN BIT2
+#define STA_UP BIT3
 #define HOTSPOT_START 6
 #define HOTSPOT_STOP 7
 
@@ -214,14 +216,25 @@ void aster_idf_wifi_event(esp_event_base_t base, int32_t id, void *data)
         }
         xSemaphoreGive(guard);
         xEventGroupSetBits(events, GOT_IP);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        xEventGroupClearBits(events, STA_DOWN);
+        xEventGroupSetBits(events, STA_UP);
     } else if (base == WIFI_EVENT &&
                (id == WIFI_EVENT_STA_DISCONNECTED || id == WIFI_EVENT_STA_STOP)) {
+        if (id == WIFI_EVENT_STA_DISCONNECTED && data) {
+            const wifi_event_sta_disconnected_t *event = data;
+            ESP_LOGW("aster_wifi", "Station disconnected reason=%u", (unsigned)event->reason);
+        }
         xSemaphoreTake(guard, portMAX_DELAY);
         info.state = ASTER_WIFI_STATE_DISCONNECTED;
         info.ipv4[0] = 0;
         info.rssi = 0;
         xSemaphoreGive(guard);
         xEventGroupClearBits(events, GOT_IP);
+        if (id == WIFI_EVENT_STA_STOP) {
+            xEventGroupClearBits(events, STA_UP);
+            xEventGroupSetBits(events, STA_DOWN);
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
         xSemaphoreTake(guard, portMAX_DELAY);
         info.state = ASTER_WIFI_STATE_ASSOCIATED;
@@ -300,6 +313,26 @@ static int configure_hotspot(request_t *request)
     return status;
 }
 
+static int restart_station(void)
+{
+    /* A hosted band change can deliver its old STOP after the new START.
+     * In that state the radio associates but the host never starts DHCP. */
+    ESP_LOGW("aster_wifi", "Resynchronizing stopped station before DHCP");
+    xEventGroupClearBits(events, STA_UP | STA_DOWN);
+    esp_err_t rc = esp_wifi_stop();
+    if (rc != ESP_OK && rc != ESP_ERR_WIFI_NOT_STARTED)
+        return error(rc);
+    if (rc == ESP_OK)
+        xEventGroupWaitBits(events, STA_DOWN, pdFALSE, pdFALSE, pdMS_TO_TICKS(1500));
+    if (aster_power_activity_closing())
+        return ASTER_ECANCELLED;
+    rc = esp_wifi_start();
+    if (rc != ESP_OK)
+        return error(rc);
+    return xEventGroupWaitBits(events, STA_UP, pdFALSE, pdFALSE, pdMS_TO_TICKS(3000)) & STA_UP
+               ? 0 : ASTER_ETIMEDOUT;
+}
+
 static int wait_for_ipv4(void)
 {
     const TickType_t timeout = pdMS_TO_TICKS(30000);
@@ -311,9 +344,11 @@ static int wait_for_ipv4(void)
         if (elapsed >= timeout)
             return ASTER_ETIMEDOUT;
         TickType_t remaining = timeout - elapsed;
-        if (xEventGroupWaitBits(events, GOT_IP, pdFALSE, pdFALSE,
-                                remaining < poll ? remaining : poll) &
-            GOT_IP)
+        EventBits_t bits = xEventGroupWaitBits(events, GOT_IP | STA_DOWN, pdFALSE, pdFALSE,
+                                               remaining < poll ? remaining : poll);
+        if (bits & STA_DOWN)
+            return ASTER_ESTATE;
+        if (bits & GOT_IP)
             return 0;
     }
     return ASTER_ECANCELLED;
@@ -328,6 +363,7 @@ static int connect_ap(request_t *request)
     memcpy(config.sta.password, request->password, strlen(request->password));
     /* This ABI selects 2.4 GHz station networks, including on dual-band radios. */
     config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    config.sta.failure_retry_cnt = 2;
     esp_wifi_disconnect();
     xEventGroupClearBits(events, GOT_IP);
     xSemaphoreTake(guard, portMAX_DELAY);
@@ -340,6 +376,13 @@ static int connect_ap(request_t *request)
     if (r != ESP_OK)
         return error(r);
     int wait_result = wait_for_ipv4();
+    if (wait_result == ASTER_ESTATE && !aster_power_activity_closing()) {
+        wait_result = restart_station();
+        if (!wait_result)
+            wait_result = error(esp_wifi_connect());
+        if (!wait_result)
+            wait_result = wait_for_ipv4();
+    }
     if (wait_result) {
         esp_wifi_disconnect();
         if (wait_result == ASTER_ECANCELLED)

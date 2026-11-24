@@ -6,6 +6,43 @@ from test_waveshare import ROOT, run_c
 
 
 class SparseCache(unittest.TestCase):
+    def test_missing_curly_quotes_use_existing_punctuation(self):
+        s = (ROOT / "systems/zephyr/ui/font_sd.c").read_text(encoding="utf-8")
+        lookup = s[s.index("static int32_t iv_find("):s.index("static bool read_at(")]
+        run_c(r'''
+#include <assert.h>
+#include <stdint.h>
+typedef struct { uint32_t first, last, offset; } cp_iv_t;
+typedef struct { cp_iv_t *ivs; uint32_t iv_cnt; } slot_t;
+''' + lookup + r'''
+int main(void)
+{
+    cp_iv_t intervals[] = {{39, 39, 0}, {69, 69, 1}, {0x300C, 0x300D, 2}};
+    slot_t face = {.ivs = intervals, .iv_cnt = 3};
+    uint32_t cp = 0x201C;
+    int32_t index = glyph_lookup(&face, &cp);
+    assert(index == 2 && cp == 0x300C && iv_cp(&face, index) == cp);
+    cp = 0x201D;
+    index = glyph_lookup(&face, &cp);
+    assert(index == 3 && cp == 0x300D && iv_cp(&face, index) == cp);
+    cp = 0x2019;
+    assert(glyph_lookup(&face, &cp) == 0 && cp == 39);
+    cp = 'E';
+    assert(glyph_lookup(&face, &cp) == 1 && cp == 'E');
+    cp = 0x2014;
+    assert(glyph_lookup(&face, &cp) == -1 && cp == 0x2014);
+
+    cp_iv_t custom[] = {{0x201C, 0x201D, 0}, {0x300C, 0x300D, 2}};
+    face = (slot_t){.ivs = custom, .iv_cnt = 2};
+    cp = 0x201C;
+    assert(glyph_lookup(&face, &cp) == 0 && cp == 0x201C);
+    face.iv_cnt = 1;
+    cp = 0x2019;
+    assert(glyph_lookup(&face, &cp) == -1 && cp == 0x2019);
+    return 0;
+}
+''')
+
     def test_unchanged_app_caption_does_not_request_another_warm(self):
         s = (ROOT / 'systems/zephyr/ui/launcher/flux.c').read_text()
         helper = s[s.index('static void set_label_text') : s.index('static lv_obj_t *icon(')]

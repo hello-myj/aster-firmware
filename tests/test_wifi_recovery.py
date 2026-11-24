@@ -15,17 +15,22 @@ class WifiRecovery(unittest.TestCase):
 #include <stdbool.h>
 #include <stdint.h>
 typedef uint32_t TickType_t;
+typedef uint32_t EventBits_t;
 #define pdMS_TO_TICKS(ms) (ms)
 #define pdFALSE 0
 #define GOT_IP 1
+#define STA_DOWN 4
+#define ASTER_ESTATE -6
 #define ASTER_ETIMEDOUT -8
 #define ASTER_ECANCELLED -19
 static int events;
+static bool down;
 static TickType_t start, now, close_after, ip_after;
 static TickType_t xTaskGetTickCount(void) { return now; }
 static bool aster_power_activity_closing(void) { return now-start >= close_after; }
 static unsigned xEventGroupWaitBits(int handle, unsigned mask, int clear, int all, TickType_t delay) {
-    assert(handle==events && mask==GOT_IP && !clear && !all && delay>0);
+    assert(handle==events && mask==(GOT_IP|STA_DOWN) && !clear && !all && delay>0);
+    if (down) return STA_DOWN;
     TickType_t elapsed=now-start;
     if (ip_after-elapsed<=delay) {
         now=start+ip_after;
@@ -48,6 +53,8 @@ int main(void) {
 
     now=start;close_after=UINT32_MAX;
     assert(wait_for_ipv4()==ASTER_ETIMEDOUT && now-start==30000);
+    start=now;down=true;
+    assert(wait_for_ipv4()==ASTER_ESTATE && now==start);
 }
 ''')
 

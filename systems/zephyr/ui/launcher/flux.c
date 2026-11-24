@@ -34,13 +34,24 @@
 #include "flux_icons.inc"
 #include "flux_motion.h"
 #include "flux_sounds.inc"
+#ifdef ASTER_AI_ENABLED
+#include "ai_voice.h"
+#include "ai_dialog.h"
+#include "ai_credentials.h"
+#include <stdatomic.h>
+#include <errno.h>
+#endif
 
 #define BG 0x131317
 #define FG 0xf3f3e8
 #define ACCENT 0xd8ff8c
 #define DIM 0xa0ae92
 #define INK 0x211d28
+#ifdef ASTER_AI_ENABLED
+#define MAX_ENTRIES (ASTER_SERVICE_MAX_APPS + 5)
+#else
 #define MAX_ENTRIES (ASTER_SERVICE_MAX_APPS + 4)
+#endif
 #define RIBBONS 5
 #define FLUX_FRAME_MS 16
 #define KV_ID "aster.launcher.flux"
@@ -49,7 +60,7 @@
 #endif
 static uint32_t art_bakes, art_hits;
 
-enum { HOME, FILTERS, MIXER, FILES, CLOCK, SYSTEM };
+enum { HOME, FILTERS, MIXER, FILES, CLOCK, SYSTEM, AI_COMPANION };
 
 enum {
     ACT_NONE,
@@ -72,6 +83,10 @@ enum {
     ACT_SHUTDOWN,
     ACT_SLEEP,
     ACT_USB_STORAGE,
+    ACT_AI_TOGGLE,
+    ACT_AI_REARM,
+    ACT_AI_MODE,
+    ACT_AI_END,
     ACT_GROUP = 32
 };
 
@@ -476,6 +491,11 @@ static void read_entries(void)
         e->icon = ICON_BOX;
     }
     const entry_t builtin[] = {
+#ifdef ASTER_AI_ENABLED
+        {.id = "ai", .name = "小鲸助手", .code = "AI COMPANION",
+         .description = "说一声“你好小智”，唤醒你的小鲸。",
+         .color = 0x95c2fa, .group = 3, .builtin = AI_COMPANION, .icon = ICON_ASTER},
+#endif
         {.id = "files",
          .name = "文件",
          .code = "STORAGE",
@@ -509,8 +529,13 @@ static void read_entries(void)
          .builtin = CLOCK,
          .icon = ICON_CLOCK},
     };
-    for (size_t i = 0; i < ARRAY_SIZE(builtin); i++)
+    for (size_t i = 0; i < ARRAY_SIZE(builtin); i++) {
+#ifdef ASTER_AI_ENABLED
+        if (builtin[i].builtin == AI_COMPANION && !aster_device_has(ASTER_DEVICE_METHOD_audio_capture_open))
+            continue;
+#endif
         entries[entry_n++] = builtin[i];
+    }
     /* Application names come from package metadata and use the generic
   * SD face. Fixed system entries use existing UI fonts. Prewarm titles;
   * introductions warm when selected to avoid evicting the visible text. */
@@ -1360,6 +1385,10 @@ static void build_system(void)
     text(body, info, 17, 100, 286, FG, 16, 256);
 }
 
+#ifdef ASTER_AI_ENABLED
+#include "ai_companion.inc"
+#endif
+
 static void show_page(int next)
 {
     ribbon_cache_clear();
@@ -1405,6 +1434,10 @@ static void show_page(int next)
         build_files();
     else if (next == SYSTEM)
         build_system();
+#ifdef ASTER_AI_ENABLED
+    else if (next == AI_COMPANION)
+        build_ai_companion();
+#endif
     else {
         text(body, "A MOMENT / CLOCK", 17, 15, 286, DIM, 16, 128);
         clock_value = text(body, "--:--", 47, 130, 256, FG, 20, 640);
@@ -1832,6 +1865,10 @@ void aster_launcher_hide(void)
 {
     if (!visible)
         return;
+#ifdef ASTER_AI_ENABLED
+    ai_dialog_reset();
+    ai_voice_stop();
+#endif
     lv_indev_wait_release(aster_ui_lvgl_indev());
     aster_ui_lvgl_pointer(launcher_touch_x, launcher_touch_y, false);
     aster_touch_ui_reset(&launcher_touch_ui);
@@ -1867,6 +1904,40 @@ void aster_launcher_show_page(int p)
 {
     want_page = p ? FILTERS : HOME;
 }
+
+#ifdef ASTER_AI_ENABLED
+void aster_launcher_open_ai(void)
+{
+    if (power_idle.screen_off)
+        aster_launcher_power_resume();
+    want_page = AI_COMPANION;
+}
+
+void aster_launcher_configure_ai(bool online)
+{
+    aster_launcher_open_ai();
+    if (visible && ai_set_mode(online) && !ai_enabled)
+        ai_toggle();
+}
+
+bool aster_launcher_ai_online(void)
+{
+    return atomic_load(&ai_online);
+}
+
+void aster_launcher_ask_ai(enum ai_query_source source)
+{
+    if (!visible || !ai_enabled || !ai_online || !ai_key_present() ||
+        (page != HOME && page != AI_COMPANION) || modal || power_idle.screen_off)
+        return;
+    enum dialog_phase phase = ai_dialog_phase();
+    if (phase == DIALOG_IDLE || phase == DIALOG_FAILED || phase == DIALOG_DONE) {
+        ai_voice_stop();
+        ai_dialog_start(source);
+        show_page(AI_COMPANION);
+    }
+}
+#endif
 
 void aster_launcher_step_page(int dir)
 {
@@ -1969,11 +2040,19 @@ void aster_launcher_pump_idle(void)
     while (aster_device_input_keys_poll(keys, ASTER_PLAT_MAX_KEYS) > 0) {
     }
     if (power_idle.screen_off) {
+#ifdef ASTER_AI_ENABLED
+        ai_dialog_reset();
+        if (ai_voice_status() != AI_IDLE)
+            ai_voice_stop();
+#endif
         aster_launcher_power_tick();
         if (power_idle.screen_off)
             return;
     }
     uint64_t now = aster_os_uptime_ms();
+#ifdef ASTER_AI_ENABLED
+    ai_companion_tick();
+#endif
     if (drag.down && !drag.moved && !drag.handle && !drag.blocked && now - drag.started >= 650 &&
         drag.hit == selected[group] && current() && !current()->builtin) {
         drag.blocked = true;
@@ -1987,7 +2066,28 @@ void aster_launcher_pump_idle(void)
         show_page(HOME);
         save();
         sound_pending = S_TUNE;
-    } else if (a == ACT_BACK) {
+    }
+#ifdef ASTER_AI_ENABLED
+    else if (a == ACT_AI_TOGGLE && page == AI_COMPANION) {
+        ai_toggle();
+    } else if (a == ACT_AI_REARM && page == AI_COMPANION) {
+        ai_action();
+        show_page(AI_COMPANION);
+    } else if (a == ACT_AI_MODE && page == AI_COMPANION) {
+        ai_set_mode(!ai_online);
+    } else if (a == ACT_AI_END && page == AI_COMPANION) {
+        ai_dialog_reset();
+        ai_voice_stop();
+        show_page(AI_COMPANION);
+    }
+#endif
+    else if (a == ACT_BACK) {
+#ifdef ASTER_AI_ENABLED
+        if (page == AI_COMPANION) {
+            ai_dialog_reset();
+            ai_voice_stop();
+        }
+#endif
         if (page == SYSTEM && prior_page == MIXER) {
             prior_page = HOME;
             show_page(MIXER);

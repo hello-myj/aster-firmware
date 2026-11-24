@@ -25,6 +25,13 @@ void aster_launcher_request_show(void);
 /* Thread-safe page switch (0 = home, 1 = drawer) for the debug screenshot
  * CLI: records the want; the idle pump applies it, visual-only (no kv). */
 void aster_launcher_show_page(int page);
+#ifdef ASTER_AI_ENABLED
+void aster_launcher_open_ai(void);
+void aster_launcher_configure_ai(bool online);
+bool aster_launcher_ai_online(void);
+#include "ai_dialog.h"
+void aster_launcher_ask_ai(enum ai_query_source source);
+#endif
 
 /* Step the page by `dir` (+1 = next). This one is a gesture on the glass,
  * not a debug poke: it persists, and it is a no-op past either end rather

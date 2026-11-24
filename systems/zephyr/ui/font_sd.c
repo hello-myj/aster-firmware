@@ -179,6 +179,35 @@ static int32_t iv_find(const slot_t *s, uint32_t cp)
 	return -1;
 }
 
+/* Some shipped faces omit typographic quotes. Prefer their exact glyph
+ * when available and otherwise use punctuation from the same pixel face. */
+static int32_t glyph_lookup(const slot_t *s, uint32_t *cp)
+{
+	int32_t index = iv_find(s, *cp);
+	if (index >= 0)
+		return index;
+
+	uint32_t substitute;
+	switch (*cp) {
+	case 0x2018: /* ‘ */
+	case 0x2019: /* ’ and typographic apostrophe */
+		substitute = '\'';
+		break;
+	case 0x201C: /* “ */
+		substitute = 0x300C; /* 「 */
+		break;
+	case 0x201D: /* ” */
+		substitute = 0x300D; /* 」 */
+		break;
+	default:
+		return -1;
+	}
+	index = iv_find(s, substitute);
+	if (index >= 0)
+		*cp = substitute;
+	return index;
+}
+
 /* glyph index -> codepoint (binary search over intervals) */
 static uint32_t iv_cp(const slot_t *s, uint32_t gidx)
 {
@@ -388,7 +417,7 @@ static bool sd_get_dsc(const lv_font_t *font, lv_font_glyph_dsc_t *d, uint32_t l
 	if (s->state != ST_SPARSE) {
 		return false;
 	}
-	gi = iv_find(s, letter);
+	gi = glyph_lookup(s, &letter);
 	if (gi < 0) {
 		return false;
 	}
@@ -664,7 +693,7 @@ void aster_font_sd_warm(uint8_t px, const char *utf8)
 	const uint8_t *p = (const uint8_t *)utf8;
 	while (*p) {
 		uint32_t cp = utf8_next(&p);
-		int32_t gi = iv_find(s, cp);
+		int32_t gi = glyph_lookup(s, &cp);
 		if (gi >= 0 && sparse_fetch(s, cp, gi))
 			s_st.warm_glyphs++;
 	}
