@@ -177,7 +177,11 @@ static int send_text(struct volc_tts *v, const char *text, size_t length)
 {
     if (length == v->sent)
         return 0;
-    int rc = send_event(v, TASK_REQUEST, text + v->sent);
+    char *piece = strndup(text + v->sent, length - v->sent);
+    if (!piece)
+        return -ENOMEM;
+    int rc = send_event(v, TASK_REQUEST, piece);
+    free(piece);
     if (!rc) {
         if (!v->sent)
             ESP_LOGI("aster_ai", "volc first text sent");
@@ -189,9 +193,13 @@ static int send_text(struct volc_tts *v, const char *text, size_t length)
 int volc_tts_delta(struct volc_tts *v, const char *text, size_t length)
 {
     int rc = atomic_load(&v->socket.error);
-    if (!rc && atomic_load(&v->session_ready) &&
-        (length - v->sent >= 24 || speech_first_clause(text + v->sent, length - v->sent)))
-        rc = send_text(v, text, length);
+    if (!rc && atomic_load(&v->session_ready)) {
+        /* Give synthesis enough context for natural cadence and keep the
+         * portion after the punctuation for the next text update. */
+        size_t clause = speech_first_clause(text + v->sent, length - v->sent);
+        if (clause)
+            rc = send_text(v, text, v->sent + clause);
+    }
     return rc;
 }
 

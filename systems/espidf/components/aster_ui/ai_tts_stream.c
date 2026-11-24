@@ -8,21 +8,26 @@
 #include "freertos/idf_additions.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include <errno.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 
-enum { MIN_QUEUE_BLOCKS = 2, MAX_QUEUE_BLOCKS = 192, START_BLOCKS = 1 };
+enum { MIN_QUEUE_BLOCKS = 2, MAX_QUEUE_BLOCKS = 192 };
 struct stream {
     struct ai_reply_sink *sink;
     QueueHandle_t queue;
     SemaphoreHandle_t joined;
+#if CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+    TaskHandle_t speaker_task;
+#endif
     struct ai_reply_audio pending;
     atomic_bool finished;
     atomic_int output_error, network_error;
     bool (*cancelled)(void);
     void (*speaking)(void);
-    unsigned peak_blocks, full_waits;
+    unsigned prebuffer_blocks, peak_blocks, full_waits;
+    int64_t refill_wait_us;
 };
 
 static int enqueue(struct stream *s)
@@ -76,6 +81,16 @@ static int next_block(void *ctx, struct ai_pcm_block **block)
     return -ECANCELED;
 }
 
+static int refill_playback(void *ctx, struct ai_pcm_block **block)
+{
+    struct stream *s = ctx;
+    int64_t start = esp_timer_get_time();
+    int rc = next_block(s, block);
+    if (*block)
+        s->refill_wait_us += esp_timer_get_time() - start;
+    return rc;
+}
+
 static int end_pcm(void *ctx)
 {
     struct stream *s = ctx;
@@ -95,9 +110,9 @@ static int flush_pcm(void *ctx)
 static void speaker(void *ctx)
 {
     struct stream *s = ctx;
-    struct ai_reply_audio audio = {.refill = next_block, .context = s};
+    struct ai_reply_audio audio = {.refill = refill_playback, .context = s};
     int rc = 0;
-    for (unsigned i = 0; i < START_BLOCKS; ++i) {
+    for (unsigned i = 0; i < s->prebuffer_blocks; ++i) {
         struct ai_pcm_block *b = NULL;
         rc = next_block(s, &b);
         if (rc || !b)
@@ -117,7 +132,8 @@ static void speaker(void *ctx)
     atomic_store(&s->output_error, rc);
     xSemaphoreGive(s->joined);
 #if CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
-    vTaskDeleteWithCaps(NULL);
+    /* The dialogue task reclaims the stack after the final output result. */
+    vTaskSuspend(NULL);
 #else
     vTaskDelete(NULL);
 #endif
@@ -128,17 +144,18 @@ static bool start_speaker(struct stream *s)
     /* This worker only consumes PCM. The internal-stack dialogue task owns
      * codec setup, teardown, credentials and all HTTPS/TLS operations. */
 #if CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
-    return xTaskCreateWithCaps(speaker, "ai_speaker", 6144, s, 6, NULL,
+    return xTaskCreateWithCaps(speaker, "ai_speaker", 6144, s, 6, &s->speaker_task,
                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS;
 #else
     return xTaskCreate(speaker, "ai_speaker", 6144, s, 6, NULL) == pdPASS;
 #endif
 }
 
-int ai_tts_stream(deepseek_turn_t *api, struct ai_reply_sink *sink, int (*produce)(void *), void *context,
-                  void (*on_speaking)(void))
+int ai_tts_stream(deepseek_turn_t *api, struct ai_reply_sink *sink, unsigned prebuffer_blocks,
+                  int (*produce)(void *), void *context, void (*on_speaking)(void))
 {
-    struct stream s = {.sink = sink, .cancelled = api->cancelled, .speaking = on_speaking};
+    struct stream s = {.sink = sink, .cancelled = api->cancelled, .speaking = on_speaking,
+                       .prebuffer_blocks = prebuffer_blocks};
     /* Only the pointer slots are reserved. A fast server may send its entire
      * answer in a burst and immediately close, so keep that burst in PSRAM. */
     size_t slots = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / (4 * sizeof(struct ai_pcm_block));
@@ -164,6 +181,15 @@ int ai_tts_stream(deepseek_turn_t *api, struct ai_reply_sink *sink, int (*produc
         atomic_store(&s.network_error, rc);
         atomic_store(&s.finished, true);
         xSemaphoreTake(s.joined, portMAX_DELAY);
+#if CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+        /* Older IDF releases can report a suspended state before the
+         * other core has switched away from the external stack. */
+        vTaskSuspend(s.speaker_task);
+        for (BaseType_t core = 0; core < configNUMBER_OF_CORES; ++core)
+            while (xTaskGetCurrentTaskHandleForCore(core) == s.speaker_task)
+                taskYIELD();
+        vTaskDeleteWithCaps(s.speaker_task);
+#endif
         if (!rc)
             rc = atomic_load(&s.output_error);
     }
@@ -176,7 +202,7 @@ int ai_tts_stream(deepseek_turn_t *api, struct ai_reply_sink *sink, int (*produc
     }
     if (s.joined)
         vSemaphoreDelete(s.joined);
-    ESP_LOGI("aster_ai", "PCM queue peak=%u blocks capacity=%u full_waits=%u",
-             s.peak_blocks, (unsigned)slots, s.full_waits);
+    ESP_LOGI("aster_ai", "PCM queue peak=%u blocks capacity=%u full_waits=%u refill_wait_ms=%u",
+             s.peak_blocks, (unsigned)slots, s.full_waits, (unsigned)(s.refill_wait_us / 1000));
     return rc;
 }

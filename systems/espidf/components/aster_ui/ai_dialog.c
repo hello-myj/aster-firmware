@@ -25,6 +25,14 @@ static atomic_bool cancelled, submitted;
 static portMUX_TYPE guard = portMUX_INITIALIZER_UNLOCKED;
 static struct dialog_view view;
 
+#if CONFIG_IDF_TARGET_ESP32S31
+/* During recognition, keep the ASR socket as the only active TLS client.
+ * Concurrent handshakes or synthesis can exhaust its AES DMA pool. */
+static const bool overlap_asr_with_reply = false;
+#else
+static const bool overlap_asr_with_reply = true;
+#endif
+
 struct chat_prewarm {
     deepseek_turn_t api;
     atomic_uint references;
@@ -204,7 +212,7 @@ static int record_question(struct session *s, int16_t *mono, size_t *samples, bo
                 memmove(mono, mono + skip, *samples * sizeof(*mono));
             }
             publish(DIALOG_VOICED, NULL);
-            if (asr)
+            if (asr && overlap_asr_with_reply)
                 start_prewarm(s);
         }
         if (asr && gate.heard && !*stream_error) {
@@ -380,13 +388,13 @@ static void converse(void *arg)
             if (!stream_error)
                 xfyun_asr_seal(asr, samples);
             rc = ai_reply_sink_open(&s->sink);
-            if (!rc && !stream_error)
+            if (!rc && !stream_error && overlap_asr_with_reply)
                 rc = volc_tts_open(&s->volc, &s->api, &s->speech_keys);
             if (!rc)
                 rc = xfyun_asr_transcribe(&asr, &s->speech_keys, stream_error, mono, samples,
                                          s->current.question, sizeof(s->current.question), stopping);
         }
-        if (asr && !rc)
+        if (asr && !rc && overlap_asr_with_reply)
             xfyun_asr_close_async(asr);
         else
             xfyun_asr_close(asr);
@@ -416,8 +424,11 @@ static void converse(void *arg)
             }
         }
         free(mono);
-        if (!rc && !stopping())
-            rc = ai_tts_stream(&s->api, &s->sink, answer, s, speaking);
+        if (!rc && !stopping()) {
+            /* The first few PCM chunks can arrive at irregular intervals.
+             * Short replies start as soon as the server completes them. */
+            rc = ai_tts_stream(&s->api, &s->sink, s->volc ? 4 : 1, answer, s, speaking);
+        }
         deepseek_voice_close(s->voice);
         s->voice = NULL;
         volc_tts_close(s->volc);

@@ -27,6 +27,9 @@ struct xfyun_asr {
     /* Recorder appends immutable samples to its retained utterance buffer. */
     const int16_t *input;
     SemaphoreHandle_t input_changed, sender_done;
+#if CONFIG_IDF_TARGET_ESP32S31 && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+    TaskHandle_t sender;
+#endif
     atomic_size_t available;
     atomic_bool sealed, abort_sender;
     atomic_int sender_result;
@@ -249,7 +252,8 @@ static void sender_task(void *arg)
     atomic_store(&a->sender_result, drain_input(a));
     xSemaphoreGive(a->sender_done);
 #if CONFIG_IDF_TARGET_ESP32S31 && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
-    vTaskDeleteWithCaps(NULL);
+    /* The owner can reclaim this stack without allocating a cleanup task. */
+    vTaskSuspend(NULL);
 #else
     vTaskDelete(NULL);
 #endif
@@ -260,7 +264,7 @@ static BaseType_t launch_sender(struct xfyun_asr *a)
 #if CONFIG_IDF_TARGET_ESP32S31 && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
     /* This worker reads retained PCM and writes to an established socket.
      * Keep its stack out of the SRAM pool needed by AES and I2S DMA. */
-    return xTaskCreateWithCaps(sender_task, "xfyun_sender", 5632, a, 4, NULL,
+    return xTaskCreateWithCaps(sender_task, "xfyun_sender", 5632, a, 4, &a->sender,
                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 #else
     return xTaskCreate(sender_task, "xfyun_sender", 5632, a, 4, NULL);
@@ -334,6 +338,9 @@ static void stop_sender(struct xfyun_asr *a)
     atomic_store(&a->abort_sender, true);
     xSemaphoreGive(a->input_changed);
     (void)join_sender(a, NULL);
+#if CONFIG_IDF_TARGET_ESP32S31 && CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM
+    vTaskDeleteWithCaps(a->sender);
+#endif
     vSemaphoreDelete(a->sender_done);
     vSemaphoreDelete(a->input_changed);
     a->sender_done = NULL;

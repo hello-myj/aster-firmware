@@ -13,6 +13,7 @@
 #include "ai_voice.h"
 #include "ai_dialog.h"
 #include "ai_credentials.h"
+#include "esp_system.h"
 #endif
 #include "qpanel.h"
 #include "wifi_settings.h"
@@ -124,6 +125,8 @@ int aster_idf_ui_command(int argc, char **argv)
         printf("AI provider=deepseek local_wake=%s key=%s mode=%s dialog=%s\n", names[ai_voice_status()],
                key ? "configured" : "missing", key && aster_launcher_ai_online() ? "cloud" : "offline",
                ai_dialog_name(ai_dialog_phase()));
+        printf("AI system uptime_ms=%llu reset_reason=%d\n",
+               (unsigned long long)(esp_timer_get_time() / 1000), esp_reset_reason());
         return 0;
     }
     if (argc == 3 && !strcmp(argv[2], "ai"))

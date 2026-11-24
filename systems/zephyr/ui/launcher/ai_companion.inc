@@ -265,10 +265,10 @@ static void ai_companion_tick(void)
         show_page(AI_COMPANION);
     else if (page == AI_COMPANION && ai_answer_label &&
              (dialog == DIALOG_SYNTH || dialog == DIALOG_SPEAKING) &&
-             ai_drawn_revision != ai_dialog_revision() && aster_os_uptime_ms() - ai_text_time >= 80) {
+             ai_drawn_revision != ai_dialog_revision() && aster_os_uptime_ms() - ai_text_time >= 120) {
         ai_drawn_revision = ai_dialog_revision();
         ai_dialog_snapshot(&ai_view);
-        lv_label_set_text(ai_answer_label, ai_view.answer);
+        set_text(ai_answer_label, ai_view.answer);
         ai_text_time = aster_os_uptime_ms();
     }
 }
