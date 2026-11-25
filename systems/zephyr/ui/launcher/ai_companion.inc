@@ -22,6 +22,76 @@ static void ai_float(void *image, int32_t offset)
     lv_obj_set_style_translate_y(image, offset, 0);
 }
 
+#ifdef ASTER_AI_AVATAR
+static lv_obj_t *ai_fullscreen_avatar;
+
+static void ai_fullscreen_deleted(lv_event_t *event)
+{
+    (void)event;
+    ai_fullscreen_avatar = NULL;
+}
+
+static void ai_fullscreen_update(enum ai_voice_status state, enum dialog_phase dialog)
+{
+    const char *label = "待机";
+    if (state == AI_HEARD)
+        label = "抚胸举手";
+    else if (state == AI_FAILED || state == AI_BUSY)
+        label = "流冷汗";
+    switch (dialog) {
+    case DIALOG_RECORDING:
+    case DIALOG_VOICED: label = "前倾"; break;
+    case DIALOG_NETWORK:
+    case DIALOG_ASR:
+    case DIALOG_THINKING:
+    case DIALOG_SYNTH: label = "加载"; break;
+    case DIALOG_SPEAKING: label = "抚胸举手"; break;
+    case DIALOG_FAILED: label = "流冷汗"; break;
+    case DIALOG_DONE: label = "爱心眼"; break;
+    default: break;
+    }
+    ai_avatar_play(ai_fullscreen_avatar, label, motion);
+    ai_drawn = state;
+    dialog_drawn = dialog;
+}
+
+static bool build_ai_fullscreen(enum ai_voice_status state, enum dialog_phase dialog)
+{
+    ai_fullscreen_avatar = ai_avatar_create(body);
+    if (!ai_fullscreen_avatar)
+        return false;
+    lv_obj_set_pos(body, 0, 0);
+    lv_obj_set_size(body, ax(320), ay(480));
+    lv_obj_set_style_bg_color(body, lv_color_hex(0x1f3340), 0);
+    lv_obj_add_flag(lv_obj_get_child(root, 0), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(ai_fullscreen_avatar, ai_fullscreen_deleted, LV_EVENT_DELETE, NULL);
+    ai_fullscreen_update(state, dialog);
+
+    lv_obj_t *settings = box(body, 281, 6, 32, 47, 0x1f3340, 0);
+    lv_obj_set_style_bg_opa(settings, LV_OPA_TRANSP, 0);
+    lv_obj_add_flag(settings, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(settings, clicked, LV_EVENT_CLICKED, (void *)(intptr_t)ACT_AI_SETTINGS);
+    lv_obj_t *glyph = icon(settings, ICON_SETTINGS, 9, 16, 13, 0xaec3d1);
+    lv_obj_clear_flag(glyph, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_image_opa(glyph, LV_OPA_40, 0);
+    return true;
+}
+
+static void build_ai_settings(void)
+{
+    lv_obj_set_style_bg_color(body, lv_color_hex(0x10202d), 0);
+    text(body, "AI 设置", 18, 18, 284, FG, 20, 290);
+    button(body, ai_enabled ? "关闭 AI" : "开启 AI", 18, 80, 284, 55, 0x32506b, ACT_AI_TOGGLE);
+    bool ready = ai_key_present();
+    button(body, ready && ai_online ? "联网对话" : "离线唤醒", 18, 149, 284, 55,
+           0x32506b, ACT_AI_MODE);
+    if (ready && ai_enabled && ai_online)
+        button(body, "直接提问", 18, 218, 284, 55, 0x326960, ACT_AI_REARM);
+    if (!ready)
+        text(body, "通过 USB 配置 API Key 后可联网对话。", 18, 222, 284, DIM, 16, 224);
+}
+#endif
+
 static const char *dialog_error(const struct dialog_view *v)
 {
     switch (v->http) {
@@ -116,6 +186,10 @@ static void build_ai_companion(void)
     ai_drawn = state;
     enum dialog_phase dialog = ai_dialog_phase();
     dialog_drawn = dialog;
+#ifdef ASTER_AI_AVATAR
+    if (build_ai_fullscreen(state, dialog))
+        return;
+#endif
     bool awake = state == AI_HEARD;
     lv_obj_set_style_bg_color(body, lv_color_hex(0x10202d), 0);
     text(body, "小鲸助手", 18, 9, 165, 0xe9f1ed, 20, 304);
@@ -189,7 +263,7 @@ static void ai_toggle(void)
     ai_enabled = value;
     ai_dialog_reset();
     ai_voice_stop();
-    show_page(AI_COMPANION);
+    show_page(page == AI_SETTINGS ? page : AI_COMPANION);
 }
 
 static void ai_action(void)
@@ -221,7 +295,7 @@ static bool ai_set_mode(bool next)
     ai_online = next;
     ai_dialog_reset();
     ai_voice_stop();
-    show_page(AI_COMPANION);
+    show_page(page == AI_SETTINGS ? page : AI_COMPANION);
     return true;
 }
 
@@ -260,6 +334,13 @@ static void ai_companion_tick(void)
         power_idle.last_activity_ms = aster_os_uptime_ms();
     if (state == AI_IDLE && wake_ready && dialog != DIALOG_STARTING)
         ai_voice_start();
+#ifdef ASTER_AI_AVATAR
+    if (page == AI_COMPANION && ai_fullscreen_avatar) {
+        if ((int)state != ai_drawn || (int)dialog != dialog_drawn)
+            ai_fullscreen_update(state, dialog);
+        return;
+    }
+#endif
     if ((page == HOME && state == AI_HEARD) ||
         (page == AI_COMPANION && ((int)state != ai_drawn || (int)dialog != dialog_drawn)))
         show_page(AI_COMPANION);

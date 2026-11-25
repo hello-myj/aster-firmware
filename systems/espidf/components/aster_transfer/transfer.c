@@ -6,9 +6,18 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef ASTER_AI_AVATAR
+#include "avatar_asset.h"
+#endif
 
 int aster_transfer_package_path(const char *remote, char *out, size_t capacity)
 {
+#ifdef ASTER_AI_AVATAR
+    if (!strcmp(remote, ASTER_AI_AVATAR_PATH)) {
+        int length = snprintf(out, capacity, "/SD%s", remote + 4);
+        return length < 0 || (size_t)length >= capacity ? -ENAMETOOLONG : 0;
+    }
+#endif
     static const char root[] = "/SD:/", install[] = "/SD:/aster/install/";
     const char *name = NULL;
     if (!strncmp(remote, install, sizeof(install) - 1))

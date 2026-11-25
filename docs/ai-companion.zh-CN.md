@@ -1,5 +1,13 @@
 # 小鲸助手
 
+## FAKE POD 形象
+
+FAKE POD 的 AI 构建会从 SD 卡读取 `aster/ai-avatar.bin`。打开「小鲸助手」后，角色按 460×460 原坐标全屏显示，随录音、思考和播报切换动作或表情。右上角的小齿轮打开 AI 设置，从屏幕底边上滑返回桌面。资源缺失或不可读时，助手会使用固件内置形象。
+
+用 `python tools/pack_ai_avatar.py /path/to/460px-preview /path/to/ai-avatar.bin` 将方屏预览目录中的 `media.json` 和 RGB565A8 帧打包。将产物复制到 SD 卡的 `aster` 目录。FAKE POD 也支持通过 ASTERPUT 将文件传到 `/SD:/aster/ai-avatar.bin`。
+
+大肥鱼预览素材的原画与拆分为神宫凉子，Live2D 建模为霓虹猫_NeonNeko。预览素材随本地资源提供。
+
 鱼鹰光电 P4C5 和 FAKE POD NANO PRO 共用小鲸的离线唤醒、对话界面和 DeepSeek 客户端。两块板通过各自的麦克风和音频输出适配器采集、播报。
 
 ## 编译与配置

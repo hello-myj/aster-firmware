@@ -38,6 +38,9 @@
 #include "ai_voice.h"
 #include "ai_dialog.h"
 #include "ai_credentials.h"
+#ifdef ASTER_AI_AVATAR
+#include "ai_avatar.h"
+#endif
 #include <stdatomic.h>
 #include <errno.h>
 #endif
@@ -60,7 +63,7 @@
 #endif
 static uint32_t art_bakes, art_hits;
 
-enum { HOME, FILTERS, MIXER, FILES, CLOCK, SYSTEM, AI_COMPANION };
+enum { HOME, FILTERS, MIXER, FILES, CLOCK, SYSTEM, AI_COMPANION, AI_SETTINGS };
 
 enum {
     ACT_NONE,
@@ -87,6 +90,7 @@ enum {
     ACT_AI_REARM,
     ACT_AI_MODE,
     ACT_AI_END,
+    ACT_AI_SETTINGS,
     ACT_GROUP = 32
 };
 
@@ -1413,6 +1417,7 @@ static void show_page(int next)
     body = box(root, 0, 40, 320, 440, next == HOME ? BG : 0x181b18, 0);
     lv_obj_t *brand = lv_obj_get_child(root, 0);
     /* Top bar is independent of page destruction. */
+    lv_obj_clear_flag(brand, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *back = lv_obj_get_child(brand, 0), *name = lv_obj_get_child(brand, 1),
              *mark = lv_obj_get_child(brand, 2);
     if (next == HOME) {
@@ -1437,6 +1442,10 @@ static void show_page(int next)
 #ifdef ASTER_AI_ENABLED
     else if (next == AI_COMPANION)
         build_ai_companion();
+#ifdef ASTER_AI_AVATAR
+    else if (next == AI_SETTINGS)
+        build_ai_settings();
+#endif
 #endif
     else {
         text(body, "A MOMENT / CLOCK", 17, 15, 286, DIM, 16, 128);
@@ -1536,6 +1545,19 @@ static bool header_touch(const aster_touch_evt_t *raw)
 
 static void touch(const aster_touch_evt_t *raw)
 {
+#ifdef ASTER_AI_AVATAR
+    if (ai_fullscreen_avatar) {
+        bool pressed = raw->action != ASTER_TOUCH_UP;
+        if (aster_gesture_feed(raw->x, raw->y, pressed, ASTER_GEST_ALLOW_EXIT, view_h) ==
+            ASTER_GEST_PANEL_UP) {
+            lv_indev_wait_release(aster_ui_lvgl_indev());
+            action = ACT_BACK;
+        }
+        aster_ui_lvgl_pointer(raw->x, raw->y, pressed);
+        lv_indev_read(aster_ui_lvgl_indev());
+        return;
+    }
+#endif
     if (header_touch(raw))
         return;
     aster_touch_evt_t mapped = *raw;
@@ -2068,12 +2090,21 @@ void aster_launcher_pump_idle(void)
         sound_pending = S_TUNE;
     }
 #ifdef ASTER_AI_ENABLED
-    else if (a == ACT_AI_TOGGLE && page == AI_COMPANION) {
+#ifdef ASTER_AI_AVATAR
+    else if (a == ACT_AI_SETTINGS && ai_fullscreen_avatar) {
+        ai_dialog_reset();
+        ai_voice_stop();
+        show_page(AI_SETTINGS);
+    } else if (a == ACT_BACK && page == AI_SETTINGS) {
+        show_page(AI_COMPANION);
+    }
+#endif
+    else if (a == ACT_AI_TOGGLE && (page == AI_COMPANION || page == AI_SETTINGS)) {
         ai_toggle();
-    } else if (a == ACT_AI_REARM && page == AI_COMPANION) {
+    } else if (a == ACT_AI_REARM && (page == AI_COMPANION || page == AI_SETTINGS)) {
         ai_action();
         show_page(AI_COMPANION);
-    } else if (a == ACT_AI_MODE && page == AI_COMPANION) {
+    } else if (a == ACT_AI_MODE && (page == AI_COMPANION || page == AI_SETTINGS)) {
         ai_set_mode(!ai_online);
     } else if (a == ACT_AI_END && page == AI_COMPANION) {
         ai_dialog_reset();

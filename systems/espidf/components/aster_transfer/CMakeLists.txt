@@ -1,4 +1,5 @@
 idf_build_get_property(ai_enabled ASTER_AI_ENABLED)
+idf_build_get_property(ai_avatar_enabled ASTER_AI_AVATAR)
 if(ai_enabled)
     set(ai_component aster_ai)
 endif()
@@ -7,4 +8,7 @@ idf_component_register(SRCS "transfer.c" "serial.c" INCLUDE_DIRS "."
     PRIV_REQUIRES ${ai_component})
 if(ai_enabled)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE ASTER_AI_ENABLED=1)
+endif()
+if(ai_avatar_enabled)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ASTER_AI_AVATAR=1)
 endif()
