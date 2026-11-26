@@ -2,6 +2,7 @@
 #include "deepseek.h"
 #include "chat_sse.h"
 #include "ai_credentials.h"
+#include "avatar_tool.h"
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
@@ -242,6 +243,8 @@ struct chat_reader {
     size_t used;
     int (*on_delta)(void *, size_t);
     void *context;
+    bool avatar_enabled;
+    struct ai_avatar_call tool[];
 };
 
 static int chat_delta(void *ctx, const char *json)
@@ -255,6 +258,8 @@ static int chat_delta(void *ctx, const char *json)
     } else {
         cJSON *choice = cJSON_GetArrayItem(choices, 0);
         cJSON *delta = cJSON_GetObjectItemCaseSensitive(choice, "delta");
+        if (reader->avatar_enabled)
+            ai_avatar_tool_collect(reader->tool, choice, delta);
         const char *content = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(delta, "content"));
         if (content && *content) {
             size_t length = strlen(content);
@@ -275,6 +280,7 @@ int deepseek_chat(deepseek_turn_t *turn, const char *question, const struct deep
                   size_t count, char answer[AI_REPLY_CAP], int (*on_delta)(void *, size_t),
                   void *context)
 {
+    bool avatar_enabled = turn->avatar && turn->avatar->count && turn->avatar_cue;
     cJSON *body = cJSON_CreateObject();
     cJSON *messages = cJSON_AddArrayToObject(body, "messages");
     cJSON *thinking = cJSON_AddObjectToObject(body, "thinking");
@@ -282,6 +288,13 @@ int deepseek_chat(deepseek_turn_t *turn, const char *question, const struct deep
               cJSON_AddStringToObject(thinking, "type", "disabled") &&
               cJSON_AddBoolToObject(body, "stream", true) && cJSON_AddNumberToObject(body, "max_tokens", 256) &&
               add_message(messages, "system", "你是 Aster 语音助手小鲸。先用一句话直接回答；除非用户要求详细解释，一到两句话即可。用用户的语言，不用 Markdown。");
+    if (ok && avatar_enabled)
+        ok = ai_avatar_tool_add(body, turn->avatar) &&
+             add_message(messages, "system", turn->avatar->explicit_only ?
+               "仅在用户明确提出动作或表情要求时调用 avatar_perform。使用工具时将台词放进 speech。" :
+               "当用户要求小鲸做动作或表情，或者动作能自然配合问候和情绪时，可以调用 avatar_perform。"
+               "你可以自行选择与对话相符的动作或表情。角色会持续当前动作，普通回复可直接输出正文。"
+               "使用工具时把全部台词放进 speech，不要先另发正文。用户要求恢复待机时再选择待机动作。");
     for (size_t i = 0; ok && i < count; ++i)
         ok = add_message(messages, "user", history[i].question) &&
              add_message(messages, "assistant", history[i].answer);
@@ -291,18 +304,33 @@ int deepseek_chat(deepseek_turn_t *turn, const char *question, const struct deep
     if (!wire)
         return -ENOMEM;
     struct part part = {wire, strlen(wire)};
-    struct chat_reader *reader = heap_caps_calloc(1, sizeof(*reader), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t memory = sizeof(struct chat_reader) + (avatar_enabled ? sizeof(struct ai_avatar_call) : 0);
+    struct chat_reader *reader = heap_caps_calloc(1, memory, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     int rc = -ENOMEM;
     if (reader) {
         reader->answer = answer;
         reader->on_delta = on_delta;
         reader->context = context;
+        reader->avatar_enabled = avatar_enabled;
         reader->sse.context = reader;
         reader->sse.json = chat_delta;
         struct reply reply = {.sse = &reader->sse};
         rc = post(turn, API "/chat/completions", "application/json", &part, 1, &reply);
         if (!rc)
             rc = chat_sse_finish(&reader->sse);
+        if (!rc && avatar_enabled && reader->tool->seen) {
+            bool accepted = ai_avatar_tool_resolve(reader->tool, turn->avatar, turn->avatar_cue,
+                                                   reader->used ? NULL : answer, AI_REPLY_CAP);
+            if (!accepted && !reader->used)
+                strcpy(answer, "这个动作现在做不到。");
+            if (accepted || !reader->used) {
+                /* If the response already streamed text, keep that audio
+                 * and publish only its new stage directions. */
+                reader->used = strlen(answer);
+                rc = reader->on_delta(reader->context, reader->used);
+            }
+            ESP_LOGI("aster_ai", "avatar tool accepted=%d", accepted);
+        }
         if (!rc && !reader->used)
             rc = -ENODATA;
         free(reader);

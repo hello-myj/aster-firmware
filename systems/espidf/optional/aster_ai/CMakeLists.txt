@@ -1,5 +1,5 @@
 idf_component_register(SRCS "wake.c" "vad.c" "deepseek.c" "deepseek_voice.c" "chat_sse.c" "credentials.c"
-    "speech_socket.c" "xfyun_asr.c" "volc_tts.c" INCLUDE_DIRS "."
+    "speech_socket.c" "xfyun_asr.c" "volc_tts.c" "avatar_tool.c" INCLUDE_DIRS "."
     PRIV_REQUIRES espressif__esp-sr espressif__cjson espressif__esp_websocket_client
                   esp_http_client mbedtls nvs_flash esp_timer esp_hw_support tcp_transport)
 idf_component_get_property(sr_dir espressif__esp-sr COMPONENT_DIR)

@@ -2,13 +2,27 @@
 
 ## FAKE POD 形象
 
-FAKE POD 的 AI 构建会从 SD 卡读取 `aster/ai-avatar.bin`。打开「小鲸助手」后，角色按 460×460 原坐标全屏显示，随录音、思考和播报切换动作或表情。右上角的小齿轮打开 AI 设置，从屏幕底边上滑返回桌面。资源缺失或不可读时，助手会使用固件内置形象。
+FAKE POD 的 AI 构建会从 SD 卡读取 `aster/ai-avatar.bin`。打开「小鲸助手」后，角色按 460×460 原坐标全屏显示。右上角的小齿轮打开 AI 设置，从屏幕底边上滑返回桌面。资源缺失或不可读时，助手会使用固件内置形象。
 
-用 `python tools/pack_ai_avatar.py /path/to/460px-preview /path/to/ai-avatar.bin` 将方屏预览目录中的 `media.json` 和 RGB565A8 帧打包。将产物复制到 SD 卡的 `aster` 目录。FAKE POD 也支持通过 ASTERPUT 将文件传到 `/SD:/aster/ai-avatar.bin`。
+进入时默认显示上半身。双击切到全身，再双击回到上半身，动作进度保持连续。待机时也循环播放带眨眼的动作。DeepSeek 可通过 `avatar_perform` 选择资源中的动作和表情。设备在音频起播时执行指令。指定动作时持续循环，直到模型发送下一条指令。如果同一指令还指定了表情，动作完整播完一次后切到该表情。单帧表情保留所选画面和轻微呼吸运动。可用 `aster ui ai-bench avatar` 检查短台词、动作和持续表情的切换。AWA1 由预渲染帧组成，关节独立控制需要角色资源和渲染器支持。
+
+用 `python tools/pack_ai_avatar.py /path/to/460px-preview /path/to/ai-avatar.bin` 将方屏预览目录中的 `media.json` 和 RGB565A8 帧打包。原模型按上半身取景导出的方屏预览也用同一工具打包为 `ai-avatar-upper.bin`。两份资源的动作及表情名称、顺序需要一致，上半身可用 12 FPS 取样。将两份产物复制到 SD 卡的 `aster` 目录，也可以通过 ASTERPUT 分别传入。缺少上半身资源时会显示全身帧的中心裁切。
 
 大肥鱼预览素材的原画与拆分为神宫凉子，Live2D 建模为霓虹猫_NeonNeko。预览素材随本地资源提供。
 
-鱼鹰光电 P4C5 和 FAKE POD NANO PRO 共用小鲸的离线唤醒、对话界面和 DeepSeek 客户端。两块板通过各自的麦克风和音频输出适配器采集、播报。
+鱼鹰光电 P4C5 和 FAKE POD NANO PRO 共用小鲸的离线唤醒和 DeepSeek 客户端。两块板通过各自的麦克风和音频输出适配器采集、播报。
+
+鱼鹰光电 P4C5 可用 `idf.py -DASTER_AI=ON -DASTER_P4_AI_AVATAR=ON build` 启用全屏角色。将同一套 AWA1 素材复制到 SD 卡 `aster` 目录。打开助手后，从左侧半透明滑条调整取景。识别结果和回复共用底部字幕区，文字自动换行，语音播完后字幕收起。角色仍从 SD 卡读取预渲染帧。
+
+## 鱼鹰 P4C5 实时角色
+
+把原始 `.moc3` 放在 SD 卡的 `aster/avatar-live.moc3`。用装有 Pillow 的 Python 执行 `python tools/pack_ai_rig_textures.py /path/to/preview-original.model3.json /path/to/avatar-live.atx`，将生成的贴图包复制到 SD 卡 `aster` 目录。贴图包保存原模型的材质纹理。固件使用独立任务计算关节、排序并绘制网格，输出 RGB565 到角色页。使用 Purism Core v1.1.0 源码，以 `idf.py -DASTER_AI=ON -DASTER_PURISM_CORE_DIR=/path/to/PurismCore build` 编译。 [Purism Core](https://github.com/SakuraMotion/PurismCore)
+
+进入小鲸助手后，左侧滑条在 60% 到 560% 调整取景，高倍率聚焦到脸部。右上角设置菜单提供「自主动作」「待机自主」「恢复姿势」以及「AI 设置」。开启待机自主后，角色能按本地节奏摆头和摆尾。播报音量驱动嘴型；DeepSeek 可通过 `avatar_perform` 同时指定动作、表情和归一化关节目标。底部字幕最多显示两行，播报结束后收起。
+
+串口命令 `aster ui ai-rig-bench` 可在桌面检查纯网格求值，`aster ui ai-bench avatar` 可在角色页发送固定对话请求，检查动作、表情和音频是否一起播放。
+
+以原始模型和 480×480 输出实测，双核分别绘制上下半屏。160% 取景下待机约 2.4 FPS，播报稳定时约 2.4 FPS。560% 头部特写约 1.5 FPS。整套模型与 7.3 MiB 贴图包加载后，PSRAM 剩约 3.1 MiB。
 
 ## 编译与配置
 

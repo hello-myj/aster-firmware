@@ -27,3 +27,5 @@ int ai_reply_sink_open(struct ai_reply_sink *sink);
 int ai_reply_sink_close(struct ai_reply_sink *sink);
 int ai_reply_audio_play(struct ai_reply_audio *audio, struct ai_reply_sink *sink, bool (*cancelled)(void));
 void ai_reply_audio_clear(struct ai_reply_audio *audio);
+bool ai_reply_audio_voicing(void);
+unsigned ai_reply_audio_level(void);

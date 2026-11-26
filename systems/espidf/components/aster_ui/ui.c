@@ -15,6 +15,9 @@
 #include "ai_credentials.h"
 #include "esp_system.h"
 #endif
+#ifdef ASTER_AI_RIG_PROBE
+#include "ai_rig_probe.h"
+#endif
 #include "qpanel.h"
 #include "wifi_settings.h"
 #include "aster_deploy.h"
@@ -44,6 +47,12 @@ static struct {
 } perf;
 
 static uint64_t bench_warm, bench_end, bench_step;
+
+/* Called only by the owner of the LVGL display. Render time includes flush. */
+struct aster_ui_frame_timing aster_idf_ui_frame_timing(void)
+{
+    return (struct aster_ui_frame_timing){perf.render_us, perf.flush_us, perf.frames, perf.flushes};
+}
 
 static void perf_reset(void)
 {
@@ -129,6 +138,10 @@ int aster_idf_ui_command(int argc, char **argv)
                (unsigned long long)(esp_timer_get_time() / 1000), esp_reset_reason());
         return 0;
     }
+#ifdef ASTER_AI_RIG_PROBE
+    if (argc == 3 && !strcmp(argv[2], "ai-rig-bench"))
+        return ai_rig_bench_start();
+#endif
     if (argc == 3 && !strcmp(argv[2], "ai"))
         request = 3;
     else if (argc == 3 && !strcmp(argv[2], "ai-talk"))
@@ -139,10 +152,23 @@ int aster_idf_ui_command(int argc, char **argv)
         request = 8;
     else if (argc == 4 && !strcmp(argv[2], "ai-bench") && !strcmp(argv[3], "warm"))
         request = 9;
+#ifdef ASTER_AI_AVATAR
+    else if (argc == 4 && !strcmp(argv[2], "ai-bench") && !strcmp(argv[3], "avatar"))
+        request = 10;
+#endif
     else if (argc == 4 && !strcmp(argv[2], "ai-mode") && !strcmp(argv[3], "cloud"))
         request = 5;
     else if (argc == 4 && !strcmp(argv[2], "ai-mode") && !strcmp(argv[3], "offline"))
         request = 6;
+#ifdef ASTER_AI_AVATAR_OVERLAY
+    else if (argc == 4 && !strcmp(argv[2], "ai-zoom")) {
+        char *end;
+        long zoom = strtol(argv[3], &end, 10);
+        if (*end || zoom < 60 || zoom > 560)
+            return ASTER_EINVAL;
+        request = 2000 + (int)zoom;
+    }
+#endif
     else
 #endif
     if (argc == 4 && !strcmp(argv[2], "volume")) {
@@ -171,16 +197,24 @@ static void perf_tick(void)
 {
     uint64_t now = esp_timer_get_time();
     int request = atomic_exchange(&perf_request, 0);
+#ifdef ASTER_AI_AVATAR_OVERLAY
+    if (request >= 2000) {
+        if (!app_active)
+            aster_launcher_ai_zoom(request - 2000);
+        return;
+    }
+#endif
 #ifdef ASTER_AI_ENABLED
     if (request == 5 || request == 6) {
         if (!app_active)
             aster_launcher_configure_ai(request == 5);
         return;
     }
-    if (request == 4 || (request >= 7 && request <= 9)) {
+    if (request == 4 || (request >= 7 && request <= 10)) {
         if (!app_active)
             aster_launcher_ask_ai(request == 4 ? AI_MICROPHONE : request == 7 ? AI_BENCH_CLAUSE :
-                                  request == 8 ? AI_BENCH_WHOLE : AI_BENCH_WARM);
+                                  request == 8 ? AI_BENCH_WHOLE : request == 9 ? AI_BENCH_WARM :
+                                  AI_BENCH_AVATAR);
         return;
     }
     if (request == 3) {

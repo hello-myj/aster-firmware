@@ -9,6 +9,7 @@ enum dialog_phase {
 
 struct dialog_view {
     char question[AI_QUESTION_CAP], answer[AI_REPLY_CAP];
+    struct ai_avatar_cue avatar;
     enum dialog_phase failed_phase;
     int error, http;
 };
@@ -16,8 +17,9 @@ struct dialog_view {
 enum dialog_phase ai_dialog_phase(void);
 const char *ai_dialog_name(enum dialog_phase phase);
 void ai_dialog_snapshot(struct dialog_view *view);
+unsigned ai_dialog_avatar_snapshot(struct ai_avatar_cue *cue);
 unsigned ai_dialog_revision(void);
-enum ai_query_source { AI_MICROPHONE, AI_BENCH_CLAUSE, AI_BENCH_WHOLE, AI_BENCH_WARM };
-void ai_dialog_start(enum ai_query_source source);
+enum ai_query_source { AI_MICROPHONE, AI_BENCH_CLAUSE, AI_BENCH_WHOLE, AI_BENCH_WARM, AI_BENCH_AVATAR };
+void ai_dialog_start(enum ai_query_source source, const struct ai_avatar_catalog *avatar);
 void ai_dialog_submit(void);
 void ai_dialog_reset(void);

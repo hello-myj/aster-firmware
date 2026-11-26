@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #pragma once
+#include "avatar_asset.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -22,6 +23,8 @@ typedef struct {
     int http_status;
     void *connection;
     unsigned connections;
+    const struct ai_avatar_catalog *avatar;
+    struct ai_avatar_cue *avatar_cue;
 } deepseek_turn_t;
 
 int deepseek_asr(deepseek_turn_t *turn, const int16_t *mono, size_t samples,

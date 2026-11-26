@@ -1,5 +1,13 @@
 /* SPDX-License-Identifier: MIT */
 #pragma once
+#include <stdint.h>
+
+struct aster_ui_frame_timing {
+    uint64_t render_us, flush_us;
+    uint32_t renders, flushes;
+};
+
+struct aster_ui_frame_timing aster_idf_ui_frame_timing(void);
 int aster_idf_ui_init(int (*launch)(const char *id));
 void aster_idf_ui_idle(void);
 void aster_idf_ui_before_app(void);

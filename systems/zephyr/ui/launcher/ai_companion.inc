@@ -24,40 +24,260 @@ static void ai_float(void *image, int32_t offset)
 
 #ifdef ASTER_AI_AVATAR
 static lv_obj_t *ai_fullscreen_avatar;
+static lv_obj_t *ai_fullscreen_settings;
+static unsigned ai_avatar_revision;
+static bool ai_upper_body;
+#ifdef ASTER_AI_AVATAR_OVERLAY
+static lv_obj_t *ai_caption_panel;
+static lv_obj_t *ai_zoom_slider, *ai_zoom_value, *ai_voice_label;
+static int ai_zoom_percent;
+static const char *dialog_error(const struct dialog_view *v);
+enum { AI_CAPTION_FONT = 16, AI_CAPTION_PADDING = 5 };
+
+#ifdef ASTER_AI_RIG_LIVE
+static bool ai_autonomous_gestures = true, ai_autonomous_idle;
+static lv_obj_t *ai_character_menu;
+
+static void ai_toggle_character_menu(lv_event_t *event)
+{
+    (void)event;
+    if (lv_obj_has_flag(ai_character_menu, LV_OBJ_FLAG_HIDDEN))
+        lv_obj_clear_flag(ai_character_menu, LV_OBJ_FLAG_HIDDEN);
+    else
+        lv_obj_add_flag(ai_character_menu, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void ai_toggle_autonomy(lv_event_t *event)
+{
+    bool idle = lv_event_get_user_data(event) != NULL;
+    bool *setting = idle ? &ai_autonomous_idle : &ai_autonomous_gestures;
+    *setting = !*setting;
+    lv_obj_t *label = lv_obj_get_child(lv_event_get_target(event), 0);
+    set_text(label, idle ? (*setting ? "待机自主 开" : "待机自主 关") :
+             (*setting ? "自主动作 开" : "自主动作 关"));
+    ai_avatar_set_autonomy(ai_fullscreen_avatar, ai_autonomous_gestures, ai_autonomous_idle);
+}
+
+static void ai_restore_live_pose(lv_event_t *event)
+{
+    (void)event;
+    const struct ai_avatar_cue clear = {0};
+    ai_avatar_perform(ai_fullscreen_avatar, &clear);
+}
+
+static void ai_build_character_menu(lv_obj_t *settings)
+{
+    lv_obj_add_event_cb(settings, ai_toggle_character_menu, LV_EVENT_CLICKED, NULL);
+    ai_character_menu = box(body, 222, 46, 91, 164, 0x162938, 8);
+    lv_obj_set_style_border_width(ai_character_menu, 1, 0);
+    lv_obj_set_style_border_color(ai_character_menu, lv_color_hex(0x617683), 0);
+    lv_obj_add_flag(ai_character_menu, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_t *gestures = button(ai_character_menu, ai_autonomous_gestures ? "自主动作 开" : "自主动作 关",
+                                5, 5, 81, 35, 0x243947, ACT_NONE);
+    lv_obj_t *idle = button(ai_character_menu, ai_autonomous_idle ? "待机自主 开" : "待机自主 关",
+                            5, 44, 81, 35, 0x243947, ACT_NONE);
+    lv_obj_t *reset = button(ai_character_menu, "恢复姿势", 5, 83, 81, 35, 0x243947, ACT_NONE);
+    button(ai_character_menu, "AI 设置", 5, 122, 81, 35, 0x243947, ACT_AI_SETTINGS);
+    lv_obj_add_event_cb(gestures, ai_toggle_autonomy, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(idle, ai_toggle_autonomy, LV_EVENT_CLICKED, ai_character_menu);
+    lv_obj_add_event_cb(reset, ai_restore_live_pose, LV_EVENT_CLICKED, NULL);
+    ai_avatar_set_autonomy(ai_fullscreen_avatar, ai_autonomous_gestures, ai_autonomous_idle);
+}
+#endif
+
+static void ai_overlay_caption(enum dialog_phase dialog)
+{
+    unsigned revision = ai_dialog_revision();
+    if ((int)dialog == dialog_drawn && (revision == ai_drawn_revision ||
+        aster_os_uptime_ms() - ai_text_time < 120))
+        return;
+    ai_drawn_revision = revision;
+    ai_text_time = aster_os_uptime_ms();
+    ai_dialog_snapshot(&ai_view);
+    const char *caption = "";
+    if (dialog == DIALOG_THINKING || dialog == DIALOG_SYNTH)
+        caption = ai_view.question;
+    else if (dialog == DIALOG_SPEAKING)
+        caption = ai_view.answer;
+    else if (dialog == DIALOG_FAILED)
+        caption = dialog_error(&ai_view);
+    bool visible = *caption != '\0';
+    bool was_visible = !lv_obj_has_flag(ai_caption_panel, LV_OBJ_FLAG_HIDDEN);
+    if (visible) {
+        lv_obj_clear_flag(ai_caption_panel, LV_OBJ_FLAG_HIDDEN);
+        if (strcmp(lv_label_get_text(ai_answer_label), caption)) {
+            aster_ui_font_warm(AI_CAPTION_FONT, caption);
+            lv_label_set_text(ai_answer_label, caption);
+            lv_obj_update_layout(ai_answer_label);
+            if (dialog == DIALOG_SPEAKING && was_visible && (int)dialog == dialog_drawn)
+                lv_obj_scroll_to_y(ai_caption_panel, lv_obj_get_height(ai_answer_label), LV_ANIM_OFF);
+        }
+        if (!was_visible || (int)dialog != dialog_drawn)
+            lv_obj_scroll_to_y(ai_caption_panel, 0, LV_ANIM_OFF);
+    } else {
+        lv_obj_add_flag(ai_caption_panel, LV_OBJ_FLAG_HIDDEN);
+        if (was_visible)
+            lv_label_set_text(ai_answer_label, "");
+    }
+    if ((int)dialog != dialog_drawn || was_visible != visible)
+        aster_service_logf(3, "ai-avatar: caption=%s phase=%s",
+                           visible ? "visible" : "hidden", ai_dialog_name(dialog));
+}
+
+static void ai_zoom_changed(lv_event_t *event)
+{
+    int percent = lv_slider_get_value(lv_event_get_target(event));
+    if (ai_zoom_percent == percent)
+        return;
+    ai_zoom_percent = percent;
+    ai_avatar_set_zoom(ai_fullscreen_avatar, percent);
+    lv_label_set_text_fmt(ai_zoom_value, "%d%%", percent);
+}
+
+static void ai_zoom_released(lv_event_t *event)
+{
+    (void)event;
+    aster_service_logf(3, "ai-avatar: zoom=%d", ai_zoom_percent);
+}
+
+void aster_launcher_ai_zoom(int percent)
+{
+    if (!ai_fullscreen_avatar)
+        return;
+    lv_slider_set_value(ai_zoom_slider, percent, LV_ANIM_OFF);
+    lv_obj_send_event(ai_zoom_slider, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_send_event(ai_zoom_slider, LV_EVENT_RELEASED, NULL);
+}
+
+static void ai_build_overlay(void)
+{
+    lv_obj_t *slider = lv_slider_create(body);
+    ai_zoom_slider = slider;
+    lv_obj_set_pos(slider, ax(11), ay(94));
+    lv_obj_set_size(slider, as(6), ay(249));
+    lv_obj_set_ext_click_area(slider, as(12));
+    lv_obj_remove_flag(slider, LV_OBJ_FLAG_ADV_HITTEST);
+    int max_zoom = ai_avatar_max_zoom(ai_fullscreen_avatar);
+    if (!ai_zoom_percent || ai_zoom_percent > max_zoom)
+        ai_zoom_percent = max_zoom > 180 ? 160 : 100;
+    lv_slider_set_range(slider, 60, max_zoom);
+    lv_slider_set_value(slider, ai_zoom_percent, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0x879da8), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_30, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0xb7e2ed), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_50, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0xb7e2ed), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(slider, LV_OPA_60, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(slider, as(4), LV_PART_KNOB);
+    lv_obj_add_event_cb(slider, ai_zoom_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(slider, ai_zoom_released, LV_EVENT_RELEASED, NULL);
+    ai_avatar_set_zoom(ai_fullscreen_avatar, ai_zoom_percent);
+    ai_zoom_value = text(body, "100%", 3, 349, 34, 0xb2c5cb, 12, 256);
+    lv_obj_set_style_text_opa(ai_zoom_value, LV_OPA_60, 0);
+    lv_label_set_text_fmt(ai_zoom_value, "%d%%", ai_zoom_percent);
+
+    lv_obj_t *voice = button(body, "开始说话", 225, 7, 53, 34, 0x162938, ACT_AI_REARM);
+    lv_obj_set_style_border_width(voice, 1, 0);
+    lv_obj_set_style_border_color(voice, lv_color_hex(0x617683), 0);
+    ai_voice_label = lv_obj_get_child(voice, 0);
+
+    ai_caption_panel = box(body, 0, 0, 306, 1, 0x101e2e, 9);
+    const lv_font_t *font = aster_ui_font(AI_CAPTION_FONT);
+    lv_obj_set_height(ai_caption_panel, 2 * lv_font_get_line_height(font) + 2 * AI_CAPTION_PADDING);
+    lv_obj_align(ai_caption_panel, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_set_style_bg_opa(ai_caption_panel, LV_OPA_80, 0);
+    lv_obj_add_flag(ai_caption_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_scroll_dir(ai_caption_panel, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(ai_caption_panel, LV_SCROLLBAR_MODE_OFF);
+    ai_answer_label = text(ai_caption_panel, "", 6, 5, 294, 0xe8f3f4, AI_CAPTION_FONT, 256);
+    lv_obj_set_style_text_font(ai_answer_label, font, 0);
+    lv_obj_set_style_text_align(ai_answer_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(ai_answer_label, LV_LABEL_LONG_WRAP);
+}
+#endif
+static struct {
+    uint32_t down_at, tap_at;
+    int32_t down_x, down_y, tap_x, tap_y;
+    bool down, pending;
+} ai_tap;
 
 static void ai_fullscreen_deleted(lv_event_t *event)
 {
     (void)event;
     ai_fullscreen_avatar = NULL;
+    ai_fullscreen_settings = NULL;
+    memset(&ai_tap, 0, sizeof(ai_tap));
 }
 
 static void ai_fullscreen_update(enum ai_voice_status state, enum dialog_phase dialog)
 {
-    const char *label = "待机";
-    if (state == AI_HEARD)
-        label = "抚胸举手";
-    else if (state == AI_FAILED || state == AI_BUSY)
-        label = "流冷汗";
-    switch (dialog) {
-    case DIALOG_RECORDING:
-    case DIALOG_VOICED: label = "前倾"; break;
-    case DIALOG_NETWORK:
-    case DIALOG_ASR:
-    case DIALOG_THINKING:
-    case DIALOG_SYNTH: label = "加载"; break;
-    case DIALOG_SPEAKING: label = "抚胸举手"; break;
-    case DIALOG_FAILED: label = "流冷汗"; break;
-    case DIALOG_DONE: label = "爱心眼"; break;
-    default: break;
+    struct ai_avatar_cue cue;
+    unsigned revision = ai_dialog_avatar_snapshot(&cue);
+    if (revision != ai_avatar_revision) {
+        ai_avatar_revision = revision;
+        ai_avatar_perform(ai_fullscreen_avatar, &cue);
     }
-    ai_avatar_play(ai_fullscreen_avatar, label, motion);
+#ifdef ASTER_AI_AVATAR_OVERLAY
+    ai_overlay_caption(dialog);
+    if ((int)dialog != dialog_drawn)
+        set_text(ai_voice_label, dialog == DIALOG_VOICED ? "说完了" :
+                 dialog > DIALOG_IDLE && dialog < DIALOG_DONE ? "停止" : "开始说话");
+#endif
     ai_drawn = state;
     dialog_drawn = dialog;
 }
 
-static bool build_ai_fullscreen(enum ai_voice_status state, enum dialog_phase dialog)
+static void ai_fullscreen_touch(const aster_touch_evt_t *event)
 {
-    ai_fullscreen_avatar = ai_avatar_create(body);
+#ifdef ASTER_AI_AVATAR_OVERLAY
+    (void)event;
+#else
+    enum { TAP_MS = 280, DOUBLE_TAP_MS = 450, TAP_SLOP = 24, DOUBLE_TAP_SLOP = 48 };
+    int32_t x = event->x, y = event->y;
+    uint32_t now = aster_os_uptime32();
+    if (event->action == ASTER_TOUCH_DOWN) {
+        lv_area_t settings;
+        lv_obj_get_coords(ai_fullscreen_settings, &settings);
+        if (x >= settings.x1 && x <= settings.x2 && y >= settings.y1 && y <= settings.y2) {
+            memset(&ai_tap, 0, sizeof(ai_tap));
+            return;
+        }
+        ai_tap.down = true;
+        ai_tap.down_at = now;
+        ai_tap.down_x = x;
+        ai_tap.down_y = y;
+        return;
+    }
+    if (!ai_tap.down)
+        return;
+    if (now - ai_tap.down_at > TAP_MS || abs(x - ai_tap.down_x) > TAP_SLOP ||
+        abs(y - ai_tap.down_y) > TAP_SLOP) {
+        memset(&ai_tap, 0, sizeof(ai_tap));
+        return;
+    }
+    if (event->action != ASTER_TOUCH_UP)
+        return;
+    ai_tap.down = false;
+    if (ai_tap.pending && now - ai_tap.tap_at <= DOUBLE_TAP_MS &&
+        abs(ai_tap.down_x - ai_tap.tap_x) <= DOUBLE_TAP_SLOP &&
+        abs(ai_tap.down_y - ai_tap.tap_y) <= DOUBLE_TAP_SLOP) {
+        ai_tap.pending = false;
+        ai_upper_body = !ai_upper_body;
+        ai_avatar_set_upper_body(ai_fullscreen_avatar, ai_upper_body);
+        aster_service_logf(3, "ai-avatar: view=%s", ai_upper_body ? "upper" : "full");
+        return;
+    }
+    ai_tap.pending = true;
+    ai_tap.tap_at = now;
+    ai_tap.tap_x = ai_tap.down_x;
+    ai_tap.tap_y = ai_tap.down_y;
+#endif
+}
+
+static bool build_ai_fullscreen(void)
+{
+    ai_upper_body = true;
+    ai_fullscreen_avatar = ai_avatar_create(body, ai_upper_body);
     if (!ai_fullscreen_avatar)
         return false;
     lv_obj_set_pos(body, 0, 0);
@@ -65,15 +285,34 @@ static bool build_ai_fullscreen(enum ai_voice_status state, enum dialog_phase di
     lv_obj_set_style_bg_color(body, lv_color_hex(0x1f3340), 0);
     lv_obj_add_flag(lv_obj_get_child(root, 0), LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(ai_fullscreen_avatar, ai_fullscreen_deleted, LV_EVENT_DELETE, NULL);
-    ai_fullscreen_update(state, dialog);
+    struct ai_avatar_cue cue;
+    ai_avatar_revision = ai_dialog_avatar_snapshot(&cue);
+#ifdef ASTER_AI_AVATAR_OVERLAY
+    ai_build_overlay();
+    ai_drawn_revision = ai_dialog_revision();
+    dialog_drawn = -1;
+#endif
 
+#ifdef ASTER_AI_AVATAR_OVERLAY
+#ifdef ASTER_AI_RIG_LIVE
+    lv_obj_t *settings = button(body, "设置", 282, 7, 31, 34, 0x162938, ACT_NONE);
+    ai_build_character_menu(settings);
+#else
+    lv_obj_t *settings = button(body, "设置", 282, 7, 31, 34, 0x162938, ACT_AI_SETTINGS);
+#endif
+    lv_obj_set_style_border_width(settings, 1, 0);
+    lv_obj_set_style_border_color(settings, lv_color_hex(0x617683), 0);
+    ai_fullscreen_settings = settings;
+#else
     lv_obj_t *settings = box(body, 281, 6, 32, 47, 0x1f3340, 0);
+    ai_fullscreen_settings = settings;
     lv_obj_set_style_bg_opa(settings, LV_OPA_TRANSP, 0);
     lv_obj_add_flag(settings, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(settings, clicked, LV_EVENT_CLICKED, (void *)(intptr_t)ACT_AI_SETTINGS);
     lv_obj_t *glyph = icon(settings, ICON_SETTINGS, 9, 16, 13, 0xaec3d1);
     lv_obj_clear_flag(glyph, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_image_opa(glyph, LV_OPA_40, 0);
+#endif
     return true;
 }
 
@@ -187,7 +426,7 @@ static void build_ai_companion(void)
     enum dialog_phase dialog = ai_dialog_phase();
     dialog_drawn = dialog;
 #ifdef ASTER_AI_AVATAR
-    if (build_ai_fullscreen(state, dialog))
+    if (build_ai_fullscreen())
         return;
 #endif
     bool awake = state == AI_HEARD;
@@ -266,6 +505,18 @@ static void ai_toggle(void)
     show_page(page == AI_SETTINGS ? page : AI_COMPANION);
 }
 
+static void ai_start_dialog(enum ai_query_source source)
+{
+#ifdef ASTER_AI_AVATAR
+    if (page != AI_COMPANION)
+        show_page(AI_COMPANION);
+    struct ai_avatar_catalog avatar = ai_avatar_catalog(ai_fullscreen_avatar);
+    ai_dialog_start(source, &avatar);
+#else
+    ai_dialog_start(source, NULL);
+#endif
+}
+
 static void ai_action(void)
 {
     enum dialog_phase dialog = ai_dialog_phase();
@@ -274,7 +525,7 @@ static void ai_action(void)
     } else if ((dialog == DIALOG_IDLE || dialog == DIALOG_DONE || dialog == DIALOG_FAILED) &&
                ai_enabled && ai_online && ai_key_present()) {
         ai_voice_stop();
-        ai_dialog_start(AI_MICROPHONE);
+        ai_start_dialog(AI_MICROPHONE);
     } else {
         ai_dialog_reset();
         ai_voice_stop();
@@ -326,7 +577,7 @@ static void ai_companion_tick(void)
                                              ai_drawn != AI_HEARD)) {
         if (ai_online && ai_key_present()) {
             ai_voice_stop();
-            ai_dialog_start(AI_MICROPHONE);
+            ai_start_dialog(AI_MICROPHONE);
         }
         dialog = ai_dialog_phase();
     }
@@ -336,8 +587,7 @@ static void ai_companion_tick(void)
         ai_voice_start();
 #ifdef ASTER_AI_AVATAR
     if (page == AI_COMPANION && ai_fullscreen_avatar) {
-        if ((int)state != ai_drawn || (int)dialog != dialog_drawn)
-            ai_fullscreen_update(state, dialog);
+        ai_fullscreen_update(state, dialog);
         return;
     }
 #endif

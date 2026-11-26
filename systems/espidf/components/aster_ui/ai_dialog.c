@@ -24,6 +24,8 @@ static atomic_uint revision;
 static atomic_bool cancelled, submitted;
 static portMUX_TYPE guard = portMUX_INITIALIZER_UNLOCKED;
 static struct dialog_view view;
+static struct ai_avatar_cue avatar_cue;
+static unsigned avatar_revision;
 
 #if CONFIG_IDF_TARGET_ESP32S31
 /* During recognition, keep the ASR socket as the only active TLS client.
@@ -52,6 +54,8 @@ struct session {
     struct dialog_view current;
     struct deepseek_exchange history[4];
     size_t history_count;
+    struct ai_avatar_catalog avatar;
+    struct ai_avatar_clip avatar_clips[];
 };
 
 enum dialog_phase ai_dialog_phase(void)
@@ -76,6 +80,15 @@ void ai_dialog_snapshot(struct dialog_view *out)
     portENTER_CRITICAL(&guard);
     *out = view;
     portEXIT_CRITICAL(&guard);
+}
+
+unsigned ai_dialog_avatar_snapshot(struct ai_avatar_cue *cue)
+{
+    portENTER_CRITICAL(&guard);
+    *cue = avatar_cue;
+    unsigned keyframe = avatar_revision;
+    portEXIT_CRITICAL(&guard);
+    return keyframe;
 }
 
 static bool stopping(void)
@@ -281,9 +294,23 @@ static int wait_for_network(void)
     return stopping() ? -ECANCELED : -ENETDOWN;
 }
 
+static void publish_avatar(const struct ai_avatar_cue *cue)
+{
+    if (cue->motion[0] || cue->expression[0] || cue->joint_mask) {
+        avatar_cue = *cue;
+        ++avatar_revision;
+    }
+}
+
 static void speaking(void)
 {
-    publish(DIALOG_SPEAKING, NULL);
+    portENTER_CRITICAL(&guard);
+    if (!stopping()) {
+        atomic_store(&phase, DIALOG_SPEAKING);
+        publish_avatar(&view.avatar);
+    }
+    portEXIT_CRITICAL(&guard);
+    ESP_LOGI("aster_ai", "voice phase=%s", ai_dialog_name(DIALOG_SPEAKING));
 }
 
 static int update_answer(void *ctx, size_t length)
@@ -295,6 +322,9 @@ static int update_answer(void *ctx, size_t length)
     portENTER_CRITICAL(&guard);
     if (!stopping()) {
         memcpy(view.answer, s->current.answer, length + 1);
+        if (ai_dialog_phase() == DIALOG_SPEAKING && !view.avatar.motion[0] && !view.avatar.expression[0] && !view.avatar.joint_mask)
+            publish_avatar(&s->current.avatar);
+        view.avatar = s->current.avatar;
         if (first)
             atomic_store(&phase, DIALOG_SYNTH);
         atomic_fetch_add(&revision, 1);
@@ -344,8 +374,10 @@ static void converse(void *arg)
     ESP_LOGI("aster_ai", "voice providers asr=%s llm=deepseek tts=%s",
              stream_asr ? "xfyun_v2" : s->source == AI_MICROPHONE ? "deepseek" : "text",
              speech_configured ? "volc_v2" : "deepseek");
-    s->api = (deepseek_turn_t){.key = s->key, .cancelled = stopping,
-                               .single_utterance = s->source == AI_BENCH_WHOLE};
+    s->api = (deepseek_turn_t){
+        .key = s->key, .cancelled = stopping, .single_utterance = s->source == AI_BENCH_WHOLE,
+        .avatar = &s->avatar, .avatar_cue = &s->current.avatar,
+    };
     unsigned completed = 0;
     size_t samples = 0;
     while (!rc && !stopping()) {
@@ -418,8 +450,16 @@ static void converse(void *arg)
                 publish(DIALOG_ASR, &s->current);
                 rc = deepseek_asr(&s->api, mono, samples, s->current.question);
             } else if (!rc && s->source != AI_MICROPHONE) {
-                strcpy(s->current.question, "请用五个完整的句子，用中文讲一个小鲸寻找月亮的小故事。");
-                ESP_LOGI("aster_ai", "bench mode=%s", s->source == AI_BENCH_WARM ? "warm" :
+                const char *question = s->source == AI_BENCH_AVATAR ?
+#ifdef ASTER_AI_RIG_LIVE
+                    "先竖起左手食指，再做爱心眼。请保持这两个姿势，用三句话说说你在做什么。" :
+#else
+                    "请竖食指，同时只说：看。动作播完后显示爱心眼。" :
+#endif
+                    "请用五个完整的句子，用中文讲一个小鲸寻找月亮的小故事。";
+                strcpy(s->current.question, question);
+                ESP_LOGI("aster_ai", "bench mode=%s", s->source == AI_BENCH_AVATAR ? "avatar" :
+                         s->source == AI_BENCH_WARM ? "warm" :
                          s->api.single_utterance ? "whole" : "clause");
             }
         }
@@ -477,14 +517,23 @@ static void converse(void *arg)
 }
 
 /* Called only from the Launcher thread. */
-void ai_dialog_start(enum ai_query_source source)
+void ai_dialog_start(enum ai_query_source source, const struct ai_avatar_catalog *avatar)
 {
     enum dialog_phase state = ai_dialog_phase();
     if (state != DIALOG_IDLE && state != DIALOG_DONE && state != DIALOG_FAILED)
         return;
-    struct session *s = heap_caps_calloc(1, sizeof(*s), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (s)
+    unsigned clips = avatar && avatar->clips && avatar->count <= ASTER_AI_AVATAR_MAX_CLIPS ?
+                     avatar->count : 0;
+    size_t clip_bytes = clips * sizeof(struct ai_avatar_clip);
+    struct session *s = heap_caps_calloc(1, sizeof(*s) + clip_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s) {
         s->source = source;
+        if (clips) {
+            memcpy(s->avatar_clips, avatar->clips, clip_bytes);
+            s->avatar = *avatar;
+            s->avatar.clips = s->avatar_clips;
+        }
+    }
     memset(&view, 0, sizeof(view));
     atomic_store(&cancelled, false);
     atomic_store(&submitted, false);

@@ -8,12 +8,17 @@
 #include <unistd.h>
 #ifdef ASTER_AI_AVATAR
 #include "avatar_asset.h"
+#include "sdkconfig.h"
 #endif
 
 int aster_transfer_package_path(const char *remote, char *out, size_t capacity)
 {
 #ifdef ASTER_AI_AVATAR
-    if (!strcmp(remote, ASTER_AI_AVATAR_PATH)) {
+    if (!strcmp(remote, ASTER_AI_AVATAR_PATH) || !strcmp(remote, ASTER_AI_AVATAR_UPPER_PATH)
+#if CONFIG_IDF_TARGET_ESP32P4
+        || !strcmp(remote, ASTER_AI_AVATAR_UPPER_HD_PATH) || !strcmp(remote, ASTER_AI_AVATAR_CLOSE_HD_PATH)
+#endif
+       ) {
         int length = snprintf(out, capacity, "/SD%s", remote + 4);
         return length < 0 || (size_t)length >= capacity ? -ENAMETOOLONG : 0;
     }

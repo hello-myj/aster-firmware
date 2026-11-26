@@ -10,10 +10,25 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
 enum { OUTPUT_FRAMES = 512, MAX_BYTES = 24000 * 2 * 120 };
+
+static atomic_uint mouth_until_ms;
+static atomic_uint mouth_level;
+
+unsigned ai_reply_audio_level(void)
+{
+    return ai_reply_audio_voicing() ? atomic_load(&mouth_level) : 0;
+}
+
+bool ai_reply_audio_voicing(void)
+{
+    uint32_t until = atomic_load(&mouth_until_ms);
+    return until && (int32_t)(until - (uint32_t)(esp_timer_get_time() / 1000)) > 0;
+}
 
 void ai_reply_audio_clear(struct ai_reply_audio *audio)
 {
@@ -126,6 +141,7 @@ int ai_reply_audio_play(struct ai_reply_audio *audio, struct ai_reply_sink *sink
     int previous = 0;
     bool first = true;
     int64_t start = esp_timer_get_time();
+    atomic_store(&mouth_until_ms, 0);
     size_t played = 0;
     while (audio->first && !rc) {
         struct ai_pcm_block *b = audio->first;
@@ -138,9 +154,11 @@ int ai_reply_audio_play(struct ai_reply_audio *audio, struct ai_reply_sink *sink
             if (bytes > OUTPUT_FRAMES)
                 bytes = OUTPUT_FRAMES;
             /* Two input bytes yield two stereo frames at 48 kHz. */
+            unsigned magnitude = 0;
             for (size_t i = 0; i < bytes; i += 2) {
                 const uint8_t *p = b->pcm + pos + i;
                 int sample = (int16_t)((uint16_t)p[1] << 8 | p[0]);
+                magnitude += abs(sample);
                 int32_t midpoint = ((first ? sample : previous) + sample) * 32768;
                 stereo[i * 2] = stereo[i * 2 + 1] = midpoint;
                 stereo[i * 2 + 2] = stereo[i * 2 + 3] = sample * 65536;
@@ -149,8 +167,14 @@ int ai_reply_audio_play(struct ai_reply_audio *audio, struct ai_reply_sink *sink
             }
             rc = write_all(sink->endpoint, stereo, bytes, sink->max_frames, cancelled);
             pos += bytes;
-            if (!rc)
+            if (!rc) {
                 played += bytes;
+                if (magnitude > 150 * bytes) {
+                    unsigned level = magnitude / bytes / 15;
+                    atomic_store(&mouth_level, level > 100 ? 100 : level);
+                    atomic_store(&mouth_until_ms, (uint32_t)(esp_timer_get_time() / 1000) + 47);
+                }
+            }
         }
         audio->first = b->next;
         audio->bytes -= b->used;
@@ -168,6 +192,7 @@ int ai_reply_audio_play(struct ai_reply_audio *audio, struct ai_reply_sink *sink
         if (rc == -ENOTSUP)
             rc = 0;
     }
+    atomic_store(&mouth_until_ms, 0);
     ESP_LOGI("aster_ai", "reply audio bytes=%u nominal_ms=%u output_ms=%u result=%d",
              (unsigned)played, (unsigned)(played / 48),
              (unsigned)((esp_timer_get_time() - start) / 1000), rc);

@@ -1550,9 +1550,11 @@ static void touch(const aster_touch_evt_t *raw)
         bool pressed = raw->action != ASTER_TOUCH_UP;
         if (aster_gesture_feed(raw->x, raw->y, pressed, ASTER_GEST_ALLOW_EXIT, view_h) ==
             ASTER_GEST_PANEL_UP) {
+            memset(&ai_tap, 0, sizeof(ai_tap));
             lv_indev_wait_release(aster_ui_lvgl_indev());
             action = ACT_BACK;
-        }
+        } else if (action != ACT_BACK)
+            ai_fullscreen_touch(raw);
         aster_ui_lvgl_pointer(raw->x, raw->y, pressed);
         lv_indev_read(aster_ui_lvgl_indev());
         return;
@@ -1955,8 +1957,9 @@ void aster_launcher_ask_ai(enum ai_query_source source)
     enum dialog_phase phase = ai_dialog_phase();
     if (phase == DIALOG_IDLE || phase == DIALOG_FAILED || phase == DIALOG_DONE) {
         ai_voice_stop();
-        ai_dialog_start(source);
-        show_page(AI_COMPANION);
+        ai_start_dialog(source);
+        if (page != AI_COMPANION)
+            show_page(AI_COMPANION);
     }
 }
 #endif
@@ -2038,13 +2041,20 @@ void aster_launcher_pump_idle(void)
         masks[i] = events[i].contact_mask;
     aster_touch_ui_begin_batch(&launcher_touch_ui, masks, (uint8_t)n);
     for (int i = 0; i < n; i++) {
-        if (aster_launcher_power_touch(events[i].contact_mask != 0))
+        if (aster_launcher_power_touch(events[i].contact_mask != 0)) {
+#ifdef ASTER_AI_AVATAR
+            memset(&ai_tap, 0, sizeof(ai_tap));
+#endif
             continue;
+        }
         struct aster_touch_ui_decision ui =
             aster_touch_ui_accept(&launcher_touch_ui, (uint8_t)i, events[i].action, events[i].slot,
                                   events[i].contact_mask);
         if (ui.reset_gesture) {
             aster_gesture_reset();
+#ifdef ASTER_AI_AVATAR
+            memset(&ai_tap, 0, sizeof(ai_tap));
+#endif
             memset(&drag, 0, sizeof(drag));
             pull = 0;
         }
@@ -2103,7 +2113,8 @@ void aster_launcher_pump_idle(void)
         ai_toggle();
     } else if (a == ACT_AI_REARM && (page == AI_COMPANION || page == AI_SETTINGS)) {
         ai_action();
-        show_page(AI_COMPANION);
+        if (page != AI_COMPANION)
+            show_page(AI_COMPANION);
     } else if (a == ACT_AI_MODE && (page == AI_COMPANION || page == AI_SETTINGS)) {
         ai_set_mode(!ai_online);
     } else if (a == ACT_AI_END && page == AI_COMPANION) {

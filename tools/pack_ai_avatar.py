@@ -59,8 +59,8 @@ def crop(frame, x, y, width, height):
 def pack(source, output):
     source = source.resolve(strict=True)
     data = json.loads((source / "media.json").read_text(encoding="utf-8-sig"))
-    if (data["width"], data["height"], data["fps"]) != (SIZE, SIZE, 15):
-        raise ValueError("Expected the square 460px, 15 FPS preview")
+    if (data["width"], data["height"]) != (SIZE, SIZE) or data["fps"] not in (12, 15):
+        raise ValueError("Expected a square 460px preview at 12 or 15 FPS")
     clips = data["motions"] + data["expressions"]
     if not 1 <= len(clips) <= 64 or any(not 1 <= c["frames"] <= 2047 for c in clips):
         raise ValueError("Invalid number of avatar clips or frames")
