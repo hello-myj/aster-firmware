@@ -18,7 +18,7 @@
 #include <stdatomic.h>
 #include <string.h>
 
-enum { MAX_ATLAS_BYTES = 8 * 1024 * 1024, RIG_WIDTH = 480, RIG_HEIGHT = 480 };
+enum { MAX_ATLAS_BYTES = 8 * 1024 * 1024, MAX_DAMAGE_VERTICES = 128 * 1024 };
 static atomic_bool live_owner;
 
 enum rig_extra {
@@ -55,6 +55,8 @@ struct live_rig {
     lv_image_dsc_t descriptor;
     uint16_t *frames[2];
     unsigned ready_index;
+    struct rig_tiles ready_tiles;
+    struct rig_damage damage;
     struct rig_draw draw[2];
     struct rig_camera camera;
     void *atlas, *moc, *state;
@@ -79,6 +81,8 @@ static void release(struct live_rig *rig)
             heap_caps_free(rig->draw[band].masks[i].pixels);
     heap_caps_free(rig->frames[0]);
     heap_caps_free(rig->frames[1]);
+    heap_caps_free(rig->damage.meshes);
+    heap_caps_free(rig->damage.vertices);
     heap_caps_free(rig->atlas);
     heap_caps_free(rig->moc);
     heap_caps_free(rig->state);
@@ -182,6 +186,28 @@ static csmModel *load_model(struct live_rig *rig)
             return NULL;
         }
     }
+    unsigned mesh_count = csmGetDrawableCount(model), vertex_count = 0;
+    const int *counts = csmGetDrawableVertexCounts(model);
+    for (unsigned id = 0; id < mesh_count; id++)
+        vertex_count += counts[id];
+    if (vertex_count && vertex_count <= MAX_DAMAGE_VERTICES) {
+        rig->damage.meshes = external(mesh_count * sizeof(*rig->damage.meshes));
+        rig->damage.vertices = external(vertex_count * sizeof(*rig->damage.vertices));
+        if (rig->damage.meshes && rig->damage.vertices) {
+            memset(rig->damage.meshes, 0, mesh_count * sizeof(*rig->damage.meshes));
+            unsigned offset = 0;
+            for (unsigned id = 0; id < mesh_count; id++) {
+                rig->damage.meshes[id].vertex_offset = offset;
+                offset += counts[id];
+            }
+            for (unsigned band = 0; band < 2; band++)
+                rig->draw[band].meshes = rig->damage.meshes;
+        } else {
+            heap_caps_free(rig->damage.meshes);
+            heap_caps_free(rig->damage.vertices);
+            rig->damage = (struct rig_damage){0};
+        }
+    }
     uint64_t available = 0;
     for (unsigned i = 0; i < AI_JOINT_COUNT; i++) {
         rig->controls[i] = ai_rig_param_index(model, joint_ids[i]);
@@ -195,8 +221,9 @@ static csmModel *load_model(struct live_rig *rig)
     portENTER_CRITICAL(&rig->guard);
     rig->joints = available;
     portEXIT_CRITICAL(&rig->guard);
-    aster_service_logf(3, "ai-live: model ready params=%d meshes=%d psram=%u", csmGetParameterCount(model),
-                       csmGetDrawableCount(model), (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    aster_service_logf(3, "ai-live: model ready params=%d meshes=%d psram=%u damage=%u", csmGetParameterCount(model),
+                       csmGetDrawableCount(model), (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                       rig->damage.vertices != NULL);
     return model;
 }
 
@@ -300,6 +327,24 @@ static void draw_lower_band(void *argument)
     vTaskDelete(NULL);
 }
 
+static void sync_back_buffer(uint16_t *back, const uint16_t *front,
+                             const struct rig_tiles *last, const struct rig_tiles *next)
+{
+    /* The back buffer is one published frame behind. Copy last frame's
+     * changed tiles that this frame will keep, then paint this frame's tiles. */
+    for (unsigned row = 0; row < RIG_TILE_ROWS; row++) {
+        unsigned bits = last->rows[row] & ~next->rows[row];
+        while (bits) {
+            unsigned first;
+            unsigned end = ai_rig_take_span(&bits, &first);
+            size_t offset = row * RIG_TILE_SIZE * RIG_WIDTH + first * RIG_TILE_SIZE;
+            size_t bytes = (end - first) * RIG_TILE_SIZE * sizeof(*back);
+            for (unsigned y = 0; y < RIG_TILE_SIZE; y++, offset += RIG_WIDTH)
+                memcpy(back + offset, front + offset, bytes);
+        }
+    }
+}
+
 static void run(void *argument)
 {
     struct live_rig *rig = argument;
@@ -330,8 +375,9 @@ static void run(void *argument)
         return;
     }
     int64_t start = esp_timer_get_time(), cue_at = start, window = start;
-    uint64_t solve = 0, draw = 0;
-    unsigned back = 0, frames = 0, last_revision = 0, voiced_frames = 0;
+    uint64_t solve = 0, damage_time = 0, draw = 0;
+    unsigned back = 0, frames = 0, updates = 0, tiles = 0, last_revision = 0, voiced_frames = 0;
+    struct rig_tiles last_tiles = {0};
     struct ai_avatar_cue cue = {0};
     bool was_speaking = false;
     float mouth = 0;
@@ -359,34 +405,46 @@ static void run(void *argument)
             cue = (struct ai_avatar_cue){0};
         was_speaking = speaking;
         float level = speaking ? ai_reply_audio_level() / 100.0f : 0;
-        voiced_frames += level > .05f;
         mouth = level * .82f + mouth * .18f;
         update_pose(rig, model, &cue, (before - start) / 1000000.0f, (before - cue_at) / 1000000.0f,
                     speaking, mouth);
         int64_t posed = esp_timer_get_time();
-        rig->render_pixels = rig->frames[back];
-        rig->render_zoom = atomic_load(&rig->zoom);
-        if (raster)
-            xTaskNotifyGive(raster);
-        ai_rig_draw(&rig->draw[0], model, &rig->camera, rig->render_pixels, rig->render_zoom);
-        if (raster)
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        else
-            ai_rig_draw(&rig->draw[1], model, &rig->camera,
-                        rig->render_pixels + RIG_WIDTH * (RIG_HEIGHT / 2), rig->render_zoom);
-        int64_t rendered = esp_timer_get_time();
+        int zoom = atomic_load(&rig->zoom);
+        unsigned count = ai_rig_collect_damage(&rig->damage, model, &rig->camera, zoom, &rig->ready_tiles);
+        int64_t compared = esp_timer_get_time();
         solve += posed - before;
-        draw += rendered - posed;
-        rig->ready_index = back;
-        atomic_store(&rig->pending, true);
-        back ^= 1;
-        if (++frames == 10) {
-            aster_service_logf(3, "ai-live: frames=%u fps_x10=%u pose_us=%u draw_us=%u voiced=%u phase=%s", frames,
-                               (unsigned)(frames * 10000000ULL / (rendered - window)), (unsigned)(solve / frames),
-                               (unsigned)(draw / frames), voiced_frames, ai_dialog_name(ai_dialog_phase()));
-            frames = voiced_frames = 0;
-            solve = draw = 0;
-            window = rendered;
+        damage_time += compared - posed;
+        if (count) {
+            sync_back_buffer(rig->frames[back], rig->frames[back ^ 1], &last_tiles, &rig->ready_tiles);
+            rig->render_pixels = rig->frames[back];
+            rig->render_zoom = zoom;
+            if (raster)
+                xTaskNotifyGive(raster);
+            ai_rig_draw(&rig->draw[0], model, &rig->camera, rig->render_pixels, zoom);
+            if (raster)
+                ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            else
+                ai_rig_draw(&rig->draw[1], model, &rig->camera, rig->render_pixels + RIG_WIDTH * (RIG_HEIGHT / 2), zoom);
+            draw += esp_timer_get_time() - compared;
+            last_tiles = rig->ready_tiles;
+            rig->ready_index = back;
+            atomic_store(&rig->pending, true);
+            back ^= 1;
+            frames++;
+            tiles += count;
+            voiced_frames += level > .05f;
+        }
+        if (++updates == 10) {
+            int64_t now = esp_timer_get_time();
+            unsigned divisor = frames ? frames : 1;
+            aster_service_logf(3, "ai-live: frames=%u fps_x10=%u eval_x10=%u zoom=%d tiles=%u pose_us=%u diff_us=%u draw_us=%u voiced=%u phase=%s", frames,
+                               (unsigned)(frames * 10000000ULL / (now - window)),
+                               (unsigned)(updates * 10000000ULL / (now - window)), zoom, tiles / divisor,
+                               (unsigned)(solve / updates), (unsigned)(damage_time / updates), (unsigned)(draw / divisor),
+                               voiced_frames, ai_dialog_name(ai_dialog_phase()));
+            frames = updates = tiles = voiced_frames = 0;
+            solve = damage_time = draw = 0;
+            window = now;
         }
         vTaskDelay(1);
     }
@@ -397,6 +455,28 @@ static void run(void *argument)
     }
     release(rig);
     vTaskDelete(NULL);
+}
+
+static void invalidate_tiles(lv_obj_t *image, struct rig_tiles tiles)
+{
+    lv_area_t bounds;
+    lv_obj_get_coords(image, &bounds);
+    for (unsigned row = 0; row < RIG_TILE_ROWS; row++) {
+        while (tiles.rows[row]) {
+            unsigned first, bits = tiles.rows[row];
+            unsigned end = ai_rig_take_span(&bits, &first);
+            unsigned run = tiles.rows[row] ^ bits;
+            tiles.rows[row] = bits;
+            unsigned bottom = row + 1;
+            while (bottom < RIG_TILE_ROWS && (tiles.rows[bottom] & run) == run) {
+                tiles.rows[bottom] &= ~run;
+                bottom++;
+            }
+            lv_area_t area = {bounds.x1 + first * RIG_TILE_SIZE, bounds.y1 + row * RIG_TILE_SIZE,
+                bounds.x1 + end * RIG_TILE_SIZE - 1, bounds.y1 + bottom * RIG_TILE_SIZE - 1};
+            lv_obj_invalidate_area(image, &area);
+        }
+    }
 }
 
 static void show_frame(lv_timer_t *timer)
@@ -417,8 +497,9 @@ static void show_frame(lv_timer_t *timer)
         lv_image_set_src(rig->image, &rig->descriptor);
         lv_obj_add_flag(rig->status, LV_OBJ_FLAG_HIDDEN);
         aster_service_logf(3, "ai-live: first RGB565 frame 480x480");
+    } else {
+        invalidate_tiles(rig->image, rig->ready_tiles);
     }
-    lv_obj_invalidate(rig->image);
     atomic_store(&rig->pending, false);
 }
 
@@ -448,6 +529,7 @@ lv_obj_t *ai_avatar_create(lv_obj_t *parent, bool upper_body)
         rig->draw[band].height = RIG_HEIGHT / 2;
         rig->draw[band].canvas_height = RIG_HEIGHT;
         rig->draw[band].y_offset = band * (RIG_HEIGHT / 2);
+        rig->draw[band].tiles = &rig->ready_tiles;
     }
     rig->descriptor = (lv_image_dsc_t){.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RGB565,
         .w = RIG_WIDTH, .h = RIG_HEIGHT, .stride = RIG_WIDTH * 2}, .data_size = RIG_WIDTH * RIG_HEIGHT * 2};
